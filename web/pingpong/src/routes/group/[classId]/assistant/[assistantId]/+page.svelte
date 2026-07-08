@@ -4066,9 +4066,7 @@
 		>
 			{#if groupArchived}
 				<ArchiveOutline class="mr-3 h-8 w-8" />
-				<span>
-					This group is archived and read-only. Assistant edits are unavailable.
-				</span>
+				<span> This group is archived and read-only. Assistant edits are unavailable. </span>
 			{:else}
 				<LockSolid class="mr-3 h-8 w-8" />
 				<span>
