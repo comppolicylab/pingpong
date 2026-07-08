@@ -16,13 +16,12 @@ from dataclasses import dataclass
 from datetime import timedelta
 from functools import cache
 from pathlib import Path
-from typing import Any, Literal, TypeVar, TypedDict, cast
+from typing import Any, TypeVar, TypedDict, cast
 
 import openai
 import tiktoken
 from openai.types import Reasoning
 import uuid_utils as uuid
-from openai.types.audio import TranscriptionWord
 from openai.types.responses.response_input_param import ResponseInputParam
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, create_model
 from pydub import AudioSegment
@@ -43,11 +42,14 @@ from pingpong.class_credential_validation import (
 )
 from pingpong.config import config
 from pingpong.errors import capture_exception_to_sentry, sentry
-from pingpong.elevenlabs import synthesize_elevenlabs_speech
+from pingpong.elevenlabs import (
+    ElevenLabsSpeechWordTiming,
+    synthesize_elevenlabs_speech,
+    synthesize_elevenlabs_speech_with_timings,
+)
 from pingpong.lecture_video_manifest_generation import (
     DEFAULT_LECTURE_INSTRUCTIONS,
     DEFAULT_GENERATION_PROMPT_CONTENT,
-    _augment_manifest_words_with_segment_text,
     _generation_transcript_source_text,
 )
 from pingpong.lecture_video_service import (
@@ -71,8 +73,6 @@ from pingpong.worker_pool import (
 logger = logging.getLogger(__name__)
 
 _ResponseModelT = TypeVar("_ResponseModelT", bound=BaseModel)
-_TranscriptionWordField = Literal["word", "start", "end"]
-_TranscriptionWordValue = str | int | float
 
 
 class SlidePageRange(TypedDict):
@@ -665,6 +665,7 @@ class SlideAudioArtifact:
     duration_ms: int
     store_key: str
     stored_object_id: int
+    word_timings: tuple[ElevenLabsSpeechWordTiming, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -1332,7 +1333,6 @@ async def _process_claimed_slide_run(run_id: int, lease_token: str) -> None:
                 start_stage = schemas.LectureSlideProcessingStage.NARRATION_AUDIO
 
             if start_stage == schemas.LectureSlideProcessingStage.NARRATION_AUDIO:
-                assert openai_client is not None
                 await _set_run_stage(
                     run_id,
                     lease_token,
@@ -1349,13 +1349,11 @@ async def _process_claimed_slide_run(run_id: int, lease_token: str) -> None:
                     lease_token,
                     schemas.LectureSlideProcessingStage.NARRATION_TRANSCRIPTION,
                 )
-                transcript = await _transcribe_and_persist_slide_audio(
+                transcript = await _persist_slide_audio_timings(
                     run_id,
                     lease_token,
                     deck_id,
                     slide_audio,
-                    openai_client,
-                    temp_dir,
                 )
                 if transcript is None:
                     return
@@ -2033,13 +2031,15 @@ async def _synthesize_slide_audio(
         synthesis_result = await _await_with_run_lease_heartbeat(
             run_id,
             lease_token,
-            synthesize_elevenlabs_speech(api_key, voice_id, narration_text),
+            synthesize_elevenlabs_speech_with_timings(
+                api_key, voice_id, narration_text
+            ),
         )
         if synthesis_result is None:
             # Existing stored slide audio is retained on mid-run cancellation,
             # matching lecture-video retry behavior.
             return None
-        _, audio = synthesis_result
+        audio = synthesis_result.audio
         content_type = LECTURE_SLIDE_AUDIO_CONTENT_TYPE
         duration_ms = audio_duration_ms(audio, content_type)
         store_key, content_length = await _store_audio(
@@ -2088,6 +2088,7 @@ async def _synthesize_slide_audio(
                 duration_ms=duration_ms,
                 store_key=store_key,
                 stored_object_id=stored_object.id,
+                word_timings=synthesis_result.words,
             )
         )
     return artifacts
@@ -2128,29 +2129,13 @@ async def _store_audio(
     return store_key, len(audio)
 
 
-async def _transcribe_and_persist_slide_audio(
+async def _persist_slide_audio_timings(
     run_id: int,
     lease_token: str,
     deck_id: int,
     slide_audio: list[SlideAudioArtifact],
-    openai_client: openai.AsyncClient | openai.AsyncAzureOpenAI,
-    temp_dir: str,
 ) -> list[schemas.LectureVideoManifestWordV3] | None:
     artifacts_by_page_id = {artifact.page_id: artifact for artifact in slide_audio}
-    transcribed_words_by_page_id: dict[
-        int, list[schemas.LectureVideoManifestWordV3]
-    ] = {}
-    for artifact in sorted(slide_audio, key=lambda item: item.page_position):
-        slide_path = os.path.join(temp_dir, f"slide-{artifact.page_position}.ogg")
-        Path(slide_path).write_bytes(artifact.audio)
-        slide_words = await _await_with_run_lease_heartbeat(
-            run_id,
-            lease_token,
-            transcribe_audio_words(slide_path, openai_client),
-        )
-        if slide_words is None:
-            return None
-        transcribed_words_by_page_id[artifact.page_id] = slide_words
 
     async with config.db.driver.async_session() as session:
         run = await models.LectureSlideProcessingRun.get_by_id(session, run_id)
@@ -2191,16 +2176,26 @@ async def _transcribe_and_persist_slide_audio(
             start_offset_ms = current_offset_ms if duration_ms > 0 else None
             end_offset_ms = current_offset_ms + duration_ms if duration_ms > 0 else None
 
-            if page_artifact is not None and start_offset_ms is not None:
-                for word_index, word in enumerate(
-                    transcribed_words_by_page_id.get(page.id, [])
-                ):
+            if (
+                page_artifact is not None
+                and start_offset_ms is not None
+                and end_offset_ms is not None
+            ):
+                for word_index, word in enumerate(page_artifact.word_timings):
+                    word_start_offset_ms = min(
+                        max(word.start_ms + start_offset_ms, start_offset_ms),
+                        end_offset_ms,
+                    )
+                    word_end_offset_ms = min(
+                        max(word.end_ms + start_offset_ms, word_start_offset_ms),
+                        end_offset_ms,
+                    )
                     words.append(
                         schemas.LectureVideoManifestWordV3(
                             id=f"slide-{page_artifact.page_position}-word-{word_index}",
                             word=word.word,
-                            start_offset_ms=word.start_offset_ms + start_offset_ms,
-                            end_offset_ms=word.end_offset_ms + start_offset_ms,
+                            start_offset_ms=word_start_offset_ms,
+                            end_offset_ms=word_end_offset_ms,
                         )
                     )
             elif (
@@ -2235,54 +2230,6 @@ async def _transcribe_and_persist_slide_audio(
         await models.LectureSlideQuestion.retime_for_deck(session, deck)
         await session.commit()
     return words
-
-
-async def transcribe_audio_words(
-    audio_path: str,
-    openai_client: openai.AsyncClient | openai.AsyncAzureOpenAI,
-) -> list[schemas.LectureVideoManifestWordV3]:
-    with open(audio_path, "rb") as audio_file:
-        transcription = await openai_client.audio.transcriptions.create(
-            file=audio_file,
-            model="whisper-1",
-            response_format="verbose_json",
-            timestamp_granularities=["word", "segment"],
-            timeout=60 * 20,
-        )
-    raw_words = getattr(transcription, "words", None)
-    if raw_words is None and isinstance(transcription, dict):
-        raw_words = transcription.get("words")
-    segments = getattr(transcription, "segments", None)
-    if segments is None and isinstance(transcription, dict):
-        segments = transcription.get("segments")
-    if not raw_words:
-        raise ValueError("OpenAI transcription returned no word-level timestamps.")
-    manifest_words: list[dict[str, object]] = []
-    for index, word in enumerate(raw_words):
-        raw_word_value = _get_attr_or_key(word, "word")
-        if raw_word_value is None:
-            continue
-        raw_word = str(raw_word_value).strip()
-        if not raw_word:
-            continue
-        start_value = _get_attr_or_key(word, "start")
-        end_value = _get_attr_or_key(word, "end")
-        start = _seconds_to_ms(start_value or 0)
-        end = _seconds_to_ms(end_value or 0)
-        manifest_words.append(
-            {
-                "id": f"word-{index}",
-                "word": raw_word,
-                "start_offset_ms": start,
-                "end_offset_ms": end,
-            }
-        )
-    if not manifest_words:
-        raise ValueError("OpenAI transcription returned no non-empty words.")
-    return [
-        schemas.LectureVideoManifestWordV3.model_validate(word)
-        for word in _augment_manifest_words_with_segment_text(manifest_words, segments)
-    ]
 
 
 def _slide_manifest_total_duration_ms(
@@ -4079,20 +4026,6 @@ def audio_duration_ms(audio: bytes, content_type: str | None = None) -> int:
             exc_info=True,
         )
         return 0
-
-
-def _seconds_to_ms(value: _TranscriptionWordValue) -> int:
-    return max(0, int(round(float(value) * 1000)))
-
-
-def _get_attr_or_key(
-    value: TranscriptionWord | Mapping[str, object],
-    key: _TranscriptionWordField,
-) -> _TranscriptionWordValue | None:
-    raw_value = value.get(key) if isinstance(value, Mapping) else getattr(value, key)
-    if isinstance(raw_value, str | int | float):
-        return raw_value
-    return None
 
 
 def generate_slide_image_store_key() -> str:

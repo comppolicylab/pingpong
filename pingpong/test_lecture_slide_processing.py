@@ -2396,34 +2396,6 @@ async def test_total_stored_audio_duration_requires_every_duration():
         )
 
 
-async def test_transcribe_audio_words_enriches_punctuation_from_segments(tmp_path):
-    class FakeTranscriptions:
-        async def create(self, **_kwargs):
-            return SimpleNamespace(
-                words=[
-                    SimpleNamespace(word="hello", start=0.0, end=0.2),
-                    SimpleNamespace(word="world", start=0.2, end=0.5),
-                ],
-                segments=[
-                    SimpleNamespace(text="Hello, world!", start=0.0, end=0.5),
-                ],
-            )
-
-    audio_path = tmp_path / "slide.ogg"
-    audio_path.write_bytes(b"audio")
-    fake_client = SimpleNamespace(
-        audio=SimpleNamespace(transcriptions=FakeTranscriptions())
-    )
-
-    words = await lecture_slide_processing.transcribe_audio_words(
-        str(audio_path), fake_client
-    )
-
-    assert [word.word for word in words] == ["Hello,", "world!"]
-    assert [word.start_offset_ms for word in words] == [0, 200]
-    assert [word.end_offset_ms for word in words] == [200, 500]
-
-
 async def test_synthesize_slide_audio_skips_empty_pages_and_stores_ogg_metadata(
     db, monkeypatch
 ):
@@ -2466,9 +2438,9 @@ async def test_synthesize_slide_audio_skips_empty_pages_and_stores_ogg_metadata(
     async def fake_get_elevenlabs_api_key(_class_id):
         return "elevenlabs-key"
 
-    async def fake_synthesize_speech(_api_key, _voice_id, text):
+    async def fake_synthesize_speech_with_timings(_api_key, _voice_id, text):
         requested_texts.append(text)
-        return "audio/mpeg", f"audio-{text}".encode("utf-8")
+        return SimpleNamespace(audio=f"audio-{text}".encode("utf-8"), words=())
 
     async def fake_store_audio(store_key, content_type, audio):
         stored_content_types.append(content_type)
@@ -2478,7 +2450,9 @@ async def test_synthesize_slide_audio_skips_empty_pages_and_stores_ogg_metadata(
         lecture_slide_processing, "_get_elevenlabs_api_key", fake_get_elevenlabs_api_key
     )
     monkeypatch.setattr(
-        lecture_slide_processing, "synthesize_elevenlabs_speech", fake_synthesize_speech
+        lecture_slide_processing,
+        "synthesize_elevenlabs_speech_with_timings",
+        fake_synthesize_speech_with_timings,
     )
     monkeypatch.setattr(lecture_slide_processing, "_store_audio", fake_store_audio)
     monkeypatch.setattr(lecture_slide_processing, "audio_duration_ms", lambda *_: 100)
@@ -2562,9 +2536,9 @@ async def test_synthesize_slide_audio_skips_pages_with_existing_narration(
     async def fake_get_elevenlabs_api_key(_class_id):
         return "elevenlabs-key"
 
-    async def fake_synthesize_speech(_api_key, _voice_id, text):
+    async def fake_synthesize_speech_with_timings(_api_key, _voice_id, text):
         requested_texts.append(text)
-        return "audio/mpeg", f"audio-{text}".encode("utf-8")
+        return SimpleNamespace(audio=f"audio-{text}".encode("utf-8"), words=())
 
     async def fake_store_audio(store_key, _content_type, audio):
         return store_key, len(audio)
@@ -2573,7 +2547,9 @@ async def test_synthesize_slide_audio_skips_pages_with_existing_narration(
         lecture_slide_processing, "_get_elevenlabs_api_key", fake_get_elevenlabs_api_key
     )
     monkeypatch.setattr(
-        lecture_slide_processing, "synthesize_elevenlabs_speech", fake_synthesize_speech
+        lecture_slide_processing,
+        "synthesize_elevenlabs_speech_with_timings",
+        fake_synthesize_speech_with_timings,
     )
     monkeypatch.setattr(lecture_slide_processing, "_store_audio", fake_store_audio)
     monkeypatch.setattr(lecture_slide_processing, "audio_duration_ms", lambda *_: 500)
@@ -2613,8 +2589,8 @@ async def test_synthesize_slide_audio_deletes_uploaded_audio_when_db_lookup_rais
     async def fake_get_elevenlabs_api_key(_class_id):
         return "elevenlabs-key"
 
-    async def fake_synthesize_speech(_api_key, _voice_id, _text):
-        return "audio/mpeg", b"audio"
+    async def fake_synthesize_speech_with_timings(_api_key, _voice_id, _text):
+        return SimpleNamespace(audio=b"audio", words=())
 
     async def fake_store_audio(store_key, _content_type, _audio):
         return store_key, 5
@@ -2630,7 +2606,9 @@ async def test_synthesize_slide_audio_deletes_uploaded_audio_when_db_lookup_rais
         lecture_slide_processing, "_get_elevenlabs_api_key", fake_get_elevenlabs_api_key
     )
     monkeypatch.setattr(
-        lecture_slide_processing, "synthesize_elevenlabs_speech", fake_synthesize_speech
+        lecture_slide_processing,
+        "synthesize_elevenlabs_speech_with_timings",
+        fake_synthesize_speech_with_timings,
     )
     monkeypatch.setattr(lecture_slide_processing, "_store_audio", fake_store_audio)
     monkeypatch.setattr(lecture_slide_processing, "audio_duration_ms", lambda *_: 100)
@@ -2649,9 +2627,7 @@ async def test_synthesize_slide_audio_deletes_uploaded_audio_when_db_lookup_rais
     assert deleted_keys
 
 
-async def test_transcribe_and_persist_slide_audio_offsets_words(
-    db, monkeypatch, tmp_path
-):
+async def test_persist_slide_audio_timings_offsets_words(db):
     await _create_class_and_deck(db)
     async with db.async_session() as session:
         pages = [
@@ -2672,16 +2648,6 @@ async def test_transcribe_and_persist_slide_audio_offsets_words(
         page_ids = [page.id for page in pages]
         run_id = run.id
 
-    async def fake_transcribe_audio_words(_path, _client):
-        return [
-            schemas.LectureVideoManifestWordV3(
-                id="w", word="hello", start_offset_ms=100, end_offset_ms=300
-            )
-        ]
-
-    monkeypatch.setattr(
-        lecture_slide_processing, "transcribe_audio_words", fake_transcribe_audio_words
-    )
     artifacts = [
         lecture_slide_processing.SlideAudioArtifact(
             page_id=page_ids[0],
@@ -2691,6 +2657,11 @@ async def test_transcribe_and_persist_slide_audio_offsets_words(
             duration_ms=1000,
             store_key="a1",
             stored_object_id=1,
+            word_timings=(
+                lecture_slide_processing.ElevenLabsSpeechWordTiming(
+                    word="hello", start_ms=100, end_ms=300
+                ),
+            ),
         ),
         lecture_slide_processing.SlideAudioArtifact(
             page_id=page_ids[1],
@@ -2700,16 +2671,19 @@ async def test_transcribe_and_persist_slide_audio_offsets_words(
             duration_ms=2000,
             store_key="a2",
             stored_object_id=2,
+            word_timings=(
+                lecture_slide_processing.ElevenLabsSpeechWordTiming(
+                    word="hello", start_ms=100, end_ms=300
+                ),
+            ),
         ),
     ]
 
-    words = await lecture_slide_processing._transcribe_and_persist_slide_audio(
+    words = await lecture_slide_processing._persist_slide_audio_timings(
         run_id,
         "lease",
         1,
         artifacts,
-        SimpleNamespace(),
-        str(tmp_path),
     )
 
     assert [word.start_offset_ms for word in words or []] == [100, 1100]
@@ -2725,9 +2699,7 @@ async def test_transcribe_and_persist_slide_audio_offsets_words(
         assert len(deck.transcript_data["word_level_transcription"]) == 2
 
 
-async def test_transcribe_and_persist_slide_audio_reuses_unchanged_slide_words(
-    db, monkeypatch, tmp_path
-):
+async def test_persist_slide_audio_timings_reuses_unchanged_slide_words(db):
     await _create_class_and_deck(db, slide_count=2)
     async with db.async_session() as session:
         unchanged_stored_object = models.LectureSlideNarrationStoredObject(
@@ -2787,21 +2759,7 @@ async def test_transcribe_and_persist_slide_audio_reuses_unchanged_slide_words(
         changed_page_id = pages[0].id
         run_id = run.id
 
-    async def fake_transcribe_audio_words(_path, _client):
-        return [
-            schemas.LectureVideoManifestWordV3(
-                id="w",
-                word="new",
-                start_offset_ms=0,
-                end_offset_ms=500,
-            )
-        ]
-
-    monkeypatch.setattr(
-        lecture_slide_processing, "transcribe_audio_words", fake_transcribe_audio_words
-    )
-
-    words = await lecture_slide_processing._transcribe_and_persist_slide_audio(
+    words = await lecture_slide_processing._persist_slide_audio_timings(
         run_id,
         "lease",
         1,
@@ -2814,10 +2772,13 @@ async def test_transcribe_and_persist_slide_audio_reuses_unchanged_slide_words(
                 duration_ms=1500,
                 store_key="a1",
                 stored_object_id=1,
+                word_timings=(
+                    lecture_slide_processing.ElevenLabsSpeechWordTiming(
+                        word="new", start_ms=0, end_ms=500
+                    ),
+                ),
             )
         ],
-        SimpleNamespace(),
-        str(tmp_path),
     )
 
     assert [
@@ -2836,8 +2797,8 @@ async def test_transcribe_and_persist_slide_audio_reuses_unchanged_slide_words(
         assert [page.end_offset_ms for page in deck.pages] == [1500, 2500]
 
 
-async def test_transcribe_and_persist_slide_audio_uses_supported_temp_extension(
-    db, monkeypatch, tmp_path
+async def test_persist_slide_audio_timings_uses_elevenlabs_timings_without_whisper(
+    db,
 ):
     await _create_class_and_deck(db)
     async with db.async_session() as session:
@@ -2856,21 +2817,7 @@ async def test_transcribe_and_persist_slide_audio_uses_supported_temp_extension(
         page_id = page.id
         run_id = run.id
 
-    seen_paths: list[str] = []
-
-    async def fake_transcribe_audio_words(path, _client):
-        seen_paths.append(path)
-        return [
-            schemas.LectureVideoManifestWordV3(
-                id="w", word="hello", start_offset_ms=0, end_offset_ms=100
-            )
-        ]
-
-    monkeypatch.setattr(
-        lecture_slide_processing, "transcribe_audio_words", fake_transcribe_audio_words
-    )
-
-    words = await lecture_slide_processing._transcribe_and_persist_slide_audio(
+    words = await lecture_slide_processing._persist_slide_audio_timings(
         run_id,
         "lease",
         1,
@@ -2883,14 +2830,22 @@ async def test_transcribe_and_persist_slide_audio_uses_supported_temp_extension(
                 duration_ms=100,
                 store_key="a1",
                 stored_object_id=1,
+                word_timings=(
+                    lecture_slide_processing.ElevenLabsSpeechWordTiming(
+                        word="early", start_ms=-50, end_ms=120
+                    ),
+                    lecture_slide_processing.ElevenLabsSpeechWordTiming(
+                        word="late", start_ms=80, end_ms=150
+                    ),
+                ),
             )
         ],
-        SimpleNamespace(),
-        str(tmp_path),
     )
 
     assert words is not None
-    assert [Path(path).suffix for path in seen_paths] == [".ogg"]
+    assert [
+        (word.word, word.start_offset_ms, word.end_offset_ms) for word in words
+    ] == [("early", 0, 100), ("late", 80, 100)]
 
 
 async def test_composite_page_audio_validation_rejects_cleared_gapped_timeline():
@@ -3539,7 +3494,7 @@ async def test_process_audio_run_rereads_force_manifest_generation(db, monkeypat
         await session.commit()
         run_id = run.id
 
-    async def fake_transcribe_and_persist(*_args):
+    async def fake_persist_slide_audio_timings(*_args):
         async with db.async_session() as session:
             run = await session.get(models.LectureSlideProcessingRun, run_id)
             assert run is not None
@@ -3587,8 +3542,8 @@ async def test_process_audio_run_rereads_force_manifest_generation(db, monkeypat
     )
     monkeypatch.setattr(
         lecture_slide_processing,
-        "_transcribe_and_persist_slide_audio",
-        fake_transcribe_and_persist,
+        "_persist_slide_audio_timings",
+        fake_persist_slide_audio_timings,
     )
     monkeypatch.setattr(
         lecture_slide_processing,
