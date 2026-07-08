@@ -1,5 +1,7 @@
-import openai
+import hashlib
 import logging
+import openai
+from openai.types import Reasoning
 from pingpong.auth import generate_auth_link
 from .authz import AuthzClient
 from pingpong.config import config
@@ -23,6 +25,9 @@ from pingpong.schemas import (
 )
 
 logger = logging.getLogger(__name__)
+
+CLASS_SUMMARY_OPENAI_MODEL = "gpt-5.4-mini"
+CLASS_SUMMARY_SAFETY_IDENTIFIER_PREFIX = "pp:v1:class-summary:"
 
 
 async def send_class_summary_for_class_task(
@@ -307,7 +312,9 @@ async def generate_assistant_summaries(
 
         if user_messages_list:
             current_period_contains_threads = True
-            assistant_summary = await generate_thread_summary(cli, user_messages_list)
+            assistant_summary = await generate_thread_summary(
+                cli, user_messages_list, class_id=class_id
+            )
             summaries.append(
                 AIAssistantSummary(
                     assistant_name=name,
@@ -457,24 +464,33 @@ Return up to 5 relevant threads, presenting topics and challenges with concise s
 
 
 async def generate_thread_summary(
-    cli: openai.AsyncClient, thread_messages: list[ThreadUserMessages]
+    cli: openai.AsyncClient,
+    thread_messages: list[ThreadUserMessages],
+    class_id: int | None = None,
 ) -> AIAssistantSummaryOutput | None:
-    completion = await cli.beta.chat.completions.parse(
-        model="gpt-4o",
-        messages=[
-            {"role": "system", "content": summarization_prompt},
-            {
-                "role": "user",
-                "content": ThreadsToSummarize(threads=thread_messages).model_dump_json(
-                    exclude={"threads": {"__all__": {"thread_id"}}}
-                ),
-            },
-        ],
-        response_format=AIAssistantSummaryOutput,
+    safety_identifier: str | openai.NotGiven = (
+        build_class_summary_safety_identifier(class_id)
+        if class_id is not None
+        else openai.NOT_GIVEN
+    )
+    completion = await cli.responses.parse(
+        model=CLASS_SUMMARY_OPENAI_MODEL,
+        instructions=summarization_prompt,
+        input=ThreadsToSummarize(threads=thread_messages).model_dump_json(
+            exclude={"threads": {"__all__": {"thread_id"}}}
+        ),
+        text_format=AIAssistantSummaryOutput,
+        reasoning=Reasoning(effort="low", summary=None),
+        safety_identifier=safety_identifier,
         temperature=0.0,
     )
 
-    return completion.choices[0].message.parsed
+    return completion.output_parsed
+
+
+def build_class_summary_safety_identifier(class_id: int) -> str:
+    class_hash = hashlib.sha256(f"class:{class_id}".encode()).hexdigest()[:32]
+    return f"{CLASS_SUMMARY_SAFETY_IDENTIFIER_PREFIX}{class_hash}"
 
 
 def generate_summary_html_from_assistant_summaries(
