@@ -11,6 +11,8 @@
 		VolumeUpSolid,
 		VolumeMuteSolid
 	} from 'flowbite-svelte-icons';
+	import SkipForwardIcon from '$lib/assets/icons/SkipForwardIcon.svelte';
+	import SkipBackwardIcon from '$lib/assets/icons/SkipBackwardIcon.svelte';
 	import type { Snippet } from 'svelte';
 	import { fade } from 'svelte/transition';
 
@@ -26,8 +28,10 @@
 	}
 
 	type QuestionMarkerState = 'upcoming' | 'correct' | 'incorrect';
-	type KeyboardActionIndicator = 'play' | 'pause' | 'mute' | 'unmute';
+	type KeyboardActionIndicator =
+		'play' | 'pause' | 'mute' | 'unmute' | 'skipForward' | 'skipBackward';
 
+	const KEYBOARD_SKIP_INTERVAL_MS = 15000;
 	const PREVIEW_WIDTH = 224;
 	const PREVIEW_VIDEO_IDLE_DEACTIVATE_MS = 3000;
 	const QUESTION_PRESENTATION_CONTROLS_HIDE_MS = 2000;
@@ -1289,6 +1293,19 @@
 		toggleMute();
 	}
 
+	function handleKeyboardSkip(direction: 'skipForward' | 'skipBackward') {
+		if (disabled || questionControlsLocked || !videoElement || durationMs <= 0) return;
+
+		const fromOffsetMs = Math.round(videoElement.currentTime * 1000);
+		const directionMultiplier = direction === 'skipBackward' ? -1 : 1;
+		const requestedOffsetMs = fromOffsetMs + directionMultiplier * KEYBOARD_SKIP_INTERVAL_MS;
+		const targetOffsetMs = Math.round(clamp(requestedOffsetMs, 0, seekLimitOffsetMs));
+
+		showKeyboardIndicator(direction);
+		if (targetOffsetMs === fromOffsetMs) return;
+		commitSeek(targetOffsetMs, fromOffsetMs);
+	}
+
 	function isKeyboardEventWithinPlayer(event: KeyboardEvent): boolean {
 		if (!playerContainerElement) return false;
 
@@ -1312,6 +1329,12 @@
 		} else if (event.key === 'm' || event.key === 'M') {
 			event.preventDefault();
 			handleKeyboardMuteToggle();
+		} else if (event.key === 'ArrowRight') {
+			event.preventDefault();
+			handleKeyboardSkip('skipForward');
+		} else if (event.key === 'ArrowLeft') {
+			event.preventDefault();
+			handleKeyboardSkip('skipBackward');
 		}
 	}
 
@@ -1354,6 +1377,10 @@
 					<PauseSolid class="size-14 text-white" />
 				{:else if keyboardActionIndicator === 'mute'}
 					<VolumeMuteSolid class="size-12 text-white" />
+				{:else if keyboardActionIndicator === 'skipForward'}
+					<SkipForwardIcon class="size-12" />
+				{:else if keyboardActionIndicator === 'skipBackward'}
+					<SkipBackwardIcon class="size-12" />
 				{:else}
 					<VolumeUpSolid class="size-12 text-white" />
 				{/if}
