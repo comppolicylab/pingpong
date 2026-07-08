@@ -13,6 +13,7 @@
 	} from 'flowbite-svelte-icons';
 	import SkipForwardIcon from '$lib/assets/icons/SkipForwardIcon.svelte';
 	import SkipBackwardIcon from '$lib/assets/icons/SkipBackwardIcon.svelte';
+	import LectureVideoControlButton from './LectureVideoControlButton.svelte';
 	import type { Snippet } from 'svelte';
 	import { fade } from 'svelte/transition';
 
@@ -1293,7 +1294,7 @@
 		toggleMute();
 	}
 
-	function handleKeyboardSkip(direction: 'skipForward' | 'skipBackward') {
+	function skipBy(direction: 'skipForward' | 'skipBackward') {
 		if (disabled || questionControlsLocked || !videoElement || durationMs <= 0) return;
 
 		const fromOffsetMs = Math.round(videoElement.currentTime * 1000);
@@ -1301,9 +1302,15 @@
 		const requestedOffsetMs = fromOffsetMs + directionMultiplier * KEYBOARD_SKIP_INTERVAL_MS;
 		const targetOffsetMs = Math.round(clamp(requestedOffsetMs, 0, seekLimitOffsetMs));
 
-		showKeyboardIndicator(direction);
 		if (targetOffsetMs === fromOffsetMs) return;
 		commitSeek(targetOffsetMs, fromOffsetMs);
+	}
+
+	function handleKeyboardSkip(direction: 'skipForward' | 'skipBackward') {
+		if (disabled || questionControlsLocked || !videoElement || durationMs <= 0) return;
+
+		showKeyboardIndicator(direction);
+		skipBy(direction);
 	}
 
 	function isKeyboardEventWithinPlayer(event: KeyboardEvent): boolean {
@@ -1785,29 +1792,33 @@
 						</div>
 					</div>
 					<div class="relative mt-1.5 flex items-center gap-2">
-						<div
-							class="shrink-0 rounded-full bg-black/30 p-1 {questionControlsLocked
-								? 'pointer-events-none invisible'
-								: 'pointer-events-auto'}"
+						<LectureVideoControlButton
+							label={endedPlayback ? 'Restart' : paused ? 'Play' : 'Pause'}
+							locked={questionControlsLocked}
+							onclick={togglePlayPause}
 						>
-							<button
-								class="flex h-8 w-8 items-center justify-center rounded-full text-white hover:bg-white/10"
-								style="transition: background-color 0.2s;"
-								onclick={(e: MouseEvent) => {
-									e.stopPropagation();
-									togglePlayPause();
-								}}
-								aria-label={endedPlayback ? 'Restart' : paused ? 'Play' : 'Pause'}
-							>
-								{#if endedPlayback}
-									<RefreshOutline class="size-5 text-white" />
-								{:else if paused}
-									<PlaySolid class="size-6 translate-x-px text-white" />
-								{:else}
-									<PauseSolid class="size-6 text-white" />
-								{/if}
-							</button>
-						</div>
+							{#if endedPlayback}
+								<RefreshOutline class="size-5 text-white" />
+							{:else if paused}
+								<PlaySolid class="size-6 translate-x-px text-white" />
+							{:else}
+								<PauseSolid class="size-6 text-white" />
+							{/if}
+						</LectureVideoControlButton>
+						<LectureVideoControlButton
+							label="Skip backward 15 seconds (left arrow)"
+							locked={questionControlsLocked}
+							onclick={() => skipBy('skipBackward')}
+						>
+							<SkipBackwardIcon class="size-5" />
+						</LectureVideoControlButton>
+						<LectureVideoControlButton
+							label="Skip forward 15 seconds (right arrow)"
+							locked={questionControlsLocked}
+							onclick={() => skipBy('skipForward')}
+						>
+							<SkipForwardIcon class="size-5" />
+						</LectureVideoControlButton>
 						<!-- svelte-ignore a11y_no_static_element_interactions -->
 						<div
 							class="relative shrink-0 rounded-full bg-black/30 p-1 {questionControlsLocked
@@ -1879,30 +1890,19 @@
 							</div>
 						</div>
 						{#if captionsAvailable}
-							<div
-								class="shrink-0 rounded-full bg-black/30 p-1 {questionControlsLocked
-									? 'pointer-events-none invisible'
-									: 'pointer-events-auto'}"
+							<LectureVideoControlButton
+								label={captionsEnabled ? 'Turn captions off' : 'Turn captions on'}
+								locked={questionControlsLocked}
+								active={captionsEnabled}
+								pressed={captionsEnabled}
+								onclick={toggleCaptions}
 							>
-								<button
-									class="flex h-8 w-8 items-center justify-center rounded-full text-white hover:bg-white/10 {captionsEnabled
-										? 'bg-white/15'
-										: ''}"
-									style="transition: background-color 0.2s;"
-									onclick={(e: MouseEvent) => {
-										e.stopPropagation();
-										toggleCaptions();
-									}}
-									aria-label={captionsEnabled ? 'Turn captions off' : 'Turn captions on'}
-									aria-pressed={captionsEnabled}
-								>
-									{#if captionsEnabled}
-										<CaptionSolid class="size-5 text-white" />
-									{:else}
-										<CaptionOutline class="size-5 text-white" />
-									{/if}
-								</button>
-							</div>
+								{#if captionsEnabled}
+									<CaptionSolid class="size-5 text-white" />
+								{:else}
+									<CaptionOutline class="size-5 text-white" />
+								{/if}
+							</LectureVideoControlButton>
 						{/if}
 						<div
 							class="shrink-0 rounded-full bg-black/30 p-1 {questionControlsLocked
