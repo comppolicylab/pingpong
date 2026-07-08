@@ -330,6 +330,8 @@
 	let chatInputRef: ChatInputHandle | null = null;
 	let dropOverlayVisible = false;
 	let dropDragCounter = 0;
+	const archivedGroupMessage =
+		'This group is archived and read-only. New content and edits are unavailable.';
 
 	let supportsVision = false;
 	$: {
@@ -805,7 +807,7 @@
 	// Handle submit on the chat input
 	const handleSubmit = async (e: CustomEvent<ChatInputMessage>) => {
 		if (groupArchived) {
-			sadToast('This group is archived and read-only.');
+			sadToast(archivedGroupMessage);
 			return;
 		}
 		await postMessage(e.detail);
@@ -813,7 +815,7 @@
 
 	const handleLectureChatSubmit = async (message: ChatInputMessage) => {
 		if (groupArchived) {
-			sadToast('This group is archived and read-only.');
+			sadToast(archivedGroupMessage);
 			return;
 		}
 		const lectureVideoPlaybackPositionMs = lectureVideoViewRef?.getPlaybackPositionMs();
@@ -829,7 +831,7 @@
 
 	const handleLectureSlideChatSubmit = async (message: ChatInputMessage) => {
 		if (groupArchived) {
-			sadToast('This group is archived and read-only.');
+			sadToast(archivedGroupMessage);
 			return;
 		}
 		const lectureSlidePlaybackPositionMs = lectureSlideViewRef?.getPlaybackPositionMs();

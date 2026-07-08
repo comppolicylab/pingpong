@@ -6799,7 +6799,9 @@ class Class(Base):
     async def update(
         cls, session: AsyncSession, id_: int, data: schemas.UpdateClass
     ) -> "Class":
-        update_data = data.model_dump(exclude_unset=True)
+        update_data = data.model_dump(exclude_none=True)
+        if "archived" in data.model_fields_set and data.archived is None:
+            update_data["archived"] = None
 
         # Fetch the current state of the record
         existing_class = await cls.get_by_id(session, id_)

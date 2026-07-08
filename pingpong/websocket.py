@@ -21,6 +21,7 @@ from pingpong.ai import (
 from pingpong.session import populate_request
 from pingpong.state_types import StateWebSocket
 from pingpong.log_utils import sanitize_for_log
+from pingpong.permission import ARCHIVED_DETAIL
 from .config import config
 
 browser_connection_logger = logging.getLogger("realtime_browser")
@@ -392,11 +393,16 @@ def ws_check_realtime_permissions(func):
     ):
         await browser_connection.accept()
         try:
+            try:
+                class_id_int = int(class_id)
+            except ValueError as e:
+                raise ValueError("Invalid class id.") from e
+
             class_ = await models.Class.get_by_id(
-                browser_connection.state["db"], int(class_id)
+                browser_connection.state["db"], class_id_int
             )
             if class_ and class_.archived is not None:
-                raise ValueError("This group is archived and read-only.")
+                raise ValueError(ARCHIVED_DETAIL)
             await check_realtime_permissions(browser_connection, thread_id)
         except ValueError as e:
             await browser_connection.send_json(

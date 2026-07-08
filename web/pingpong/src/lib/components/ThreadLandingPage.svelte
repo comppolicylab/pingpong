@@ -57,6 +57,8 @@
 	let chatInputRef: ChatInputHandle | null = null;
 	let dropOverlayVisible = false;
 	let dropDragCounter = 0;
+	const archivedGroupMessage =
+		'This group is archived and read-only. New content and edits are unavailable.';
 
 	const errorMessages: Record<number, string> = {
 		1: 'We faced an issue when trying to sync with Canvas.'
@@ -411,7 +413,7 @@
 
 	const handleAudioThreadCreate = async () => {
 		if (groupArchived) {
-			sadToast('This group is archived and read-only.');
+			sadToast(archivedGroupMessage);
 			return;
 		}
 		$loading = true;
@@ -448,7 +450,7 @@
 
 	const handleLectureThreadCreate = async () => {
 		if (groupArchived) {
-			sadToast('This group is archived and read-only.');
+			sadToast(archivedGroupMessage);
 			return;
 		}
 		if ($loading) return;
@@ -486,7 +488,7 @@
 
 	const handleChatThreadCreate = async () => {
 		if (groupArchived) {
-			sadToast('This group is archived and read-only.');
+			sadToast(archivedGroupMessage);
 			return;
 		}
 		$loading = true;
@@ -543,7 +545,7 @@
 	// Handle form submission
 	const handleSubmit = async (e: CustomEvent<ChatInputMessage>) => {
 		if (groupArchived) {
-			sadToast('This group is archived and read-only.');
+			sadToast(archivedGroupMessage);
 			return;
 		}
 		$loading = true;

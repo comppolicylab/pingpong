@@ -34,7 +34,12 @@ async def test_update_class_archives_with_server_timestamp_and_unarchives(
 
     async with db.async_session() as session:
         class_ = await models.Class.get_by_id(session, 1)
-        assert class_.archived.replace(tzinfo=timezone.utc) == datetime(
+        archived = class_.archived
+        if archived.tzinfo is None:
+            archived = archived.replace(tzinfo=timezone.utc)
+        else:
+            archived = archived.astimezone(timezone.utc)
+        assert archived == datetime(
             2024, 1, 1, 0, 0, 0, tzinfo=timezone.utc
         )
 
@@ -90,8 +95,5 @@ async def test_archived_class_blocks_thread_creation(api, db, valid_user_token):
 
     assert response.status_code == 409
     assert response.json() == {
-        "detail": (
-            "This group is archived and read-only. "
-            "Unarchive it in Manage group to make changes."
-        )
+        "detail": "This group is archived and read-only. New content and edits are unavailable."
     }

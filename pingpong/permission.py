@@ -210,14 +210,21 @@ class ClassInstitutionAdmin(Expression):
 
 
 ARCHIVED_DETAIL = (
-    "This group is archived and read-only. "
-    "Unarchive it in Manage group to make changes."
+    "This group is archived and read-only. New content and edits are unavailable."
 )
 
 
 class ClassNotArchived(Expression):
     async def __call__(self, request: StateRequest):
-        if not await self.test_with_cache(request):
+        class_id = request.path_params.get("class_id")
+        if not class_id:
+            return
+
+        class_ = await models.Class.get_by_id(request.state["db"], int(class_id))
+        if class_ is None:
+            raise HTTPException(status_code=404, detail="Class not found.")
+
+        if class_.archived is not None:
             raise HTTPException(status_code=409, detail=ARCHIVED_DETAIL)
 
     async def test(self, request: StateRequest) -> bool:
