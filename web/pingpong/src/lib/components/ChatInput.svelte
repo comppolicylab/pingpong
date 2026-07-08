@@ -79,6 +79,10 @@
 	 */
 	export let canViewAssistant = true;
 	/**
+	 * Whether the parent group is archived.
+	 */
+	export let groupArchived = false;
+	/**
 	 * Whether we're waiting for an in-flight request.
 	 */
 	export let loading = false;
@@ -188,6 +192,7 @@
 		!!upload &&
 		!loading &&
 		!disabled &&
+		!groupArchived &&
 		!tooManyFiles &&
 		!uploading &&
 		!isUsingOlderAssistantVersion;
@@ -736,19 +741,22 @@
 				rows="1"
 				name="message"
 				class="mt-1 w-full resize-none border-none bg-transparent p-0 !outline-hidden focus:ring-0"
-				placeholder={canSubmit
+				placeholder={canSubmit && !groupArchived
 					? isUsingOlderAssistantVersion
 						? 'Start a new chat to continue.'
 						: placeholderMessage
 					: assistantDeleted
-						? 'Read-only thread: the assistant associated with this thread is deleted.'
-						: canViewAssistant
-							? "You can't reply in this thread."
-							: 'Read-only thread: You no longer have permissions to interact with this assistant.'}
+						? 'Read-only thread: the assistant associated with this thread was deleted.'
+						: groupArchived
+							? 'This thread has been archived and is read-only.'
+							: canViewAssistant
+								? "You can't reply in this thread."
+								: 'Read-only thread: You no longer have permissions to interact with this assistant.'}
 				class:text-gray-700={disabled}
 				disabled={!canSubmit ||
 					assistantDeleted ||
 					!canViewAssistant ||
+					groupArchived ||
 					isUsingOlderAssistantVersion}
 				onkeydown={maybeSubmit}
 				oninput={handleTextAreaInput}

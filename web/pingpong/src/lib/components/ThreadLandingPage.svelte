@@ -57,6 +57,8 @@
 	let chatInputRef: ChatInputHandle | null = null;
 	let dropOverlayVisible = false;
 	let dropDragCounter = 0;
+	const archivedGroupMessage =
+		'This group is archived and read-only. New content and edits are unavailable.';
 
 	const errorMessages: Record<number, string> = {
 		1: 'We faced an issue when trying to sync with Canvas.'
@@ -118,6 +120,7 @@
 
 	let userTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 	$: isPrivate = data.class.private || false;
+	$: groupArchived = !!data.class.archived;
 	// Currently selected assistant.
 	$: assistants = ((data?.assistants || []) as Assistant[]).filter(
 		(asst: Assistant) =>
@@ -276,6 +279,7 @@
 			: null;
 	$: canDropUploadsOnLanding =
 		isConfigured &&
+		!groupArchived &&
 		assistant.interaction_mode === 'chat' &&
 		chatInputRef !== null &&
 		!(assistant.assistant_should_message_first ?? false) &&
@@ -408,6 +412,10 @@
 	};
 
 	const handleAudioThreadCreate = async () => {
+		if (groupArchived) {
+			sadToast(archivedGroupMessage);
+			return;
+		}
 		$loading = true;
 		const partyIds = parties ? parties.split(',').map((id) => parseInt(id, 10)) : [];
 		try {
@@ -441,6 +449,10 @@
 	};
 
 	const handleLectureThreadCreate = async () => {
+		if (groupArchived) {
+			sadToast(archivedGroupMessage);
+			return;
+		}
 		if ($loading) return;
 		$loading = true;
 		const partyIds = parties ? parties.split(',').map((id) => parseInt(id, 10)) : [];
@@ -475,6 +487,10 @@
 	};
 
 	const handleChatThreadCreate = async () => {
+		if (groupArchived) {
+			sadToast(archivedGroupMessage);
+			return;
+		}
 		$loading = true;
 		const partyIds = parties ? parties.split(',').map((id) => parseInt(id, 10)) : [];
 		const tools: api.Tool[] = [];
@@ -528,6 +544,10 @@
 
 	// Handle form submission
 	const handleSubmit = async (e: CustomEvent<ChatInputMessage>) => {
+		if (groupArchived) {
+			sadToast(archivedGroupMessage);
+			return;
+		}
 		$loading = true;
 		const form = e.detail;
 		if (!form.message) {
@@ -919,6 +939,7 @@
 								onclick={handleAudioThreadCreate}
 								ontouchstart={handleAudioThreadCreate}
 								type="button"
+								disabled={groupArchived}
 							>
 								<CirclePlusSolid size="sm" />
 								<span class="text-center text-sm font-normal"> Create session </span>
@@ -977,6 +998,7 @@
 							class="flex flex-row gap-1.5 rounded-lg bg-blue-dark-40 px-4 py-1.5 text-xs text-white transition-all hover:bg-blue-dark-50 hover:text-blue-light-50"
 							onclick={handleLectureThreadCreate}
 							type="button"
+							disabled={groupArchived}
 						>
 							<CirclePlusSolid size="sm" />
 							<span class="text-center text-sm font-normal"> Start a Lesson </span>
@@ -1007,7 +1029,8 @@
 								mimeType={data.uploadInfo.mimeType}
 								maxSize={data.uploadInfo.private_file_max_size}
 								loading={$loading || !!$navigating}
-								canSubmit={true}
+								canSubmit={!groupArchived}
+								{groupArchived}
 								visionAcceptedFiles={landingVisionAcceptedFiles}
 								{visionSupportOverride}
 								{useImageDescriptions}

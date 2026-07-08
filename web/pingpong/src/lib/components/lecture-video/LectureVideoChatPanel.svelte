@@ -45,6 +45,7 @@
 		threadManagerError,
 		assistantDeleted,
 		canViewAssistant,
+		groupArchived = false,
 		resolvedAssistantVersion,
 		version,
 		useLatex,
@@ -78,6 +79,7 @@
 		threadManagerError: string | null;
 		assistantDeleted: boolean;
 		canViewAssistant: boolean;
+		groupArchived?: boolean;
 		resolvedAssistantVersion: number;
 		version: number;
 		useLatex: boolean;
@@ -243,6 +245,7 @@
 		if (
 			!showInput ||
 			!canSubmitChatText ||
+			groupArchived ||
 			assistantDeleted ||
 			!canViewAssistant ||
 			message.data.id !== latestAssistantMessageId
@@ -252,7 +255,9 @@
 		return getFollowupSuggestions(message.data);
 	};
 
-	let canShowStarterQuestions = $derived(showInput && !assistantDeleted && canViewAssistant);
+	let canShowStarterQuestions = $derived(
+		showInput && !groupArchived && !assistantDeleted && canViewAssistant
+	);
 	let canSubmitChatText = $derived(
 		canShowStarterQuestions && canSubmit && !disabled && !waiting && !submitting
 	);
@@ -632,6 +637,7 @@
 					useImageDescriptions={false}
 					{assistantDeleted}
 					{canViewAssistant}
+					{groupArchived}
 					{canSubmit}
 					{disabled}
 					loading={submitting || waiting}

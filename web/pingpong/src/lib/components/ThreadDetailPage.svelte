@@ -235,6 +235,15 @@
 	$: effectiveLectureVideoAssistantMismatch =
 		threadLectureVideoMismatch || runtimeLectureVideoAssistantMismatch;
 	$: effectiveLectureVideoMismatch = effectiveLectureVideoAssistantMismatch;
+	$: threadLectureSlideMismatch = data.threadLectureSlideMismatch === true;
+	let runtimeLectureSlideAssistantMismatch = false;
+	let runtimeLectureSlideAssistantMismatchKey: string | null = null;
+	$: if (runtimeLectureSlideAssistantMismatchKey !== currentLectureVideoThreadKey) {
+		runtimeLectureSlideAssistantMismatch = false;
+		runtimeLectureSlideAssistantMismatchKey = currentLectureVideoThreadKey;
+	}
+	$: effectiveLectureSlideMismatch =
+		threadLectureSlideMismatch || runtimeLectureSlideAssistantMismatch;
 	let lectureVideoViewRef: LectureVideoViewHandle | null = null;
 	let lectureSlideViewRef: LectureVideoViewHandle | null = null;
 	let lecturePlayerVolume = 1;
@@ -321,6 +330,8 @@
 	let chatInputRef: ChatInputHandle | null = null;
 	let dropOverlayVisible = false;
 	let dropDragCounter = 0;
+	const archivedGroupMessage =
+		'This group is archived and read-only. New content and edits are unavailable.';
 
 	let supportsVision = false;
 	$: {
@@ -367,6 +378,7 @@
 	}
 	// TODO - should figure this out by checking grants instead of participants
 	$: canSubmit = !!$participants.user && $participants.user.includes('Me');
+	$: groupArchived = !!data.class?.archived;
 	$: assistantDeleted = !$assistantId && $assistantId === 0;
 	let useLatex = false;
 	let useImageDescriptions = false;
@@ -380,9 +392,14 @@
 		visionSupportOverride === false && !useImageDescriptions ? null : chatVisionAcceptedFiles;
 	$: chatFileSearchAcceptedFiles = allowUserFileUploads ? fileSearchAcceptedFiles : null;
 	$: chatCodeInterpreterAcceptedFiles = allowUserFileUploads ? codeInterpreterAcceptedFiles : null;
-	$: chatInputDisabled = !canSubmit || assistantDeleted || !!$navigating || !canViewAssistant;
+	$: chatInputDisabled =
+		!canSubmit || groupArchived || assistantDeleted || !!$navigating || !canViewAssistant;
 	$: lectureChatCanSubmit =
-		canSubmit && threadIsCurrentUserParticipant && !assistantDeleted && canViewAssistant;
+		canSubmit &&
+		!groupArchived &&
+		threadIsCurrentUserParticipant &&
+		!assistantDeleted &&
+		canViewAssistant;
 	$: lectureChatInputDisabled =
 		!lectureChatCanSubmit || !!$navigating || !threadLectureChatAvailable;
 	$: lectureChatContinuePromptVisible =
@@ -789,10 +806,18 @@
 
 	// Handle submit on the chat input
 	const handleSubmit = async (e: CustomEvent<ChatInputMessage>) => {
+		if (groupArchived) {
+			sadToast(archivedGroupMessage);
+			return;
+		}
 		await postMessage(e.detail);
 	};
 
 	const handleLectureChatSubmit = async (message: ChatInputMessage) => {
+		if (groupArchived) {
+			sadToast(archivedGroupMessage);
+			return;
+		}
 		const lectureVideoPlaybackPositionMs = lectureVideoViewRef?.getPlaybackPositionMs();
 		lectureChatContinuePromptDismissedByPlayback = false;
 		void lectureVideoViewRef?.pauseForChatSubmit();
@@ -805,6 +830,10 @@
 	};
 
 	const handleLectureSlideChatSubmit = async (message: ChatInputMessage) => {
+		if (groupArchived) {
+			sadToast(archivedGroupMessage);
+			return;
+		}
 		const lectureSlidePlaybackPositionMs = lectureSlideViewRef?.getPlaybackPositionMs();
 		lectureChatContinuePromptDismissedByPlayback = false;
 		void lectureSlideViewRef?.pauseForChatSubmit();
@@ -1609,6 +1638,11 @@
 		runtimeLectureVideoAssistantMismatchKey = currentLectureVideoThreadKey;
 	}
 
+	function handleLectureSlideLessonUpdated() {
+		runtimeLectureSlideAssistantMismatch = true;
+		runtimeLectureSlideAssistantMismatchKey = currentLectureVideoThreadKey;
+	}
+
 	async function startReplacementLectureThread() {
 		if (startingReplacementLectureThread || !$assistantId || isAnonymousSession) return;
 
@@ -1675,101 +1709,92 @@
 >
 	{#if data.threadInteractionMode === 'lecture_video'}
 		{#key `${classId}:${threadId}:${lectureVideoSrc}:${effectiveLectureVideoMismatch}`}
-			{#if effectiveLectureVideoMismatch}
-				<div class="flex h-full w-full items-center justify-center p-4">
-					<div
-						class="flex w-full max-w-2xl flex-col gap-4 rounded-2xl border border-orange/30 bg-orange-light px-6 py-5 text-slate-900 shadow-sm sm:flex-row sm:items-center sm:justify-between"
-					>
-						<div class="flex flex-col gap-1">
-							<div class="text-base font-semibold text-slate-900">
-								This video lesson was updated
-							</div>
-							<div class="text-sm text-slate-700">
-								{isAnonymousSession
-									? 'Ask the lesson owner for a new shared session.'
-									: 'Start a fresh session to jump into the new version.'}
-							</div>
-						</div>
-						{#if !isAnonymousSession}
-							<button
-								type="button"
-								class="inline-flex shrink-0 items-center justify-center rounded-full bg-orange px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-orange-dark focus:ring-2 focus:ring-orange focus:ring-offset-2 focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
-								disabled={startingReplacementLectureThread || !$assistantId}
-								onclick={startReplacementLectureThread}
-							>
-								{#if startingReplacementLectureThread}
-									<Spinner color="custom" customColor="fill-white" class="mr-2 h-4 w-4" />
-								{/if}
-								Start new lesson
-							</button>
-						{/if}
-					</div>
-				</div>
-			{:else}
-				<LectureVideoView
-					bind:this={lectureVideoViewRef}
-					{classId}
-					{threadId}
-					{lectureVideoSrc}
-					captionsSrc={lectureVideoCaptionsSrc}
-					title={lectureVideoDisplayTitle}
-					canParticipate={threadIsCurrentUserParticipant}
-					showRefreshAction={!isAnonymousSession}
-					initialSession={lectureVideoSession}
-					bind:playerVolume={lecturePlayerVolume}
-					chatAvailable={threadLectureChatAvailable}
-					on:sessionchange={handleLectureSessionChange}
-					on:playbackresumed={handleLecturePlaybackResumed}
-					on:narrationplaybackstarted={handleLectureNarrationPlaybackStarted}
-					on:lessonupdated={handleLectureVideoLessonUpdated}
-				>
-					{#snippet chat(lectureVideoAtEnd = false)}
-						{#if threadLectureChatAvailable}
-							<LectureVideoChatPanel
-								{classId}
-								{threadId}
-								messages={$messages}
-								canFetchMore={$canFetchMore}
-								showInput={effectiveLectureVideoSession?.state !== 'completed' ||
-									threadIsCurrentUserParticipant}
-								showContinueWatchingPrompt={lectureChatContinuePromptVisible &&
-									!(effectiveLectureVideoSession?.state === 'completed' && lectureVideoAtEnd)}
-								canSubmit={lectureChatCanSubmit}
-								disabled={lectureChatInputDisabled}
-								waiting={$waiting}
-								submitting={$submitting}
-								ttsMuted={$ttsMuted}
-								ttsPlaying={$ttsPlaying}
-								ttsAvailable={lectureVideoTtsAvailable}
-								{threadManagerError}
-								{assistantDeleted}
-								{canViewAssistant}
-								{resolvedAssistantVersion}
-								version={$version}
-								{useLatex}
-								{userTimezone}
-								meName={data?.me?.user?.name || data?.me?.user?.email || 'Me'}
-								meImage={data?.me?.profile?.image_url || ''}
-								{assistantIconSrc}
-								assistantId={$assistantId}
-								participants={$participants}
-								mimeType={data.uploadInfo.mimeType}
-								{fetchMoreMessages}
-								{fetchCodeInterpreterResult}
-								onsubmit={handleLectureChatSubmit}
-								ondismisserror={handleLectureChatDismissError}
-								oncontinuewatching={handleLectureChatContinueWatching}
-								onmutettstoggle={() => {
-									threadMgr.setTtsMuted(!$ttsMuted);
-								}}
-							/>
-						{/if}
-					{/snippet}
-				</LectureVideoView>
-			{/if}
+			<LectureVideoView
+				bind:this={lectureVideoViewRef}
+				{classId}
+				{threadId}
+				{lectureVideoSrc}
+				captionsSrc={lectureVideoCaptionsSrc}
+				title={lectureVideoDisplayTitle}
+				canParticipate={threadIsCurrentUserParticipant &&
+					!groupArchived &&
+					!effectiveLectureVideoMismatch}
+				{groupArchived}
+				lessonUpdated={effectiveLectureVideoMismatch}
+				showParticipantNotice={!groupArchived && !effectiveLectureVideoMismatch}
+				showRefreshAction={!isAnonymousSession}
+				initialSession={lectureVideoSession}
+				bind:playerVolume={lecturePlayerVolume}
+				chatAvailable={threadLectureChatAvailable}
+				on:sessionchange={handleLectureSessionChange}
+				on:playbackresumed={handleLecturePlaybackResumed}
+				on:narrationplaybackstarted={handleLectureNarrationPlaybackStarted}
+				on:lessonupdated={handleLectureVideoLessonUpdated}
+			>
+				{#snippet statusAction()}
+					{#if !isAnonymousSession}
+						<button
+							type="button"
+							class="inline-flex shrink-0 items-center justify-center rounded-full bg-orange px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-orange-dark focus:ring-2 focus:ring-orange focus:ring-offset-2 focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
+							disabled={startingReplacementLectureThread || !$assistantId}
+							onclick={startReplacementLectureThread}
+						>
+							{#if startingReplacementLectureThread}
+								<Spinner color="custom" customColor="fill-white" class="mr-2 h-4 w-4" />
+							{/if}
+							Start new lesson
+						</button>
+					{/if}
+				{/snippet}
+				{#snippet chat(lectureVideoAtEnd = false)}
+					{#if threadLectureChatAvailable}
+						<LectureVideoChatPanel
+							{classId}
+							{threadId}
+							messages={$messages}
+							canFetchMore={$canFetchMore}
+							showInput={!effectiveLectureVideoMismatch &&
+								(effectiveLectureVideoSession?.state !== 'completed' ||
+									threadIsCurrentUserParticipant)}
+							showContinueWatchingPrompt={!effectiveLectureVideoMismatch &&
+								lectureChatContinuePromptVisible &&
+								!(effectiveLectureVideoSession?.state === 'completed' && lectureVideoAtEnd)}
+							canSubmit={lectureChatCanSubmit && !effectiveLectureVideoMismatch}
+							disabled={lectureChatInputDisabled || effectiveLectureVideoMismatch}
+							waiting={$waiting}
+							submitting={$submitting}
+							ttsMuted={$ttsMuted}
+							ttsPlaying={$ttsPlaying}
+							ttsAvailable={lectureVideoTtsAvailable}
+							{threadManagerError}
+							{assistantDeleted}
+							{canViewAssistant}
+							{groupArchived}
+							{resolvedAssistantVersion}
+							version={$version}
+							{useLatex}
+							{userTimezone}
+							meName={data?.me?.user?.name || data?.me?.user?.email || 'Me'}
+							meImage={data?.me?.profile?.image_url || ''}
+							{assistantIconSrc}
+							assistantId={$assistantId}
+							participants={$participants}
+							mimeType={data.uploadInfo.mimeType}
+							{fetchMoreMessages}
+							{fetchCodeInterpreterResult}
+							onsubmit={handleLectureChatSubmit}
+							ondismisserror={handleLectureChatDismissError}
+							oncontinuewatching={handleLectureChatContinueWatching}
+							onmutettstoggle={() => {
+								threadMgr.setTtsMuted(!$ttsMuted);
+							}}
+						/>
+					{/if}
+				{/snippet}
+			</LectureVideoView>
 		{/key}
 	{:else if data.threadInteractionMode === 'lecture_slides'}
-		{#key `${classId}:${threadId}:${lectureSlideDeck?.continuous_narration_url ?? ''}`}
+		{#key `${classId}:${threadId}:${lectureSlideDeck?.continuous_narration_url ?? ''}:${effectiveLectureSlideMismatch}`}
 			<LectureVideoView
 				bind:this={lectureSlideViewRef}
 				{classId}
@@ -1777,7 +1802,13 @@
 				lectureVideoSrc={lectureSlideDeck?.continuous_narration_url ?? ''}
 				captionsSrc={lectureSlideCaptionsSrc}
 				title={threadMgr.thread?.name || 'Lecture Slides'}
-				canParticipate={threadIsCurrentUserParticipant}
+				canParticipate={threadIsCurrentUserParticipant &&
+					!groupArchived &&
+					!effectiveLectureSlideMismatch}
+				{groupArchived}
+				lessonUpdated={effectiveLectureSlideMismatch}
+				showParticipantNotice={!groupArchived && !effectiveLectureSlideMismatch}
+				showRefreshAction={!isAnonymousSession}
 				initialSession={lectureSlideSession}
 				bind:playerVolume={lecturePlayerVolume}
 				chatAvailable={threadLectureSlideChatAvailable}
@@ -1787,7 +1818,23 @@
 				mediaAspectRatio={lectureSlideMediaAspectRatio}
 				on:sessionchange={handleLectureSlideSessionChange}
 				on:playbackresumed={handleLecturePlaybackResumed}
+				on:lessonupdated={handleLectureSlideLessonUpdated}
 			>
+				{#snippet statusAction()}
+					{#if !isAnonymousSession}
+						<button
+							type="button"
+							class="inline-flex shrink-0 items-center justify-center rounded-full bg-orange px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-orange-dark focus:ring-2 focus:ring-orange focus:ring-offset-2 focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
+							disabled={startingReplacementLectureThread || !$assistantId}
+							onclick={startReplacementLectureThread}
+						>
+							{#if startingReplacementLectureThread}
+								<Spinner color="custom" customColor="fill-white" class="mr-2 h-4 w-4" />
+							{/if}
+							Start new lesson
+						</button>
+					{/if}
+				{/snippet}
 				{#snippet visual(offsetMs)}
 					{@const visiblePage = lectureSlidePageAtOffset(offsetMs)}
 					{@const visiblePageIndex = visiblePage ? lectureSlidePageIndex(visiblePage) : -1}
@@ -1832,12 +1879,17 @@
 							{threadId}
 							messages={$messages}
 							canFetchMore={$canFetchMore}
-							showInput={effectiveLectureSlideSession?.state !== 'completed' ||
-								threadIsCurrentUserParticipant}
-							showContinueWatchingPrompt={lectureSlideChatContinuePromptVisible &&
+							showInput={!effectiveLectureSlideMismatch &&
+								(effectiveLectureSlideSession?.state !== 'completed' ||
+									threadIsCurrentUserParticipant)}
+							showContinueWatchingPrompt={!effectiveLectureSlideMismatch &&
+								lectureSlideChatContinuePromptVisible &&
 								!(effectiveLectureSlideSession?.state === 'completed' && lectureSlideAtEnd)}
-							canSubmit={lectureChatCanSubmit}
-							disabled={!lectureChatCanSubmit || !!$navigating || !threadLectureSlideChatAvailable}
+							canSubmit={lectureChatCanSubmit && !effectiveLectureSlideMismatch}
+							disabled={!lectureChatCanSubmit ||
+								effectiveLectureSlideMismatch ||
+								!!$navigating ||
+								!threadLectureSlideChatAvailable}
 							waiting={$waiting}
 							submitting={$submitting}
 							ttsMuted={$ttsMuted}
@@ -1846,6 +1898,7 @@
 							{threadManagerError}
 							{assistantDeleted}
 							{canViewAssistant}
+							{groupArchived}
 							{resolvedAssistantVersion}
 							version={$version}
 							{useLatex}
@@ -2314,6 +2367,7 @@
 								{useImageDescriptions}
 								{assistantDeleted}
 								{canViewAssistant}
+								{groupArchived}
 								canSubmit={canSubmit && !assistantDeleted && canViewAssistant}
 								disabled={chatInputDisabled}
 								loading={$submitting || $waiting}

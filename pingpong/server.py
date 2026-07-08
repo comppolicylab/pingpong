@@ -196,9 +196,11 @@ from .lti.course_bridge import (
 from .merge import list_all_permissions, merge
 from .now import NowFn, utcnow
 from .permission import (
+    ARCHIVED_DETAIL,
     And,
     Authz,
     ClassInstitutionAdmin,
+    ClassNotArchived,
     InstitutionAdmin,
     LoggedIn,
     Or,
@@ -2153,6 +2155,8 @@ async def update_class(
             and not update.any_can_publish_assistant
         ):
             update.any_can_share_assistant = False
+        if "archived" in update.model_fields_set and update.archived is not None:
+            update.archived = get_now_fn(request)()
         cls = await models.Class.update(request.state["db"], int(class_id), update)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -4170,6 +4174,7 @@ async def get_thread(
         lecture_video_matches_assistant = _lecture_video_matches_assistant(
             thread, assistant
         )
+        lecture_slide_matches_assistant = True
         lecture_video_tts_available = False
         lecture_video_captions_available = False
         lecture_video_session = None
@@ -4208,6 +4213,9 @@ async def get_thread(
                 request.state["db"], thread.id
             )
             if slide_thread is not None:
+                lecture_slide_matches_assistant = (
+                    lecture_slide_runtime.lecture_slide_matches_assistant(slide_thread)
+                )
                 lecture_slide_deck = _lecture_slide_deck_view(request, slide_thread)
                 interactive_lesson_session = (
                     await lecture_slide_runtime.get_thread_session(
@@ -4245,6 +4253,7 @@ async def get_thread(
             "attachments": all_files,
             "instructions": effective_instructions if can_view_prompt else None,
             "lecture_video_matches_assistant": lecture_video_matches_assistant,
+            "lecture_slide_matches_assistant": lecture_slide_matches_assistant,
             "lecture_video_session": lecture_video_session,
             "lecture_video_tts_available": lecture_video_tts_available,
             "lecture_video_captions_available": lecture_video_captions_available,
@@ -4828,6 +4837,7 @@ async def get_thread(
         lecture_video_matches_assistant = _lecture_video_matches_assistant(
             thread, assistant
         )
+        lecture_slide_matches_assistant = True
         lecture_video_tts_available = False
         lecture_video_captions_available = False
         lecture_video_session = None
@@ -4866,6 +4876,9 @@ async def get_thread(
                 request.state["db"], thread.id
             )
             if slide_thread is not None:
+                lecture_slide_matches_assistant = (
+                    lecture_slide_runtime.lecture_slide_matches_assistant(slide_thread)
+                )
                 lecture_slide_deck = _lecture_slide_deck_view(request, slide_thread)
                 interactive_lesson_session = (
                     await lecture_slide_runtime.get_thread_session(
@@ -4931,6 +4944,7 @@ async def get_thread(
             "instructions": effective_instructions if can_view_prompt else None,
             "lecture_video_id": thread.lecture_video_id,
             "lecture_video_matches_assistant": lecture_video_matches_assistant,
+            "lecture_slide_matches_assistant": lecture_slide_matches_assistant,
             "lecture_video_session": lecture_video_session,
             "lecture_video_tts_available": lecture_video_tts_available,
             "lecture_video_captions_available": lecture_video_captions_available,
@@ -5726,7 +5740,10 @@ async def get_thread_lecture_video_narration(
 
 @v1.post(
     "/class/{class_id}/thread/{thread_id}/lecture-video/control/acquire",
-    dependencies=[Depends(Authz("can_participate", "thread:{thread_id}"))],
+    dependencies=[
+        Depends(Authz("can_participate", "thread:{thread_id}")),
+        Depends(ClassNotArchived()),
+    ],
     response_model=schemas.LectureVideoControlAcquireResponse,
 )
 async def acquire_lecture_video_control(
@@ -5785,7 +5802,10 @@ async def release_lecture_video_control(
 
 @v1.post(
     "/class/{class_id}/thread/{thread_id}/lecture-video/control/renew",
-    dependencies=[Depends(Authz("can_participate", "thread:{thread_id}"))],
+    dependencies=[
+        Depends(Authz("can_participate", "thread:{thread_id}")),
+        Depends(ClassNotArchived()),
+    ],
     response_model=schemas.LectureVideoControlRenewResponse,
 )
 async def renew_lecture_video_control(
@@ -5815,7 +5835,10 @@ async def renew_lecture_video_control(
 
 @v1.post(
     "/class/{class_id}/thread/{thread_id}/lecture-video/interactions",
-    dependencies=[Depends(Authz("can_participate", "thread:{thread_id}"))],
+    dependencies=[
+        Depends(Authz("can_participate", "thread:{thread_id}")),
+        Depends(ClassNotArchived()),
+    ],
     response_model=schemas.LectureVideoInteractionResponse,
 )
 async def post_lecture_video_interaction(
@@ -5842,7 +5865,10 @@ async def post_lecture_video_interaction(
 
 @v1.post(
     "/class/{class_id}/thread/{thread_id}/lecture-slide/control/acquire",
-    dependencies=[Depends(Authz("can_participate", "thread:{thread_id}"))],
+    dependencies=[
+        Depends(Authz("can_participate", "thread:{thread_id}")),
+        Depends(ClassNotArchived()),
+    ],
     response_model=schemas.InteractiveLessonControlAcquireResponse,
 )
 async def acquire_lecture_slide_control(
@@ -5901,7 +5927,10 @@ async def release_lecture_slide_control(
 
 @v1.post(
     "/class/{class_id}/thread/{thread_id}/lecture-slide/control/renew",
-    dependencies=[Depends(Authz("can_participate", "thread:{thread_id}"))],
+    dependencies=[
+        Depends(Authz("can_participate", "thread:{thread_id}")),
+        Depends(ClassNotArchived()),
+    ],
     response_model=schemas.InteractiveLessonControlRenewResponse,
 )
 async def renew_lecture_slide_control(
@@ -5931,7 +5960,10 @@ async def renew_lecture_slide_control(
 
 @v1.post(
     "/class/{class_id}/thread/{thread_id}/lecture-slide/interactions",
-    dependencies=[Depends(Authz("can_participate", "thread:{thread_id}"))],
+    dependencies=[
+        Depends(Authz("can_participate", "thread:{thread_id}")),
+        Depends(ClassNotArchived()),
+    ],
     response_model=schemas.InteractiveLessonInteractionResponse,
 )
 async def post_lecture_slide_interaction(
@@ -6137,7 +6169,8 @@ async def get_thread_recording(
     dependencies=[
         Depends(
             Authz("can_view", "thread:{thread_id}"),
-        )
+        ),
+        Depends(ClassNotArchived()),
     ],
     response_model=schemas.GenericStatus,
 )
@@ -7611,7 +7644,10 @@ async def list_threads(
 
 @v1.post(
     "/class/{class_id}/thread/audio",
-    dependencies=[Depends(Authz("can_create_thread", "class:{class_id}"))],
+    dependencies=[
+        Depends(Authz("can_create_thread", "class:{class_id}")),
+        Depends(ClassNotArchived()),
+    ],
     response_model=schemas.ThreadWithOptionalToken,
 )
 async def create_audio_thread(
@@ -7810,7 +7846,10 @@ async def create_audio_thread(
 
 @v1.post(
     "/class/{class_id}/thread/lecture",
-    dependencies=[Depends(Authz("can_create_thread", "class:{class_id}"))],
+    dependencies=[
+        Depends(Authz("can_create_thread", "class:{class_id}")),
+        Depends(ClassNotArchived()),
+    ],
     response_model=schemas.ThreadWithOptionalToken,
 )
 async def create_lecture_thread(
@@ -8027,7 +8066,10 @@ async def create_lecture_thread(
 
 @v1.post(
     "/class/{class_id}/thread",
-    dependencies=[Depends(Authz("can_create_thread", "class:{class_id}"))],
+    dependencies=[
+        Depends(Authz("can_create_thread", "class:{class_id}")),
+        Depends(ClassNotArchived()),
+    ],
     response_model=schemas.ThreadWithOptionalToken,
 )
 async def create_thread(
@@ -8503,6 +8545,7 @@ async def create_thread(
     "/class/{class_id}/thread/{thread_id}/run",
     dependencies=[
         Depends(Authz("can_participate", "thread:{thread_id}")),
+        Depends(ClassNotArchived()),
     ],
 )
 async def create_run(
@@ -8766,6 +8809,7 @@ async def create_run(
     "/class/{class_id}/thread/{thread_id}",
     dependencies=[
         Depends(Authz("can_participate", "thread:{thread_id}")),
+        Depends(ClassNotArchived()),
     ],
 )
 async def send_message(
@@ -9376,6 +9420,7 @@ async def send_message(
     "/class/{class_id}/thread/{thread_id}/publish",
     dependencies=[
         Depends(Authz("can_publish", "thread:{thread_id}")),
+        Depends(ClassNotArchived()),
     ],
     response_model=schemas.GenericStatus,
 )
@@ -9695,7 +9740,10 @@ async def delete_thread(
 
 @v1.post(
     "/class/{class_id}/file",
-    dependencies=[Depends(Authz("can_upload_class_files", "class:{class_id}"))],
+    dependencies=[
+        Depends(Authz("can_upload_class_files", "class:{class_id}")),
+        Depends(ClassNotArchived()),
+    ],
     response_model=schemas.File,
 )
 async def create_file(
@@ -9723,7 +9771,10 @@ async def create_file(
 
 @v1.post(
     "/class/{class_id}/user/{user_id}/file",
-    dependencies=[Depends(Authz("can_upload_user_files", "class:{class_id}"))],
+    dependencies=[
+        Depends(Authz("can_upload_user_files", "class:{class_id}")),
+        Depends(ClassNotArchived()),
+    ],
     response_model=schemas.File,
 )
 async def create_user_file(
@@ -9761,7 +9812,10 @@ async def create_user_file(
 
 @v1.post(
     "/class/{class_id}/lecture-video",
-    dependencies=[Depends(Authz("admin", "class:{class_id}"))],
+    dependencies=[
+        Depends(Authz("admin", "class:{class_id}")),
+        Depends(ClassNotArchived()),
+    ],
     response_model=schemas.LectureVideoSummary,
 )
 async def create_lecture_video(
@@ -9786,7 +9840,10 @@ async def create_lecture_video(
 
 @v1.post(
     "/class/{class_id}/assistant/{assistant_id}/lecture-video/upload",
-    dependencies=[Depends(Authz("can_edit", "assistant:{assistant_id}"))],
+    dependencies=[
+        Depends(Authz("can_edit", "assistant:{assistant_id}")),
+        Depends(ClassNotArchived()),
+    ],
     response_model=schemas.LectureVideoSummary,
 )
 async def upload_lecture_video_for_assistant(
@@ -9814,7 +9871,10 @@ async def upload_lecture_video_for_assistant(
 
 @v1.post(
     "/class/{class_id}/lecture-slides",
-    dependencies=[Depends(Authz("admin", "class:{class_id}"))],
+    dependencies=[
+        Depends(Authz("admin", "class:{class_id}")),
+        Depends(ClassNotArchived()),
+    ],
     response_model=schemas.LectureSlideSummary,
 )
 async def create_lecture_slide_deck(
@@ -9833,7 +9893,10 @@ async def create_lecture_slide_deck(
 
 @v1.post(
     "/class/{class_id}/assistant/{assistant_id}/lecture-slides/upload",
-    dependencies=[Depends(Authz("can_edit", "assistant:{assistant_id}"))],
+    dependencies=[
+        Depends(Authz("can_edit", "assistant:{assistant_id}")),
+        Depends(ClassNotArchived()),
+    ],
     response_model=schemas.LectureSlideSummary,
 )
 async def upload_lecture_slide_deck_for_assistant(
@@ -9856,7 +9919,10 @@ async def upload_lecture_slide_deck_for_assistant(
 
 @v1.post(
     "/class/{class_id}/lecture-slides/additional-context",
-    dependencies=[Depends(Authz("admin", "class:{class_id}"))],
+    dependencies=[
+        Depends(Authz("admin", "class:{class_id}")),
+        Depends(ClassNotArchived()),
+    ],
     response_model=schemas.LectureSlideAdditionalContextFileSummary,
 )
 async def upload_lecture_slide_additional_context_file(
@@ -9871,7 +9937,10 @@ async def upload_lecture_slide_additional_context_file(
 
 @v1.post(
     "/class/{class_id}/assistant/{assistant_id}/lecture-slides/additional-context/upload",
-    dependencies=[Depends(Authz("can_edit", "assistant:{assistant_id}"))],
+    dependencies=[
+        Depends(Authz("can_edit", "assistant:{assistant_id}")),
+        Depends(ClassNotArchived()),
+    ],
     response_model=schemas.LectureSlideAdditionalContextFileSummary,
 )
 async def upload_lecture_slide_additional_context_file_for_assistant(
@@ -10537,7 +10606,10 @@ async def get_assistant_lecture_slide_config(
 
 @v1.post(
     "/class/{class_id}/assistant/{assistant_id}/lecture-video/retry",
-    dependencies=[Depends(Authz("can_edit", "assistant:{assistant_id}"))],
+    dependencies=[
+        Depends(Authz("can_edit", "assistant:{assistant_id}")),
+        Depends(ClassNotArchived()),
+    ],
     response_model=schemas.LectureVideoSummary,
 )
 async def retry_assistant_lecture_video_processing(
@@ -10642,7 +10714,10 @@ async def retry_assistant_lecture_video_processing(
 
 @v1.post(
     "/class/{class_id}/assistant/{assistant_id}/lecture-slides/retry",
-    dependencies=[Depends(Authz("can_edit", "assistant:{assistant_id}"))],
+    dependencies=[
+        Depends(Authz("can_edit", "assistant:{assistant_id}")),
+        Depends(ClassNotArchived()),
+    ],
     response_model=schemas.LectureSlideSummary,
 )
 async def retry_assistant_lecture_slide_processing(
@@ -10936,7 +11011,10 @@ async def list_assistants(class_id: str, request: StateRequest):
 
 @v1.post(
     "/class/{class_id}/assistant",
-    dependencies=[Depends(Authz("can_create_assistants", "class:{class_id}"))],
+    dependencies=[
+        Depends(Authz("can_create_assistants", "class:{class_id}")),
+        Depends(ClassNotArchived()),
+    ],
     response_model=schemas.Assistant,
 )
 async def create_assistant(
@@ -11640,7 +11718,10 @@ async def create_assistant(
 
 @v1.post(
     "/class/{class_id}/assistant_instructions",
-    dependencies=[Depends(Authz("can_create_assistants", "class:{class_id}"))],
+    dependencies=[
+        Depends(Authz("can_create_assistants", "class:{class_id}")),
+        Depends(ClassNotArchived()),
+    ],
     response_model=schemas.AssistantInstructionsPreviewResponse,
 )
 async def preview_assistant_instructions(
@@ -11745,6 +11826,8 @@ async def copy_assistant(
             status_code=404,
             detail="Target class not found",
         )
+    if target_class.archived is not None:
+        raise HTTPException(status_code=409, detail=ARCHIVED_DETAIL)
 
     if not (source_class.api_key_id or source_class.api_key):
         raise HTTPException(
@@ -11845,6 +11928,8 @@ async def copy_assistant_check(
             status_code=404,
             detail="Target class not found",
         )
+    if target_class.archived is not None:
+        raise HTTPException(status_code=409, detail=ARCHIVED_DETAIL)
 
     if not (target_class.api_key_id or target_class.api_key):
         raise HTTPException(
@@ -11888,6 +11973,7 @@ async def copy_assistant_check(
             Authz("can_edit", "assistant:{assistant_id}"),
         ),
         Depends(Authz("can_share_assistants", "class:{class_id}")),
+        Depends(ClassNotArchived()),
     ],
     response_model=schemas.GenericStatus,
 )
@@ -12047,7 +12133,10 @@ async def update_assistant_share_name(
 
 @v1.put(
     "/class/{class_id}/assistant/{assistant_id}",
-    dependencies=[Depends(Authz("can_edit", "assistant:{assistant_id}"))],
+    dependencies=[
+        Depends(Authz("can_edit", "assistant:{assistant_id}")),
+        Depends(ClassNotArchived()),
+    ],
     response_model=schemas.Assistant,
 )
 async def update_assistant(
@@ -13903,7 +13992,10 @@ async def get_assistant_mcp_servers(
 
 @v1.post(
     "/class/{class_id}/assistant/{assistant_id}/publish",
-    dependencies=[Depends(Authz("can_publish", "assistant:{assistant_id}"))],
+    dependencies=[
+        Depends(Authz("can_publish", "assistant:{assistant_id}")),
+        Depends(ClassNotArchived()),
+    ],
     response_model=schemas.GenericStatus,
 )
 async def publish_assistant(class_id: str, assistant_id: str, request: StateRequest):
@@ -13920,7 +14012,10 @@ async def publish_assistant(class_id: str, assistant_id: str, request: StateRequ
 
 @v1.delete(
     "/class/{class_id}/assistant/{assistant_id}/publish",
-    dependencies=[Depends(Authz("can_publish", "assistant:{assistant_id}"))],
+    dependencies=[
+        Depends(Authz("can_publish", "assistant:{assistant_id}")),
+        Depends(ClassNotArchived()),
+    ],
     response_model=schemas.GenericStatus,
 )
 async def unpublish_assistant(class_id: str, assistant_id: str, request: StateRequest):
@@ -13937,7 +14032,10 @@ async def unpublish_assistant(class_id: str, assistant_id: str, request: StateRe
 
 @v1.post(
     "/class/{class_id}/assistant/{assistant_id}/lock",
-    dependencies=[Depends(Authz("admin", "class:{class_id}"))],
+    dependencies=[
+        Depends(Authz("admin", "class:{class_id}")),
+        Depends(ClassNotArchived()),
+    ],
     response_model=schemas.GenericStatus,
 )
 async def lock_assistant(class_id: str, assistant_id: str, request: StateRequest):
@@ -13951,7 +14049,10 @@ async def lock_assistant(class_id: str, assistant_id: str, request: StateRequest
 
 @v1.delete(
     "/class/{class_id}/assistant/{assistant_id}/lock",
-    dependencies=[Depends(Authz("admin", "class:{class_id}"))],
+    dependencies=[
+        Depends(Authz("admin", "class:{class_id}")),
+        Depends(ClassNotArchived()),
+    ],
     response_model=schemas.GenericStatus,
 )
 async def unlock_assistant(class_id: str, assistant_id: str, request: StateRequest):

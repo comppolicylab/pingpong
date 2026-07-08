@@ -5,6 +5,7 @@
 	import PageHeader, { mainTextClass } from './PageHeader.svelte';
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
+	import DropdownBadge from '$lib/components/DropdownBadge.svelte';
 
 	export let classes: api.Class[];
 	export let isOnClassPage: boolean;
@@ -71,7 +72,14 @@
 					{#each filteredClasses as cls (cls.id)}
 						<DropdownItem
 							class="flex w-full items-center gap-4 py-3 text-base leading-6 hover:bg-blue-light-50"
-							onclick={() => goToClass(cls.id)}>{cls.name}</DropdownItem
+							onclick={() => goToClass(cls.id)}
+							><span class="min-w-0 flex-1 truncate">{cls.name}</span>
+							{#if cls.archived}
+								<DropdownBadge
+									extraClasses="border-slate-300 from-slate-50 to-slate-100 text-slate-700"
+									><span slot="name">Archived</span></DropdownBadge
+								>
+							{/if}</DropdownItem
 						>
 					{/each}
 					{#if filteredClasses.length === 0}

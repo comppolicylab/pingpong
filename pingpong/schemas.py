@@ -2926,6 +2926,7 @@ class Class(BaseModel):
     created: datetime
     updated: datetime | None
     private: bool | None = None
+    archived: datetime | None = None
     lms_user: LMSUser | None = None
     lms_type: LMSType | None = None
     lms_tenant: str | None = None
@@ -2995,6 +2996,7 @@ class UpdateClass(BaseModel):
     name: str | None = Field(None, min_length=3, max_length=100)
     term: str | None = Field(None, min_length=1, max_length=100)
     private: bool | None = None
+    archived: datetime | None = None
     any_can_create_assistant: bool | None = None
     any_can_publish_assistant: bool | None = None
     any_can_share_assistant: bool | None = None
@@ -3609,6 +3611,7 @@ class ThreadWithMeta(BaseModel):
     instructions: str | None
     lecture_video_id: int | None = None
     lecture_video_matches_assistant: bool | None = None
+    lecture_slide_matches_assistant: bool | None = None
     lecture_video_session: LectureVideoSession | None = None
     lecture_video_tts_available: bool = False
     lecture_video_captions_available: bool = False

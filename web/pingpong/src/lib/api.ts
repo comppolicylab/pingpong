@@ -1132,6 +1132,7 @@ export type Class = {
 	created: string;
 	updated: string | null;
 	private: boolean | null;
+	archived: string | null;
 	lms_user: AppUser | null;
 	lms_type: LMSType | null;
 	lms_tenant: string | null;
@@ -1216,6 +1217,7 @@ export type UpdateClassRequest = {
 	name?: string;
 	term?: string;
 	private?: boolean;
+	archived?: string | null;
 	any_can_create_assistant?: boolean;
 	any_can_publish_assistant?: boolean;
 	any_can_share_assistant?: boolean;
@@ -4104,6 +4106,7 @@ export type ThreadWithMeta = {
 	instructions: string | null;
 	lecture_video_id?: number | null;
 	lecture_video_matches_assistant?: boolean | null;
+	lecture_slide_matches_assistant?: boolean | null;
 	lecture_video_session?: LectureVideoSession | null;
 	lecture_video_tts_available?: boolean;
 	lecture_video_captions_available?: boolean;

@@ -57,6 +57,7 @@
 		RectangleListOutline,
 		EnvelopeOpenSolid,
 		FileCopyOutline,
+		ArchiveOutline,
 		ChevronSortOutline,
 		QuestionCircleOutline,
 		LinkBreakOutline,
@@ -202,6 +203,7 @@
 	};
 	let deleteModal = false;
 	let cloneModal = false;
+	let archiveModal = false;
 	let exportThreadsModal = false;
 	let exportThreadsRange: 'all' | 'filter' = 'all';
 	let exportThreadsStartDate = '';
@@ -216,6 +218,7 @@
 	let anyCanShareAssistant = data?.class.any_can_share_assistant || false;
 	let presignedUrlExpiration = data?.class.download_link_expiration || null;
 	let makePrivate = data?.class.private || false;
+	$: groupArchived = !!data?.class.archived;
 	let assistantPermissions = formatAssistantPermissions(data?.class);
 	const asstPermOptions = [
 		{ value: 'create:0,publish:0,upload:0', name: 'Do not allow members to create' },
@@ -578,6 +581,21 @@
 			$updatingClass = false;
 			happyToast('Saved group info');
 		}
+	};
+
+	const setArchiveState = async (archived: boolean) => {
+		$updatingClass = true;
+		const result = await api.updateClass(fetch, data.class.id, {
+			archived: archived ? new Date().toISOString() : null
+		});
+		if (api.isErrorResponse(result)) {
+			sadToast(result.detail || `Failed to ${archived ? 'archive' : 'unarchive'} group`);
+		} else {
+			await invalidateAll();
+			archiveModal = false;
+			happyToast(archived ? 'Group archived' : 'Group unarchived');
+		}
+		$updatingClass = false;
 	};
 
 	/**
@@ -1409,6 +1427,17 @@
 					<div>Clone group</div>
 				</DropdownItem>
 
+				{#if canEditClassInfo}
+					<DropdownItem
+						ontouchstart={() => (archiveModal = true)}
+						onclick={() => (archiveModal = true)}
+						class="flex flex-row items-center gap-2 tracking-wide text-blue-dark-40"
+					>
+						<ArchiveOutline />
+						<div>{groupArchived ? 'Unarchive group' : 'Archive group'}</div>
+					</DropdownItem>
+				{/if}
+
 				<DropdownItem
 					ontouchstart={() => (deleteModal = true)}
 					onclick={() => (deleteModal = true)}
@@ -1592,6 +1621,36 @@
 					on:confirm={deleteClass}
 					on:cancel={() => (deleteModal = false)}
 				/>
+			</Modal>
+			<Modal bind:open={archiveModal} size="xs" autoclose={!groupArchived}>
+				{#if groupArchived}
+					<div class="px-2 text-center">
+						<ArchiveOutline class="mx-auto mb-4 h-12 w-12 text-slate-500" />
+						<h3 class="mb-4 text-xl font-bold text-gray-900">Unarchive this group?</h3>
+						<p class="mb-6 text-sm text-gray-700">
+							Members will be able to create threads, continue conversations, upload content, and
+							edit assistants again.
+						</p>
+						<div class="flex justify-center gap-3">
+							<Button pill color="alternative" onclick={() => (archiveModal = false)}>Cancel</Button
+							>
+							<Button pill color="blue" onclick={() => setArchiveState(false)}
+								>Unarchive group</Button
+							>
+						</div>
+					</div>
+				{:else}
+					<ConfirmationModal
+						warningTitle={`Archive ${data?.class.name || 'this group'}?`}
+						warningDescription="Members can still view threads, messages, and assistants, but no one can create new content or edit assistants until the group is unarchived."
+						warningMessage="Membership, settings, cloning, copying assistants out, exports, and cleanup actions will remain available."
+						cancelButtonText="Cancel"
+						confirmText="archive"
+						confirmButtonText="Archive group"
+						on:confirm={() => setArchiveState(true)}
+						on:cancel={() => (archiveModal = false)}
+					/>
+				{/if}
 			</Modal>
 			<Modal bind:open={cloneModal} size="md">
 				<CloneClassModal
@@ -1813,6 +1872,28 @@
 									class="font-semibold">This setting cannot be changed.</span
 								>
 							</span>
+						</div>
+					{/if}
+					{#if groupArchived}
+						<div
+							class="col-span-2 flex items-center justify-between gap-3 rounded-lg bg-slate-800 px-4 py-3 text-sm text-white"
+						>
+							<div class="flex items-center">
+								<ArchiveOutline class="mr-3 h-8 w-8 shrink-0" />
+								<span>
+									This group is archived. Members can view existing content, but new content and
+									assistant edits are frozen.
+								</span>
+							</div>
+							{#if canEditClassInfo}
+								<Button
+									pill
+									size="xs"
+									color="light"
+									class="shrink-0"
+									onclick={() => setArchiveState(false)}>Unarchive</Button
+								>
+							{/if}
 						</div>
 					{/if}
 					<PermissionsTable {permissions} />

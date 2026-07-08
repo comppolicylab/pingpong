@@ -29,6 +29,7 @@
 	} from '$lib/api';
 	import { hasVisiblePostAnswerFeedback } from '$lib/lectureVideoFeedback';
 	import { mergeQuestionOptions } from '$lib/utils/lecture-video';
+	import { ArchiveOutline, InfoCircleOutline } from 'flowbite-svelte-icons';
 	import { LECTURE_NARRATION_VOLUME_SCALE } from './audio-levels';
 	import LectureVideoPlayer from './LectureVideoPlayer.svelte';
 	import LectureVideoQuestionGallery from './LectureVideoQuestionGallery.svelte';
@@ -70,11 +71,15 @@
 		captionsSrc = null,
 		title = 'Lecture Video',
 		canParticipate = true,
+		groupArchived = false,
+		lessonUpdated = false,
 		showRefreshAction = true,
+		showParticipantNotice = true,
 		initialSession = null,
 		chatAvailable = false,
 		playerVolume = $bindable(1),
 		chat = undefined,
+		statusAction = undefined,
 		lessonMode = 'lecture_video',
 		mediaKind = 'video',
 		durationMsOverride = null,
@@ -87,11 +92,15 @@
 		captionsSrc?: string | null;
 		title?: string;
 		canParticipate?: boolean;
+		groupArchived?: boolean;
+		lessonUpdated?: boolean;
 		showRefreshAction?: boolean;
+		showParticipantNotice?: boolean;
 		initialSession?: LessonSession | null;
 		chatAvailable?: boolean;
 		playerVolume?: number;
 		chat?: Snippet<[boolean]>;
+		statusAction?: Snippet;
 		lessonMode?: LessonMode;
 		mediaKind?: 'video' | 'audio';
 		durationMsOverride?: number | null;
@@ -2132,12 +2141,47 @@
 {:else}
 	<div class="h-full w-full overflow-hidden">
 		<div
-			class="mx-auto flex h-full w-full max-w-screen-2xl flex-col gap-6 px-4 py-4 lg:px-6 xl:grid xl:grid-cols-5 xl:items-stretch xl:justify-center xl:gap-8 xl:py-6"
+			class={`mx-auto flex h-full w-full max-w-screen-2xl flex-col gap-6 px-4 py-4 lg:px-6 xl:grid xl:grid-cols-5 xl:items-stretch xl:justify-center xl:gap-8 xl:py-6 ${groupArchived || lessonUpdated ? 'xl:grid-rows-[auto_minmax(0,1fr)]' : ''}`}
 		>
+			{#if groupArchived || lessonUpdated}
+				<div
+					class="flex flex-row justify-between items-center shrink-0 rounded-2xl border border-slate-200 bg-slate-50 p-4 text-slate-800 xl:col-span-5"
+				>
+					<div class="flex gap-3">
+						<div
+							class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white text-slate-600"
+						>
+							{#if lessonUpdated}
+								<InfoCircleOutline class="h-5 w-5" />
+							{:else}
+								<ArchiveOutline class="h-5 w-5" />
+							{/if}
+						</div>
+						<div class="min-w-0">
+							<div class="text-sm font-semibold text-slate-900">
+								{lessonUpdated ? 'This lesson was updated' : 'Archived lesson'}
+							</div>
+							<div class="mt-1 text-sm leading-6 text-slate-700">
+								{#if lessonUpdated}
+									This older lesson session is now view-only. Start a new lesson to continue with
+									the latest version.
+								{:else}
+									This group has been archived, so this lesson is view-only.
+								{/if}
+							</div>
+						</div>
+					</div>
+					{#if statusAction}
+						<div class="shrink-0">
+							{@render statusAction()}
+						</div>
+					{/if}
+				</div>
+			{/if}
 			<div
 				class="col-span-3 flex max-h-[40%] min-h-0 min-w-0 shrink-0 flex-col gap-4 xl:h-full xl:max-h-none xl:shrink xl:[container-type:size]"
 			>
-				{#if !canParticipate}
+				{#if !canParticipate && showParticipantNotice}
 					<div
 						class="shrink-0 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700"
 					>
@@ -2152,50 +2196,62 @@
 						initialInteractions={historyInteractions}
 					/>
 				{:else if !isCompleted || canParticipate}
-					<div
-						class="mx-auto min-h-0 w-full max-w-[calc((40dvh_-_4rem)_*_var(--lecture-media-aspect-ratio)_+_var(--lecture-player-frame-chrome))] shrink-0 overflow-hidden rounded-3xl border border-slate-200 bg-white p-3 shadow-xl xl:max-w-[calc((50cqh_-_var(--lecture-player-frame-chrome))_*_var(--lecture-media-aspect-ratio)_+_var(--lecture-player-frame-chrome))]"
-						style={playerFrameStyle}
-					>
-						<LectureVideoPlayer
-							src={lectureVideoSrc}
-							{captionsSrc}
-							{mediaKind}
-							{durationMsOverride}
-							{visual}
-							bind:mediaAspectRatio={playerMediaAspectRatio}
-							displayTitle={sessionState === 'awaiting_answer'
-								? 'Answer the comprehension check to continue'
-								: title}
-							startOffsetMs={initialStartOffsetMs}
-							{questionMarkers}
-							{subtitleText}
-							disabled={playerInteractionDisabled}
-							{activeQuestionIds}
-							{questionPresentationVersion}
-							{furthestOffsetMs}
-							allowFullSeek={timelineBypassEnabled ||
-								(isCompleted && canParticipate && completedPlaybackReachedEnd)}
-							maxSeekOffsetMs={questionReviewSeekLimitMs}
-							manualPlaybackPrompt={playbackRequiresManualStart}
-							bind:videoElement
-							bind:currentTimeMs
-							bind:paused
-							bind:endedPlayback={videoAtEnd}
-							bind:effectiveVolume={playerVolume}
-							ontimeupdate={handleTimeUpdate}
-							onseek={handleSeek}
-							onended={handleVideoEnded}
-							oncanplay={handleCanPlay}
-							onerror={() =>
-								failClosedControl(
-									'We could not load this video lesson. Refresh the lesson and try again.'
-								)}
-							onplay={handlePlay}
-							onpause={handlePause}
-							onquestionclick={handleQuestionClick}
-							onmanualplayrequest={handleManualPlaybackRequest}
-						/>
-					</div>
+					{#if lessonUpdated}
+						<div
+							class="mx-auto flex min-h-0 w-full max-w-[calc((40dvh_-_4rem)_*_var(--lecture-media-aspect-ratio)_+_var(--lecture-player-frame-chrome))] shrink-0 items-center justify-center overflow-hidden rounded-3xl border border-slate-200 bg-slate-50 p-6 text-center shadow-sm xl:max-w-[calc((50cqh_-_var(--lecture-player-frame-chrome))_*_var(--lecture-media-aspect-ratio)_+_var(--lecture-player-frame-chrome))]"
+							style={playerFrameStyle}
+						>
+							<div class="text-sm leading-6 text-slate-600">
+								Playback isn't available for this older lesson. Start a new lesson to continue with
+								the latest version.
+							</div>
+						</div>
+					{:else}
+						<div
+							class="mx-auto min-h-0 w-full max-w-[calc((40dvh_-_4rem)_*_var(--lecture-media-aspect-ratio)_+_var(--lecture-player-frame-chrome))] shrink-0 overflow-hidden rounded-3xl border border-slate-200 bg-white p-3 shadow-xl xl:max-w-[calc((50cqh_-_var(--lecture-player-frame-chrome))_*_var(--lecture-media-aspect-ratio)_+_var(--lecture-player-frame-chrome))]"
+							style={playerFrameStyle}
+						>
+							<LectureVideoPlayer
+								src={lectureVideoSrc}
+								{captionsSrc}
+								{mediaKind}
+								{durationMsOverride}
+								{visual}
+								bind:mediaAspectRatio={playerMediaAspectRatio}
+								displayTitle={sessionState === 'awaiting_answer'
+									? 'Answer the comprehension check to continue'
+									: title}
+								startOffsetMs={initialStartOffsetMs}
+								{questionMarkers}
+								{subtitleText}
+								disabled={playerInteractionDisabled}
+								{activeQuestionIds}
+								{questionPresentationVersion}
+								{furthestOffsetMs}
+								allowFullSeek={timelineBypassEnabled ||
+									(isCompleted && canParticipate && completedPlaybackReachedEnd)}
+								maxSeekOffsetMs={questionReviewSeekLimitMs}
+								manualPlaybackPrompt={playbackRequiresManualStart}
+								bind:videoElement
+								bind:currentTimeMs
+								bind:paused
+								bind:endedPlayback={videoAtEnd}
+								bind:effectiveVolume={playerVolume}
+								ontimeupdate={handleTimeUpdate}
+								onseek={handleSeek}
+								onended={handleVideoEnded}
+								oncanplay={handleCanPlay}
+								onerror={() =>
+									failClosedControl(
+										'We could not load this video lesson. Refresh the lesson and try again.'
+									)}
+								onplay={handlePlay}
+								onpause={handlePause}
+								onquestionclick={handleQuestionClick}
+								onmanualplayrequest={handleManualPlaybackRequest}
+							/>
+						</div>
+					{/if}
 					{#if isDesktopLayout}
 						<div class="min-h-0 flex-1">
 							<LectureVideoQuestionGallery
