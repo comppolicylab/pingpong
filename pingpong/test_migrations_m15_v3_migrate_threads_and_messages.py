@@ -1454,6 +1454,94 @@ async def test_rerun_does_not_duplicate_tool_calls(
     assert len(fs_results) == 1
 
 
+async def test_rerun_moves_tool_call_from_wrong_live_run_without_duplicate(
+    db: DbDriver, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    messages = [
+        _generate_openai_message("msg_user_1", role="user", created_at=100, user_id=7),
+        _generate_openai_message(
+            "msg_asst_1", role="assistant", created_at=110, run_id="run_1"
+        ),
+        _generate_openai_message("msg_user_2", role="user", created_at=200, user_id=7),
+        _generate_openai_message(
+            "msg_asst_2", role="assistant", created_at=210, run_id="run_2"
+        ),
+    ]
+    runs = {
+        "run_1": _generate_openai_run("run_1", completed_at=120),
+        "run_2": _generate_openai_run("run_2", completed_at=220),
+    }
+    client = FakeOpenAIClient(
+        messages,
+        runs,
+        steps_by_run={
+            "run_1": [
+                _tool_calls_step(
+                    "step-1", [_ci_tool_call("tc-1", "print(1)", [_ci_logs("1\n")])]
+                )
+            ],
+            "run_2": [],
+        },
+    )
+    _patch_client(monkeypatch, client)
+
+    async with db.async_session() as session:
+        thread = await _generate_local_thread(session)
+        wrong_live_run = models.Run(
+            run_id="run_2",
+            thread_id=thread.id,
+            assistant_id=1,
+            status=schemas.RunStatus.COMPLETED,
+        )
+        session.add(wrong_live_run)
+        await session.flush()
+        session.add_all(
+            [
+                models.Message(
+                    message_id="msg_user_2",
+                    thread_id=thread.id,
+                    run_id=wrong_live_run.id,
+                    role=schemas.MessageRole.USER,
+                    message_status=schemas.MessageStatus.COMPLETED,
+                    output_index=0,
+                ),
+                models.Message(
+                    message_id="msg_asst_2",
+                    thread_id=thread.id,
+                    run_id=wrong_live_run.id,
+                    role=schemas.MessageRole.ASSISTANT,
+                    message_status=schemas.MessageStatus.COMPLETED,
+                    output_index=1,
+                ),
+                models.ToolCall(
+                    tool_call_id="tc-1",
+                    thread_id=thread.id,
+                    run_id=wrong_live_run.id,
+                    type=schemas.ToolCallType.CODE_INTERPRETER,
+                    status=schemas.ToolCallStatus.COMPLETED,
+                    output_index=99,
+                ),
+            ]
+        )
+        await session.commit()
+
+    async with db.async_session() as session:
+        await migration.migrate_threads_and_messages_to_v3(session)
+
+    async with db.async_session() as session:
+        runs_local = await _all_runs(session, 1)
+        tool_calls = await _all_tool_calls(session, 1)
+        ci_outputs = list(
+            (await session.execute(select(models.CodeInterpreterCallOutput))).scalars()
+        )
+
+    run_1 = next(run for run in runs_local if run.run_id == "run_1")
+    assert [tc.tool_call_id for tc in tool_calls] == ["tc-1"]
+    assert tool_calls[0].run_id == run_1.id
+    assert tool_calls[0].output_index == 1
+    assert len(ci_outputs) == 1
+
+
 async def test_stale_local_tool_call_is_deleted(
     db: DbDriver, monkeypatch: pytest.MonkeyPatch
 ) -> None:

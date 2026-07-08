@@ -842,12 +842,34 @@ async def _upsert_tool_call(
         **extra,
     }
 
-    existing = await session.scalar(
-        select(models.ToolCall).where(
-            models.ToolCall.run_id == local_run.id,
-            models.ToolCall.tool_call_id == tool_call.id,
-        )
+    existing_tool_calls = list(
+        (
+            await session.execute(
+                select(models.ToolCall).where(
+                    models.ToolCall.thread_id == local_run.thread_id,
+                    models.ToolCall.tool_call_id == tool_call.id,
+                )
+            )
+        ).scalars()
     )
+    existing = next(
+        (
+            existing_tool_call
+            for existing_tool_call in existing_tool_calls
+            if existing_tool_call.run_id == local_run.id
+        ),
+        existing_tool_calls[0] if existing_tool_calls else None,
+    )
+    duplicate_ids = [
+        existing_tool_call.id
+        for existing_tool_call in existing_tool_calls
+        if existing is not None and existing_tool_call.id != existing.id
+    ]
+    if duplicate_ids:
+        await session.execute(
+            delete(models.ToolCall).where(models.ToolCall.id.in_(duplicate_ids))
+        )
+
     if existing is None:
         return await models.ToolCall.create(session, values)
 
