@@ -1,3 +1,4 @@
+import base64
 import importlib
 from types import SimpleNamespace
 from typing import cast
@@ -1487,6 +1488,107 @@ async def test_synthesize_elevenlabs_speech_omits_request_options_without_timeou
     }
     assert content_type == "audio/ogg"
     assert audio == b"ogg-audio"
+
+
+async def test_synthesize_elevenlabs_speech_with_timings_uses_normalized_alignment(
+    monkeypatch,
+):
+    seen: dict[str, object] = {}
+
+    async def fake_convert_with_timestamps(
+        *,
+        voice_id,
+        text,
+        model_id,
+        output_format,
+        voice_settings,
+        request_options=None,
+    ):
+        seen["voice_id"] = voice_id
+        seen["text"] = text
+        seen["model_id"] = model_id
+        seen["output_format"] = output_format
+        seen["voice_settings"] = voice_settings
+        seen["request_options"] = request_options
+        return SimpleNamespace(
+            audio_base_64=base64.b64encode(b"ogg-audio").decode("ascii"),
+            alignment=SimpleNamespace(
+                characters=list("ignored"),
+                character_start_times_seconds=[0, 1, 2, 3, 4, 5, 6],
+                character_end_times_seconds=[1, 2, 3, 4, 5, 6, 7],
+            ),
+            normalized_alignment=SimpleNamespace(
+                characters=list("Hello world"),
+                character_start_times_seconds=[
+                    0.0,
+                    0.02,
+                    0.04,
+                    0.06,
+                    0.08,
+                    0.10,
+                    0.20,
+                    0.22,
+                    0.24,
+                    0.26,
+                    0.28,
+                ],
+                character_end_times_seconds=[
+                    0.02,
+                    0.04,
+                    0.06,
+                    0.08,
+                    0.10,
+                    0.20,
+                    0.22,
+                    0.24,
+                    0.26,
+                    0.28,
+                    0.30,
+                ],
+            ),
+        )
+
+    class FakeClient:
+        def __init__(self, *, api_key):
+            seen["api_key"] = api_key
+            self.text_to_speech = SimpleNamespace(
+                convert_with_timestamps=fake_convert_with_timestamps
+            )
+
+    monkeypatch.setattr(elevenlabs_module, "AsyncElevenLabs", FakeClient)
+
+    result = await elevenlabs_module.synthesize_elevenlabs_speech_with_timings(
+        api_key="elevenlabs-key",
+        voice_id="voice-123",
+        text="Hello world",
+        timeout_seconds=30,
+    )
+
+    assert seen == {
+        "api_key": "elevenlabs-key",
+        "voice_id": "voice-123",
+        "text": "Hello world",
+        "model_id": "eleven_v3",
+        "output_format": "opus_48000_32",
+        "voice_settings": elevenlabs_module.VoiceSettings(
+            stability=0.5,
+            use_speaker_boost=True,
+            similarity_boost=0.8,
+            style=0.0,
+            speed=1.0,
+        ),
+        "request_options": {"timeout_in_seconds": 30},
+    }
+    assert result.content_type == "audio/ogg"
+    assert result.audio == b"ogg-audio"
+    assert result.words == (
+        elevenlabs_module.ElevenLabsSpeechWordTiming(
+            word="Hello", start_ms=0, end_ms=100
+        ),
+        elevenlabs_module.ElevenLabsSpeechWordTiming(
+            word="world", start_ms=200, end_ms=300
+        ),
+    )
 
 
 async def test_synthesize_elevenlabs_voice_sample_maps_empty_api_key_to_unavailable():

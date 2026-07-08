@@ -1,6 +1,9 @@
 import logging
 import ssl
+from base64 import b64decode
+from binascii import Error as BinasciiError
 from collections.abc import AsyncGenerator, Mapping
+from dataclasses import dataclass
 from html import unescape
 import re
 from types import MappingProxyType
@@ -55,6 +58,20 @@ ELEVENLABS_STREAMING_TTS_CONNECT_TIMEOUT = aiohttp.ClientWSTimeout(
     ws_receive=30.0,
     ws_close=10.0,
 )
+
+
+@dataclass(frozen=True)
+class ElevenLabsSpeechWordTiming:
+    word: str
+    start_ms: int
+    end_ms: int
+
+
+@dataclass(frozen=True)
+class ElevenLabsSpeechWithTimings:
+    content_type: str
+    audio: bytes
+    words: tuple[ElevenLabsSpeechWordTiming, ...]
 
 
 def get_elevenlabs_client(api_key: str) -> AsyncElevenLabs:
@@ -252,6 +269,203 @@ async def synthesize_elevenlabs_speech(
         )
 
     return (ELEVENLABS_VOICE_VALIDATION_CONTENT_TYPE, audio)
+
+
+async def synthesize_elevenlabs_speech_with_timings(
+    api_key: str,
+    voice_id: str,
+    text: str,
+    *,
+    voice_settings: Mapping[str, Any] | None = None,
+    timeout_seconds: int | None = None,
+) -> ElevenLabsSpeechWithTimings:
+    safe_voice_id = sanitize_for_log(voice_id)
+    try:
+        client = get_elevenlabs_client(api_key)
+        request_options = (
+            RequestOptions(timeout_in_seconds=timeout_seconds)
+            if timeout_seconds is not None
+            else None
+        )
+        response = await client.text_to_speech.convert_with_timestamps(
+            voice_id=voice_id,
+            text=text,
+            model_id=ELEVENLABS_TTS_MODEL,
+            output_format=ELEVENLABS_VOICE_VALIDATION_OUTPUT_FORMAT,
+            voice_settings=VoiceSettings(
+                **(
+                    ELEVENLABS_TTS_VOICE_SETTINGS
+                    if voice_settings is None
+                    else voice_settings
+                )
+            ),
+            request_options=request_options,
+        )
+    except ElevenLabsUnauthorizedError as exc:
+        logger.warning(
+            "ElevenLabs speech synthesis with timings failed due to credential error. voice_id=%s",
+            safe_voice_id,
+            exc_info=exc,
+        )
+        raise ClassCredentialValidationUnavailableError(
+            provider=schemas.ClassCredentialProvider.ELEVENLABS,
+            message="Unable to generate the ElevenLabs audio right now.",
+        ) from exc
+    except (httpx.TimeoutException, TimeoutError) as exc:
+        logger.warning(
+            "Timed out generating ElevenLabs audio with timings for voice_id=%s.",
+            safe_voice_id,
+            exc_info=exc,
+        )
+        raise ClassCredentialValidationUnavailableError(
+            provider=schemas.ClassCredentialProvider.ELEVENLABS,
+            message="Unable to generate the ElevenLabs audio right now.",
+        ) from exc
+    except ssl.SSLError as exc:
+        logger.warning(
+            "SSL error generating ElevenLabs audio with timings for voice_id=%s.",
+            safe_voice_id,
+            exc_info=exc,
+        )
+        raise ClassCredentialValidationSSLError(
+            provider=schemas.ClassCredentialProvider.ELEVENLABS,
+            message="Unable to generate the ElevenLabs audio due to an SSL error.",
+        ) from exc
+    except ElevenLabsApiError as exc:
+        if _is_invalid_elevenlabs_voice_error(exc):
+            logger.info(
+                "ElevenLabs speech synthesis with timings rejected voice_id=%s",
+                safe_voice_id,
+                exc_info=exc,
+            )
+            raise ClassCredentialVoiceValidationError(
+                "Invalid voice ID provided. Please choose a different voice."
+            ) from exc
+        logger.warning(
+            "Failed to generate ElevenLabs audio with timings for voice_id=%s due to provider API error.",
+            safe_voice_id,
+            exc_info=exc,
+        )
+        raise ClassCredentialValidationUnavailableError(
+            provider=schemas.ClassCredentialProvider.ELEVENLABS,
+            message="Unable to generate the ElevenLabs audio right now.",
+        ) from exc
+    except ValueError as exc:
+        logger.warning(
+            "ElevenLabs speech synthesis with timings failed due to credential error. voice_id=%s",
+            safe_voice_id,
+            exc_info=exc,
+        )
+        raise ClassCredentialValidationUnavailableError(
+            provider=schemas.ClassCredentialProvider.ELEVENLABS,
+            message="Unable to generate the ElevenLabs audio right now.",
+        ) from exc
+    except Exception as exc:
+        logger.warning(
+            "Failed to generate ElevenLabs audio with timings for voice_id=%s due to provider error.",
+            safe_voice_id,
+            exc_info=exc,
+        )
+        raise ClassCredentialValidationUnavailableError(
+            provider=schemas.ClassCredentialProvider.ELEVENLABS,
+            message="Unable to generate the ElevenLabs audio right now.",
+        ) from exc
+
+    audio_base64 = getattr(response, "audio_base_64", None)
+    if not audio_base64:
+        logger.warning(
+            "ElevenLabs speech synthesis with timings returned empty audio. voice_id=%s",
+            safe_voice_id,
+        )
+        raise ClassCredentialValidationUnavailableError(
+            provider=schemas.ClassCredentialProvider.ELEVENLABS,
+            message="Unable to generate the ElevenLabs audio right now.",
+        )
+    try:
+        audio = b64decode(audio_base64, validate=True)
+    except (BinasciiError, ValueError) as exc:
+        logger.warning(
+            "ElevenLabs speech synthesis with timings returned invalid audio. voice_id=%s",
+            safe_voice_id,
+            exc_info=exc,
+        )
+        raise ClassCredentialValidationUnavailableError(
+            provider=schemas.ClassCredentialProvider.ELEVENLABS,
+            message="Unable to generate the ElevenLabs audio right now.",
+        ) from exc
+    if not audio:
+        logger.warning(
+            "ElevenLabs speech synthesis with timings returned empty decoded audio. voice_id=%s",
+            safe_voice_id,
+        )
+        raise ClassCredentialValidationUnavailableError(
+            provider=schemas.ClassCredentialProvider.ELEVENLABS,
+            message="Unable to generate the ElevenLabs audio right now.",
+        )
+
+    alignment = response.normalized_alignment or response.alignment
+    words = _timing_words_from_alignment(alignment)
+    if text.strip() and not words:
+        logger.warning(
+            "ElevenLabs speech synthesis with timings returned no alignment words. voice_id=%s",
+            safe_voice_id,
+        )
+        raise ClassCredentialValidationUnavailableError(
+            provider=schemas.ClassCredentialProvider.ELEVENLABS,
+            message="Unable to generate the ElevenLabs audio right now.",
+        )
+    return ElevenLabsSpeechWithTimings(
+        content_type=ELEVENLABS_VOICE_VALIDATION_CONTENT_TYPE,
+        audio=audio,
+        words=tuple(words),
+    )
+
+
+def _timing_words_from_alignment(
+    alignment: Any | None,
+) -> list[ElevenLabsSpeechWordTiming]:
+    if alignment is None:
+        return []
+
+    characters = list(getattr(alignment, "characters", []) or [])
+    starts = list(getattr(alignment, "character_start_times_seconds", []) or [])
+    ends = list(getattr(alignment, "character_end_times_seconds", []) or [])
+    count = min(len(characters), len(starts), len(ends))
+    words: list[ElevenLabsSpeechWordTiming] = []
+    current_chars: list[str] = []
+    current_start: float | None = None
+    current_end: float | None = None
+
+    def flush_word() -> None:
+        nonlocal current_chars, current_start, current_end
+        word = "".join(current_chars).strip()
+        if word and current_start is not None and current_end is not None:
+            words.append(
+                ElevenLabsSpeechWordTiming(
+                    word=word,
+                    start_ms=_seconds_to_ms(current_start),
+                    end_ms=_seconds_to_ms(current_end),
+                )
+            )
+        current_chars = []
+        current_start = None
+        current_end = None
+
+    for index in range(count):
+        character = str(characters[index])
+        if character.isspace():
+            flush_word()
+            continue
+        if current_start is None:
+            current_start = float(starts[index] or 0)
+        current_chars.append(character)
+        current_end = float(ends[index] or starts[index] or 0)
+    flush_word()
+    return words
+
+
+def _seconds_to_ms(value: float) -> int:
+    return int(round(value * 1000))
 
 
 async def validate_elevenlabs_api_key(api_key: str) -> bool:
