@@ -39,9 +39,7 @@ async def test_update_class_archives_with_server_timestamp_and_unarchives(
             archived = archived.replace(tzinfo=timezone.utc)
         else:
             archived = archived.astimezone(timezone.utc)
-        assert archived == datetime(
-            2024, 1, 1, 0, 0, 0, tzinfo=timezone.utc
-        )
+        assert archived == datetime(2024, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
 
     unarchive_response = api.put(
         "/api/v1/class/1",
