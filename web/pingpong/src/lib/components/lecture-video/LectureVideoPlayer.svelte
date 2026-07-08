@@ -11,9 +11,9 @@
 		VolumeUpSolid,
 		VolumeMuteSolid
 	} from 'flowbite-svelte-icons';
+	import LectureVideoControlButton from '$lib/components/lecture-video/LectureVideoControlButton.svelte';
 	import SkipForwardIcon from '$lib/assets/icons/SkipForwardIcon.svelte';
 	import SkipBackwardIcon from '$lib/assets/icons/SkipBackwardIcon.svelte';
-	import LectureVideoControlButton from './LectureVideoControlButton.svelte';
 	import type { Snippet } from 'svelte';
 	import { fade } from 'svelte/transition';
 
