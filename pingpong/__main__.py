@@ -94,6 +94,10 @@ from pingpong.migrations.m19_migrate_all_to_next_gen import migrate_all_to_next_
 from pingpong.migrations.m20_migrate_voice_mode_threads_to_v3 import (
     migrate_voice_mode_threads_to_v3,
 )
+from pingpong.migrations.m21_finalize_v2_threads_to_v3 import (
+    finalize_v2_threads_to_v3,
+    revert_finalized_v3_threads_to_v2,
+)
 from pingpong.now import _get_next_run_time, croner, utcnow
 from pingpong.schemas import LMSType, RunStatus
 from pingpong.lti.course_bridge import course_bridge_sync_all
@@ -1255,6 +1259,28 @@ def m20_migrate_voice_mode_threads_to_v3() -> None:
             logger.info("Done!")
 
     asyncio.run(_m20_migrate_voice_mode_threads_to_v3())
+
+
+@db.command("m21_finalize_v2_threads_to_v3")
+def m21_finalize_v2_threads_to_v3() -> None:
+    async def _m21_finalize_v2_threads_to_v3() -> None:
+        async with config.db.driver.async_session() as session:
+            logger.info("Finalizing fully migrated v2 threads to v3...")
+            await finalize_v2_threads_to_v3(session)
+            logger.info("Done!")
+
+    asyncio.run(_m21_finalize_v2_threads_to_v3())
+
+
+@db.command("m21_revert_finalized_v3_threads_to_v2")
+def m21_revert_finalized_v3_threads_to_v2() -> None:
+    async def _m21_revert_finalized_v3_threads_to_v2() -> None:
+        async with config.db.driver.async_session() as session:
+            logger.info("Reverting m21-finalized v3 threads to v2...")
+            await revert_finalized_v3_threads_to_v2(session)
+            logger.info("Done!")
+
+    asyncio.run(_m21_revert_finalized_v3_threads_to_v2())
 
 
 @db.command("m02_remove_responses_threads")

@@ -650,6 +650,118 @@ async def test_existing_rows_are_updated_on_rerun(
         assert [m.completed for m in msgs_local] == [_naive_dt(101), _naive_dt(111)]
 
 
+async def test_rerun_clears_message_parts_and_attachments_before_resetting_metadata(
+    db: DbDriver, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    messages = [
+        _generate_openai_message("msg_user", role="user", created_at=100, user_id=7),
+        _generate_openai_message(
+            "msg_asst", role="assistant", created_at=110, run_id="run_1"
+        ),
+    ]
+    runs = {
+        "run_1": _generate_openai_run(
+            "run_1", status="completed", started_at=105, completed_at=120
+        )
+    }
+    client = FakeOpenAIClient(messages, runs)
+    _patch_client(monkeypatch, client)
+
+    async with db.async_session() as session:
+        await _generate_local_thread(session)
+        await session.commit()
+
+    async with db.async_session() as session:
+        await migration.migrate_threads_and_messages_to_v3(session)
+
+    async with db.async_session() as session:
+        user_msg = await models.Message.get_by_openai_message_id(session, "msg_user")
+        assert user_msg is not None
+        user_msg.message_metadata = {
+            "assistants_to_responses_api_thread_migration": {
+                "message": "complete",
+                "message_parts": "complete",
+                "attachments": "complete",
+            }
+        }
+        file = models.File(id=50, file_id="file-1", name="file.txt")
+        part = models.MessagePart(
+            id=60,
+            message_id=user_msg.id,
+            type=schemas.MessagePartType.INPUT_TEXT,
+            part_index=0,
+            text="old part",
+        )
+        annotation = models.Annotation(
+            id=70,
+            message_part_id=60,
+            type=schemas.AnnotationType.FILE_CITATION,
+            annotation_index=0,
+            file_object_id=50,
+        )
+        session.add_all([file, part, annotation])
+        await session.flush()
+        await session.execute(
+            models.file_search_attachment_association.insert().values(
+                message_id=user_msg.id,
+                file_id=file.id,
+            )
+        )
+        await session.execute(
+            models.code_interpreter_attachment_association.insert().values(
+                message_id=user_msg.id,
+                file_id=file.id,
+            )
+        )
+        await session.commit()
+
+    async with db.async_session() as session:
+        await migration.migrate_threads_and_messages_to_v3(session)
+
+    async with db.async_session() as session:
+        user_msg = await models.Message.get_by_openai_message_id(session, "msg_user")
+        assert user_msg is not None
+        assert user_msg.message_metadata == {
+            "assistants_to_responses_api_thread_migration": {"message": "complete"}
+        }
+
+        parts = list(
+            (
+                await session.scalars(
+                    select(models.MessagePart).where(
+                        models.MessagePart.message_id == user_msg.id
+                    )
+                )
+            ).all()
+        )
+        annotations = list((await session.scalars(select(models.Annotation))).all())
+        file_search_attachments = list(
+            (
+                await session.execute(
+                    select(models.file_search_attachment_association).where(
+                        models.file_search_attachment_association.c.message_id
+                        == user_msg.id
+                    )
+                )
+            ).all()
+        )
+        code_interpreter_attachments = list(
+            (
+                await session.execute(
+                    select(models.code_interpreter_attachment_association).where(
+                        models.code_interpreter_attachment_association.c.message_id
+                        == user_msg.id
+                    )
+                )
+            ).all()
+        )
+
+        assert parts == []
+        assert annotations == []
+        assert file_search_attachments == []
+        assert code_interpreter_attachments == []
+
+
 async def test_none_message_status_defaults_to_completed(
     db: DbDriver, monkeypatch: pytest.MonkeyPatch
 ) -> None:
