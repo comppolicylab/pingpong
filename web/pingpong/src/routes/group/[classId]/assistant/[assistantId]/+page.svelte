@@ -407,7 +407,8 @@
 	let assistantForm: HTMLFormElement;
 	let deleteModal = false;
 	$: assistant = data.assistant;
-	$: preventEdits = !!assistant?.locked;
+	$: groupArchived = !!data.class?.archived;
+	$: preventEdits = !!assistant?.locked || groupArchived;
 	$: canPublish = data.grants.canPublishAssistants;
 	$: isClassPrivate = data.class?.private || false;
 
@@ -4063,12 +4064,19 @@
 		<div
 			class="border-gradient-to-r col-span-2 mb-4 flex items-center rounded-lg bg-gradient-to-r from-gray-800 to-gray-600 p-4 text-white"
 		>
-			<LockSolid class="mr-3 h-8 w-8" />
-			<span>
-				This assistant is locked and cannot be edited. To make changes, create a new assistant. You
-				can still publish or unpublish this assistant if you have the necessary permissions. For
-				more information, contact your Group's administrator.
-			</span>
+			{#if groupArchived}
+				<ArchiveOutline class="mr-3 h-8 w-8" />
+				<span>
+					This group is archived and read-only. Unarchive it in Manage group to edit assistants.
+				</span>
+			{:else}
+				<LockSolid class="mr-3 h-8 w-8" />
+				<span>
+					This assistant is locked and cannot be edited. To make changes, create a new assistant.
+					You can still publish or unpublish this assistant if you have the necessary permissions.
+					For more information, contact your Group's administrator.
+				</span>
+			{/if}
 		</div>
 	{/if}
 	{#if lectureVideoConfigLoadError}

@@ -6628,6 +6628,7 @@ class Class(Base):
     any_can_share_assistant = Column(Boolean, default=False)
     any_can_publish_thread = Column(Boolean, default=False)
     any_can_upload_class_file = Column(Boolean, default=False)
+    archived = Column(DateTime(timezone=True), nullable=True)
     users: Mapped[List["UserClassRole"]] = relationship(
         "UserClassRole",
         back_populates="class_",
@@ -6798,7 +6799,7 @@ class Class(Base):
     async def update(
         cls, session: AsyncSession, id_: int, data: schemas.UpdateClass
     ) -> "Class":
-        update_data = data.dict(exclude_none=True)
+        update_data = data.model_dump(exclude_unset=True)
 
         # Fetch the current state of the record
         existing_class = await cls.get_by_id(session, id_)

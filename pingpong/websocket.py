@@ -392,6 +392,11 @@ def ws_check_realtime_permissions(func):
     ):
         await browser_connection.accept()
         try:
+            class_ = await models.Class.get_by_id(
+                browser_connection.state["db"], int(class_id)
+            )
+            if class_ and class_.archived is not None:
+                raise ValueError("This group is archived and read-only.")
             await check_realtime_permissions(browser_connection, thread_id)
         except ValueError as e:
             await browser_connection.send_json(
