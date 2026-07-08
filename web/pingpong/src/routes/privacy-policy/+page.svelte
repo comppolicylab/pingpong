@@ -75,7 +75,7 @@
 			triggered the error. Identifiable information, per policy, cannot be requested and will not be
 			provided to moderators. Generally, HKS follows the
 			<a
-				href="https://hwpi.harvard.edu/files/provost/files/policy_on_access_to_electronic_information.pdf"
+				href="https://provost.harvard.edu/sites/g/files/omnuum12476/files/provost/files/policy_on_access_to_electronic_information.pdf"
 				rel="noopener noreferrer"
 				class="underline"
 				target="_blank">Harvard Policy on Access to Electronic Information</a
