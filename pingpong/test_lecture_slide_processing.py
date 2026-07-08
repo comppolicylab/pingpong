@@ -2832,7 +2832,10 @@ async def test_persist_slide_audio_timings_uses_elevenlabs_timings_without_whisp
                 stored_object_id=1,
                 word_timings=(
                     lecture_slide_processing.ElevenLabsSpeechWordTiming(
-                        word="hello", start_ms=0, end_ms=100
+                        word="early", start_ms=-50, end_ms=120
+                    ),
+                    lecture_slide_processing.ElevenLabsSpeechWordTiming(
+                        word="late", start_ms=80, end_ms=150
                     ),
                 ),
             )
@@ -2842,7 +2845,7 @@ async def test_persist_slide_audio_timings_uses_elevenlabs_timings_without_whisp
     assert words is not None
     assert [
         (word.word, word.start_offset_ms, word.end_offset_ms) for word in words
-    ] == [("hello", 0, 100)]
+    ] == [("early", 0, 100), ("late", 80, 100)]
 
 
 async def test_composite_page_audio_validation_rejects_cleared_gapped_timeline():

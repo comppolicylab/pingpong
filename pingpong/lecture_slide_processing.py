@@ -2176,14 +2176,26 @@ async def _persist_slide_audio_timings(
             start_offset_ms = current_offset_ms if duration_ms > 0 else None
             end_offset_ms = current_offset_ms + duration_ms if duration_ms > 0 else None
 
-            if page_artifact is not None and start_offset_ms is not None:
+            if (
+                page_artifact is not None
+                and start_offset_ms is not None
+                and end_offset_ms is not None
+            ):
                 for word_index, word in enumerate(page_artifact.word_timings):
+                    word_start_offset_ms = min(
+                        max(word.start_ms + start_offset_ms, start_offset_ms),
+                        end_offset_ms,
+                    )
+                    word_end_offset_ms = min(
+                        max(word.end_ms + start_offset_ms, word_start_offset_ms),
+                        end_offset_ms,
+                    )
                     words.append(
                         schemas.LectureVideoManifestWordV3(
                             id=f"slide-{page_artifact.page_position}-word-{word_index}",
                             word=word.word,
-                            start_offset_ms=word.start_ms + start_offset_ms,
-                            end_offset_ms=word.end_ms + start_offset_ms,
+                            start_offset_ms=word_start_offset_ms,
+                            end_offset_ms=word_end_offset_ms,
                         )
                     )
             elif (

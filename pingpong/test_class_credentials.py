@@ -1490,7 +1490,7 @@ async def test_synthesize_elevenlabs_speech_omits_request_options_without_timeou
     assert audio == b"ogg-audio"
 
 
-async def test_synthesize_elevenlabs_speech_with_timings_uses_normalized_alignment(
+async def test_synthesize_elevenlabs_speech_with_timings_uses_source_alignment(
     monkeypatch,
 ):
     seen: dict[str, object] = {}
@@ -1513,14 +1513,9 @@ async def test_synthesize_elevenlabs_speech_with_timings_uses_normalized_alignme
         return SimpleNamespace(
             audio_base_64=base64.b64encode(b"ogg-audio").decode("ascii"),
             alignment=SimpleNamespace(
-                characters=list("ignored"),
-                character_start_times_seconds=[0, 1, 2, 3, 4, 5, 6],
-                character_end_times_seconds=[1, 2, 3, 4, 5, 6, 7],
-            ),
-            normalized_alignment=SimpleNamespace(
                 characters=list("Hello world"),
                 character_start_times_seconds=[
-                    0.0,
+                    -0.01,
                     0.02,
                     0.04,
                     0.06,
@@ -1545,6 +1540,11 @@ async def test_synthesize_elevenlabs_speech_with_timings_uses_normalized_alignme
                     0.28,
                     0.30,
                 ],
+            ),
+            normalized_alignment=SimpleNamespace(
+                characters=list("ignored"),
+                character_start_times_seconds=[0, 1, 2, 3, 4, 5, 6],
+                character_end_times_seconds=[1, 2, 3, 4, 5, 6, 7],
             ),
         )
 
