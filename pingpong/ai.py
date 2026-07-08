@@ -343,7 +343,7 @@ def get_original_model_name_by_azure_equivalent(model_name: str) -> str:
 
 
 async def generate_name(
-    cli: openai.AsyncClient, transcript: str, model: str = "gpt-4o-mini"
+    cli: openai.AsyncClient, transcript: str, model: str = "gpt-5.4-mini"
 ) -> ThreadName | None:
     """Generate a name for a prompt using the given model.
 
@@ -354,22 +354,15 @@ async def generate_name(
     """
     system_prompt = 'You will be given a transcript between a user and an assistant. Messages the user sent are prepended with "USER", and messages the assistant sent are prepended with "ASSISTANT". Return a title of 3 to 4 words summarizing what the conversation is about. If you are unsure about the conversation topic, set name to None and set can_generate to false. DO NOT RETURN MORE THAN 4 WORDS!'
     try:
-        response = await cli.beta.chat.completions.parse(
-            messages=[
-                {
-                    "role": "system",
-                    "content": system_prompt,
-                },
-                {
-                    "role": "user",
-                    "content": transcript,
-                },
-            ],
+        response = await cli.responses.parse(
             model=model,
-            response_format=ThreadName,
+            instructions=system_prompt,
+            input=transcript,
+            text_format=ThreadName,
+            reasoning=Reasoning(effort="none", summary=None),
             temperature=0.0,
         )
-        return response.choices[0].message.parsed
+        return response.output_parsed
     except openai.RateLimitError as e:
         raise e
     except openai.BadRequestError:
