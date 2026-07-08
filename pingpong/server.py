@@ -8243,6 +8243,9 @@ async def create_thread(
                     req.message,
                     req.vision_file_ids,
                     class_id,
+                    response_safety_identifier=request.state[
+                        "response_safety_identifier"
+                    ],
                 ),
             )
         except openai.InternalServerError:
@@ -8283,6 +8286,9 @@ async def create_thread(
                     req.message,
                     req.vision_file_ids,
                     class_id,
+                    response_safety_identifier=request.state[
+                        "response_safety_identifier"
+                    ],
                 ),
             )
         except openai.InternalServerError:
@@ -8967,6 +8973,7 @@ async def send_message(
                 str(thread.id) if thread.version == 3 else thread.thread_id,
                 class_id,
                 thread_version=thread.version,
+                response_safety_identifier=request.state["response_safety_identifier"],
             )
 
         if data.file_search_file_ids:

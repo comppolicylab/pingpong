@@ -343,23 +343,31 @@ def get_original_model_name_by_azure_equivalent(model_name: str) -> str:
 
 
 async def generate_name(
-    cli: openai.AsyncClient, transcript: str, model: str = "gpt-5.4-mini"
+    cli: openai.AsyncClient,
+    transcript: str,
+    model: str = "gpt-5.4-mini",
+    safety_identifier: str | None = None,
 ) -> ThreadName | None:
     """Generate a name for a prompt using the given model.
 
     :param cli: OpenAI client
     :param prompt: Prompt to generate a name for
     :param model: Model to use
+    :param safety_identifier: Safety identifier to include in the OpenAI request
     :return: Generated name
     """
     system_prompt = 'You will be given a transcript between a user and an assistant. Messages the user sent are prepended with "USER", and messages the assistant sent are prepended with "ASSISTANT". Return a title of 3 to 4 words summarizing what the conversation is about. If you are unsure about the conversation topic, set name to None and set can_generate to false. DO NOT RETURN MORE THAN 4 WORDS!'
     try:
+        safety_identifier_setting: str | openai.NotGiven = (
+            safety_identifier if safety_identifier is not None else openai.NOT_GIVEN
+        )
         response = await cli.responses.parse(
             model=model,
             instructions=system_prompt,
             input=transcript,
             text_format=ThreadName,
             reasoning=Reasoning(effort="none", summary=None),
+            safety_identifier=safety_identifier_setting,
             temperature=0.0,
         )
         return response.output_parsed
@@ -386,6 +394,7 @@ async def get_thread_conversation_name(
     thread_id: str,
     class_id: str,
     thread_version: int = 2,
+    response_safety_identifier: str | None = None,
 ) -> str | None:
     if thread_version <= 2:
         messages = await cli.beta.threads.messages.list(
@@ -421,7 +430,9 @@ async def get_thread_conversation_name(
             message_str += "USER: Uploaded an image file\n"
     else:
         raise ValueError(f"Unsupported thread version: {thread_version}")
-    return await generate_thread_name(cli, session, message_str, class_id)
+    return await generate_thread_name(
+        cli, session, message_str, class_id, response_safety_identifier
+    )
 
 
 async def get_initial_thread_conversation_name(
@@ -430,21 +441,31 @@ async def get_initial_thread_conversation_name(
     message: str | None,
     vision_files: list[str],
     class_id: str,
+    response_safety_identifier: str | None = None,
 ) -> str | None:
     if not message:
         return None
     message_str = f"USER: {message}\n"
     for _ in vision_files:
         message_str += "USER: Uploaded an image file\n"
-    return await generate_thread_name(cli, session, message_str, class_id)
+    return await generate_thread_name(
+        cli, session, message_str, class_id, response_safety_identifier
+    )
 
 
 async def generate_thread_name(
-    cli: openai.AsyncClient, session: AsyncSession, transcript: str, class_id: str
+    cli: openai.AsyncClient,
+    session: AsyncSession,
+    transcript: str,
+    class_id: str,
+    response_safety_identifier: str | None = None,
 ) -> str | None:
     thread_name = None
     try:
-        name_response = await generate_name(cli, transcript)
+        safety_identifier = build_openai_safety_identifier(response_safety_identifier)
+        name_response = await generate_name(
+            cli, transcript, safety_identifier=safety_identifier
+        )
         thread_name = (
             name_response.name if name_response and name_response.can_generate else None
         )
