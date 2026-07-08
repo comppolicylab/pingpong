@@ -1,17 +1,35 @@
+import base64
 import logging
 from collections.abc import AsyncIterator, Iterator
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from itertools import groupby
+from pathlib import Path
 
-from openai import Omit, omit
+from openai import APIStatusError, Omit, omit
 from openai.types.beta.threads import Message, Run
+from openai.types.beta.threads.runs import (
+    CodeInterpreterToolCall,
+    FileSearchToolCall,
+    MessageCreationStepDetails,
+    RunStep,
+    ToolCallsStepDetails,
+)
 from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import pingpong.models as models
 from pingpong.ai import get_openai_client_by_class_id
-from pingpong.schemas import InteractionMode, MessageRole, MessageStatus, RunStatus
+from pingpong.files import file_extension_to_mime_type
+from pingpong.schemas import (
+    CodeInterpreterOutputType,
+    InteractionMode,
+    MessageRole,
+    MessageStatus,
+    RunStatus,
+    ToolCallStatus,
+    ToolCallType,
+)
 from pingpong.server import OpenAIClient
 
 logger = logging.getLogger(__name__)
@@ -272,15 +290,16 @@ async def _iter_migration_turns(
                 yield MigrationTurn.orphan(orphan)
             continue
 
-        openai_runs = [
-            await _resolve_run(openai_client, thread, m.run_id, run_cache)
-            for m in messages
-            if m.run_id is not None
-        ]
+        openai_runs_by_id: dict[str, Run] = {}
+        for m in messages:
+            if m.run_id is not None and m.run_id not in openai_runs_by_id:
+                openai_runs_by_id[m.run_id] = await _resolve_run(
+                    openai_client, thread, m.run_id, run_cache
+                )
         yield MigrationTurn(
             user_message=pending_owner,
             assistant_messages=messages,
-            openai_runs=openai_runs,
+            openai_runs=list(openai_runs_by_id.values()),
         )
         pending_owner = None
 
@@ -311,27 +330,45 @@ async def _migrate_thread(
     )
 
     prev_output_index = -1
+    seen_tool_call_ids: set[str] = set()
 
     async for turn in _iter_migration_turns(openai_client, thread, openai_messages):
         local_run = await _store_turn_run(session, thread, assistant, turn)
-        for message in turn.messages():
+
+        # first store user message
+        if turn.user_message is not None:
             prev_output_index = await _store_message(
                 session,
                 thread,
-                message,
+                turn.user_message,
                 local_run,
                 prev_output_index,
             )
 
+        # then store tool calls + assistant messages in the proper order
+        prev_output_index = await _store_assistant_messages_and_tool_calls(
+            session,
+            openai_client,
+            thread,
+            local_run,
+            turn,
+            prev_output_index,
+            seen_tool_call_ids,
+        )
+
     deleted_stale_messages = await _delete_stale_messages(
         session, thread, openai_messages
+    )
+    deleted_stale_tool_calls = await _delete_stale_tool_calls(
+        session, thread, seen_tool_call_ids
     )
     pruned_orphan_runs = await _prune_orphan_runs(session, thread)
     logger.info(
         "m15 cleaned thread. thread_id=%s stale_messages_deleted=%s "
-        "orphan_runs_deleted=%s",
+        "stale_tool_calls_deleted=%s orphan_runs_deleted=%s",
         thread.id,
         deleted_stale_messages,
+        deleted_stale_tool_calls,
         pruned_orphan_runs,
     )
 
@@ -373,6 +410,20 @@ async def _delete_stale_messages(
                 models.Message.message_id.not_in(keep_ids),
             )
         )
+    result = await session.execute(stmt)
+    await session.flush()
+    return _rowcount(result.rowcount)
+
+
+async def _delete_stale_tool_calls(
+    session: AsyncSession,
+    thread: models.Thread,
+    seen_tool_call_ids: set[str],
+) -> int:
+    """Delete local tool calls no longer present upstream (empty set clears all)."""
+    stmt = delete(models.ToolCall).where(models.ToolCall.thread_id == thread.id)
+    if seen_tool_call_ids:
+        stmt = stmt.where(models.ToolCall.tool_call_id.not_in(seen_tool_call_ids))
     result = await session.execute(stmt)
     await session.flush()
     return _rowcount(result.rowcount)
@@ -609,3 +660,382 @@ def _maybe_extract_user_id(openai_message: Message | None) -> int | None:
             "because it couldn't be converted to an integer"
         )
         return None
+
+
+async def _store_assistant_messages_and_tool_calls(
+    session: AsyncSession,
+    openai_client: OpenAIClient,
+    thread: models.Thread,
+    local_run: models.Run,
+    turn: MigrationTurn,
+    prev_output_index: int,
+    seen_tool_call_ids: set[str],
+) -> int:
+    """Store the assistant messages and tool calls this turn collapsed onto the single
+    local Run, interleaved in OpenAI's chronological run-step order. Also updates
+    output_index and returns it.
+
+    Tool calls are upserted by their OpenAI `tool_call_id` (like runs), so re-running
+    the migration reuses the existing rows rather than deleting and recreating them.
+    """
+    messages_by_id = {m.id: m for m in turn.assistant_messages}
+    stored_message_ids: set[str] = set()
+
+    tool_calls_created = 0
+    for openai_run in turn.openai_runs:
+        for run_step in await _list_run_steps(
+            openai_client, thread.thread_id, openai_run.id
+        ):
+            # detect if it's an assistant message creation step
+            if isinstance(run_step.step_details, MessageCreationStepDetails):
+                message_id = run_step.step_details.message_creation.message_id
+                message = messages_by_id.get(message_id)
+                if message is None:
+                    # Message doesn't exist anymore, nothing we can do!
+                    continue
+                prev_output_index = await _store_message(
+                    session, thread, message, local_run, prev_output_index
+                )
+                stored_message_ids.add(message_id)
+            else:
+                prev_output_index, created = await _store_run_step_tool_calls(
+                    session,
+                    openai_client,
+                    local_run,
+                    run_step,
+                    prev_output_index,
+                    seen_tool_call_ids,
+                )
+                tool_calls_created += created
+
+    # make sure all assistant messages in turn are stored, even if they don't have
+    # Message creation steps. Not sure if this will ever happen and the ordering will get
+    # messed up since they're put at the end, but I put it here just in case
+    for message in turn.assistant_messages:
+        if message.id not in stored_message_ids:
+            prev_output_index = await _store_message(
+                session, thread, message, local_run, prev_output_index
+            )
+
+    if tool_calls_created:
+        await session.flush()
+        logger.info(
+            "m15 stored turn tool calls. thread_id=%s run_pk=%s openai_runs=%s "
+            "tool_calls_created=%s",
+            thread.id,
+            local_run.id,
+            [r.id for r in turn.openai_runs],
+            tool_calls_created,
+        )
+    return prev_output_index
+
+
+async def _list_run_steps(
+    openai_client: OpenAIClient,
+    openai_thread_id: str,
+    openai_run_id: str,
+) -> list[RunStep]:
+    run_steps: list[RunStep] = []
+    after: str | Omit = omit
+
+    while True:
+        page = await openai_client.beta.threads.runs.steps.list(
+            openai_run_id,
+            thread_id=openai_thread_id,
+            order="asc",
+            after=after,
+            include=["step_details.tool_calls[*].file_search.results[*].content"],
+        )
+        run_steps.extend(page.data)
+        if not page.has_more or not page.data:
+            break
+
+        after = page.data[-1].id
+
+    return run_steps
+
+
+async def _store_run_step_tool_calls(
+    session: AsyncSession,
+    openai_client: OpenAIClient,
+    local_run: models.Run,
+    run_step: RunStep,
+    prev_output_index: int,
+    seen_tool_call_ids: set[str],
+) -> tuple[int, int]:
+    """Returns the updated output_index and the number of tool calls created. Records the
+    OpenAI id of every persisted tool call in `seen_tool_call_ids` so stale local tool
+    calls can be pruned afterward."""
+    if not isinstance(run_step.step_details, ToolCallsStepDetails):
+        return prev_output_index, 0
+
+    status = _map_run_step_status(run_step.status)
+    created = _require_dt(run_step.created_at)
+    completed = _dt_from_ts(
+        run_step.completed_at
+        or run_step.failed_at
+        or run_step.cancelled_at
+        or run_step.expired_at
+    )
+
+    created_count = 0
+    for tool_call in run_step.step_details.tool_calls:
+        if isinstance(tool_call, CodeInterpreterToolCall):
+            prev_output_index += 1
+            await _persist_code_interpreter_tool_call(
+                session,
+                openai_client,
+                local_run,
+                tool_call,
+                status,
+                prev_output_index,
+                created,
+                completed,
+            )
+            seen_tool_call_ids.add(tool_call.id)
+            created_count += 1
+        elif isinstance(tool_call, FileSearchToolCall):
+            prev_output_index += 1
+            await _persist_file_search_tool_call(
+                session,
+                local_run,
+                tool_call,
+                status,
+                prev_output_index,
+                created,
+                completed,
+            )
+            seen_tool_call_ids.add(tool_call.id)
+            created_count += 1
+        else:
+            # No support for function tool calls, so this should never be executed?
+            logger.info(
+                "m15 skipping unsupported tool call type. run_pk=%s type=%s",
+                local_run.id,
+                getattr(tool_call, "type", None),
+            )
+
+    return prev_output_index, created_count
+
+
+async def _upsert_tool_call(
+    session: AsyncSession,
+    local_run: models.Run,
+    tool_call: CodeInterpreterToolCall | FileSearchToolCall,
+    tool_call_type: ToolCallType,
+    status: ToolCallStatus,
+    output_index: int,
+    created: datetime,
+    completed: datetime | None,
+    extra: dict,
+) -> models.ToolCall:
+    """Upserts a ToolCall with the fields shared across all v2 tool call types."""
+    values = {
+        "run_id": local_run.id,
+        "tool_call_id": tool_call.id,
+        "type": tool_call_type,
+        "status": status,
+        "thread_id": local_run.thread_id,
+        "output_index": output_index,
+        "created": created,
+        "completed": completed,
+        **extra,
+    }
+
+    existing_tool_calls = list(
+        (
+            await session.execute(
+                select(models.ToolCall).where(
+                    models.ToolCall.thread_id == local_run.thread_id,
+                    models.ToolCall.tool_call_id == tool_call.id,
+                )
+            )
+        ).scalars()
+    )
+    existing = next(
+        (
+            existing_tool_call
+            for existing_tool_call in existing_tool_calls
+            if existing_tool_call.run_id == local_run.id
+        ),
+        existing_tool_calls[0] if existing_tool_calls else None,
+    )
+    duplicate_ids = [
+        existing_tool_call.id
+        for existing_tool_call in existing_tool_calls
+        if existing is not None and existing_tool_call.id != existing.id
+    ]
+    if duplicate_ids:
+        await session.execute(
+            delete(models.ToolCall).where(models.ToolCall.id.in_(duplicate_ids))
+        )
+
+    if existing is None:
+        return await models.ToolCall.create(session, values)
+
+    for key, value in values.items():
+        setattr(existing, key, value)
+
+    # It would be kind of annoying to try to match the OpenAI Output/Result for the tool
+    # calls since the local versions don't store a reference to them. So rather than
+    # doing that, we're deleting them here and recreating them later
+    if isinstance(tool_call, CodeInterpreterToolCall):
+        await session.execute(
+            delete(models.CodeInterpreterCallOutput).where(
+                models.CodeInterpreterCallOutput.tool_call_id == existing.id
+            )
+        )
+    if isinstance(tool_call, FileSearchToolCall):
+        await session.execute(
+            delete(models.FileSearchCallResult).where(
+                models.FileSearchCallResult.tool_call_id == existing.id
+            )
+        )
+    await session.flush()
+    return existing
+
+
+async def _persist_code_interpreter_tool_call(
+    session: AsyncSession,
+    openai_client: OpenAIClient,
+    local_run: models.Run,
+    tool_call: CodeInterpreterToolCall,
+    status: ToolCallStatus,
+    output_index: int,
+    created: datetime,
+    completed: datetime | None,
+) -> None:
+    local_tool_call = await _upsert_tool_call(
+        session,
+        local_run,
+        tool_call,
+        ToolCallType.CODE_INTERPRETER,
+        status,
+        output_index,
+        created,
+        completed,
+        {
+            "container_id": None,  # because v2
+            "code": tool_call.code_interpreter.input,
+        },
+    )
+
+    for output in tool_call.code_interpreter.outputs:
+        if output.type == "logs":
+            await models.CodeInterpreterCallOutput.create(
+                session,
+                {
+                    "tool_call_id": local_tool_call.id,
+                    "output_type": CodeInterpreterOutputType.LOGS,
+                    "logs": output.logs,
+                    "created": created,
+                },
+            )
+        elif output.type == "image":
+            file_id = output.image.file_id if output.image else None
+            if file_id is None:
+                logger.warning(
+                    "m15 skipping code interpreter image output without a file_id. "
+                    "run_pk=%s tool_call_id=%s",
+                    local_run.id,
+                    tool_call.id,
+                )
+                continue
+            # v2 only gives a file_id (no URL), so fetch the content and store it as a
+            # base64 data URL in the `url` column.
+            data_url = await _image_output_to_data_url(openai_client, file_id)
+            if data_url is None:
+                logger.warning(
+                    "m15 skipping code interpreter image output whose content could "
+                    "not be fetched. run_pk=%s tool_call_id=%s file_id=%s",
+                    local_run.id,
+                    tool_call.id,
+                    file_id,
+                )
+                continue
+            await models.CodeInterpreterCallOutput.create(
+                session,
+                {
+                    "tool_call_id": local_tool_call.id,
+                    "output_type": CodeInterpreterOutputType.IMAGE,
+                    "url": data_url,
+                    "created": created,
+                },
+            )
+
+
+async def _persist_file_search_tool_call(
+    session: AsyncSession,
+    local_run: models.Run,
+    tool_call: FileSearchToolCall,
+    status: ToolCallStatus,
+    output_index: int,
+    created: datetime,
+    completed: datetime | None,
+) -> None:
+    local_tool_call = await _upsert_tool_call(
+        session,
+        local_run,
+        tool_call,
+        ToolCallType.FILE_SEARCH,
+        status,
+        output_index,
+        created,
+        completed,
+        # v2 file_search run steps have no queries.
+        {"queries": ""},
+    )
+
+    for result in tool_call.file_search.results or []:
+        text = "\n\n".join(c.text for c in (result.content or []) if c.text)
+        local_file = await session.scalar(
+            select(models.File).where(models.File.file_id == result.file_id)
+        )
+        await models.FileSearchCallResult.create(
+            session,
+            {
+                # v2 file_search results have no attributes.
+                "attributes": None,
+                "file_id": result.file_id,
+                "file_object_id": local_file.id if local_file else None,
+                "filename": result.file_name,
+                "score": result.score,
+                "text": text,
+                "created": created,
+                "tool_call_id": local_tool_call.id,
+            },
+        )
+
+
+async def _image_output_to_data_url(
+    openai_client: OpenAIClient, file_id: str
+) -> str | None:
+    """Fetch a code interpreter image file's content from OpenAI and return it as a
+    base64 data URL, or None if the content is unavailable (e.g. an expired/deleted
+    file returns 404). Better than raising an Exception for a missing image
+
+    Essentially replicates files.generate_image_description where the image_url is set.
+    """
+    try:
+        response = await openai_client.files.with_raw_response.retrieve_content(file_id)
+    except APIStatusError:
+        return None
+    if response.status_code != 200:
+        return None
+
+    content_type = response.headers.get("content-type")
+    if not content_type:
+        openai_file = await openai_client.files.retrieve(file_id)
+        suffix = Path(openai_file.filename or "").suffix.lstrip(".")
+        # files._normalize_upload_content_type ends up setting it to "" if it can't
+        # extract the right type
+        content_type = (file_extension_to_mime_type(suffix) if suffix else None) or ""
+    b64 = base64.b64encode(response.content).decode("utf-8")
+    return f"data:{content_type};base64,{b64}"
+
+
+def _map_run_step_status(run_step_status: str) -> ToolCallStatus:
+    """`cancelled`, `expired`, or any other unexpected value get assigned INCOMPLETE"""
+    if run_step_status not in ToolCallStatus.__members__.values():
+        return ToolCallStatus.INCOMPLETE
+    return ToolCallStatus(run_step_status)
