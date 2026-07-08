@@ -32,7 +32,7 @@
 	type KeyboardActionIndicator =
 		'play' | 'pause' | 'mute' | 'unmute' | 'skipForward' | 'skipBackward';
 
-	const KEYBOARD_SKIP_INTERVAL_MS = 15000;
+	const SKIP_INTERVAL_MS = 15000;
 	const PREVIEW_WIDTH = 224;
 	const PREVIEW_VIDEO_IDLE_DEACTIVATE_MS = 3000;
 	const QUESTION_PRESENTATION_CONTROLS_HIDE_MS = 2000;
@@ -1299,7 +1299,7 @@
 
 		const fromOffsetMs = Math.round(videoElement.currentTime * 1000);
 		const directionMultiplier = direction === 'skipBackward' ? -1 : 1;
-		const requestedOffsetMs = fromOffsetMs + directionMultiplier * KEYBOARD_SKIP_INTERVAL_MS;
+		const requestedOffsetMs = fromOffsetMs + directionMultiplier * SKIP_INTERVAL_MS;
 		const targetOffsetMs = Math.round(clamp(requestedOffsetMs, 0, seekLimitOffsetMs));
 
 		if (targetOffsetMs === fromOffsetMs) return;
