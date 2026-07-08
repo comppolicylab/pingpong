@@ -44,9 +44,8 @@ async def migrate_threads_and_messages_to_v3(session: AsyncSession) -> None:
     OpenAI's datastores rather than in our own. In this first step, we fetch all v2
     threads and messages in those threads and create local copies of those two types
     of objects.
-    NOTE: this migration does not cover persisting objects other than `models.Thread`
-    and `models.Message`. Future migrations will handle creation message parts,
-    attachments, tool calls, and annotations.
+    NOTE: this migration stores local runs, messages, and tool calls. Future
+    migrations will handle message parts, attachments, and annotations.
     """
     logger.info(
         "m15 starting thread/message migration. classes=%s assistants=%s",
@@ -443,6 +442,32 @@ async def _prune_orphan_runs(session: AsyncSession, thread: models.Thread) -> in
     return _rowcount(result.rowcount)
 
 
+async def _delete_message_derived_rows(session: AsyncSession, message_id: int) -> None:
+    """Remove rows rebuilt by later migration steps for one m15-managed message."""
+    message_part_ids = select(models.MessagePart.id).where(
+        models.MessagePart.message_id == message_id
+    )
+    await session.execute(
+        delete(models.Annotation).where(
+            models.Annotation.message_part_id.in_(message_part_ids)
+        )
+    )
+    await session.execute(
+        delete(models.MessagePart).where(models.MessagePart.message_id == message_id)
+    )
+    await session.execute(
+        delete(models.file_search_attachment_association).where(
+            models.file_search_attachment_association.c.message_id == message_id
+        )
+    )
+    await session.execute(
+        delete(models.code_interpreter_attachment_association).where(
+            models.code_interpreter_attachment_association.c.message_id == message_id
+        )
+    )
+    await session.flush()
+
+
 def _rowcount(rowcount: int | None) -> int:
     if rowcount is None or rowcount < 0:
         return 0
@@ -621,6 +646,7 @@ async def _store_message(
         )
     else:
         action = "updated"
+        await _delete_message_derived_rows(session, existing.id)
         for key, value in fields.items():
             setattr(existing, key, value)
         await session.flush()

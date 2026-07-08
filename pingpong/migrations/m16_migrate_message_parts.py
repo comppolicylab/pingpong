@@ -281,7 +281,20 @@ async def _persist_message_parts(
     written_grants: list[Relation],
     stats: MessagePartMigrationStats,
 ) -> None:
-    for part_index, content in enumerate(openai_message.content):
+    contents = list(openai_message.content)
+    ci_image_contents: list[ImageFileContentBlock] = []
+    if local_message.role == schemas.MessageRole.ASSISTANT:
+        # Code interpreter output images arrive as `image_file` content blocks in
+        # the Assistants API, but v3 represents them as container-file-citation
+        # annotations on a text part, so peel them off and attach them once the
+        # text parts exist.
+        ci_image_contents = [c for c in contents if _is_image_file_content(c)]
+        contents = [c for c in contents if not _is_image_file_content(c)]
+
+    text_part: models.MessagePart | None = None
+    text_part_annotation_count = 0
+
+    for part_index, content in enumerate(contents):
         part_data = await _create_message_part_data(
             session,
             authz_client,
@@ -302,6 +315,13 @@ async def _persist_message_parts(
 
         message_part = await models.MessagePart.create(session, part_data)
         stats.parts_created += 1
+
+        if (
+            text_part is None
+            and part_data["type"] == schemas.MessagePartType.OUTPUT_TEXT
+        ):
+            text_part = message_part
+            text_part_annotation_count = len(_get_annotations_for_content(content))
 
         for annotation_index, annotation in enumerate(
             _get_annotations_for_content(content)
@@ -328,6 +348,85 @@ async def _persist_message_parts(
 
             await models.Annotation.create(session, annotation_data)
             stats.annotations_created += 1
+
+    if ci_image_contents:
+        await _persist_ci_image_annotations(
+            session,
+            authz_client,
+            openai_client,
+            local_message,
+            ci_image_contents,
+            text_part,
+            text_part_annotation_count,
+            len(contents),
+            written_grants,
+            stats,
+        )
+
+
+async def _persist_ci_image_annotations(
+    session: AsyncSession,
+    authz_client: AuthzClient,
+    openai_client: OpenAIClient,
+    local_message: models.Message,
+    ci_image_contents: list[ImageFileContentBlock],
+    text_part: models.MessagePart | None,
+    text_part_annotation_count: int,
+    next_part_index: int,
+    written_grants: list[Relation],
+    stats: MessagePartMigrationStats,
+) -> None:
+    if text_part is None:
+        # Assistants messages can be image-only; v3 needs a text part to carry
+        # the citation annotations.
+        text_part = await models.MessagePart.create(
+            session,
+            {
+                "message_id": local_message.id,
+                "part_index": next_part_index,
+                "type": schemas.MessagePartType.OUTPUT_TEXT,
+                "text": "",
+            },
+        )
+        stats.parts_created += 1
+
+    for offset, content in enumerate(ci_image_contents):
+        local_file = await _fetch_or_create_local_file(
+            session,
+            authz_client,
+            openai_client,
+            local_message.thread,
+            local_message,
+            content.image_file.file_id,
+            written_grants,
+            include_anonymous_context=True,
+            source="image_file",
+            stats=stats,
+        )
+        await _backfill_s3_file(session, openai_client, local_file)
+        await models.Annotation.create(
+            session,
+            {
+                "message_part_id": text_part.id,
+                "annotation_index": text_part_annotation_count + offset,
+                "type": schemas.AnnotationType.CONTAINER_FILE_CITATION,
+                "vision_file_id": local_file.file_id,
+                "vision_file_object_id": local_file.id,
+                "filename": local_file.name,
+            },
+        )
+        stats.annotations_created += 1
+        await models.Thread.add_image_files(
+            session, local_message.thread_id, [local_file.file_id]
+        )
+        logger.info(
+            "m16 added code interpreter image annotation. thread_id=%s "
+            "message_id=%s local_file_id=%s openai_file_id=%s",
+            local_message.thread_id,
+            local_message.id,
+            local_file.id,
+            local_file.file_id,
+        )
 
 
 async def _create_message_part_data(
@@ -430,9 +529,13 @@ async def _create_annotation_data_and_persist_file(
             stats=stats,
         )
         await _backfill_s3_file(session, openai_client, local_file)
+        # Stored as a container-file citation (the native v3 shape for code
+        # interpreter output files) so the v3 download endpoint recognizes it.
+        # `container_id` stays NULL: replay to the Responses API requires a live
+        # `cfile_` container file, so these annotations are display-only.
         data.update(
             {
-                "type": schemas.AnnotationType.FILE_PATH,
+                "type": schemas.AnnotationType.CONTAINER_FILE_CITATION,
                 "file_id": local_file.file_id,
                 "file_object_id": local_file.id if local_file else None,
                 "filename": local_file.name if local_file else None,
@@ -495,7 +598,10 @@ async def _fetch_or_create_local_file(
         return maybe_local_file
 
     openai_file = await openai_client.files.retrieve(openai_file_id)
-    filename_parts = openai_file.filename.split(".")
+    # Code interpreter output files are named by their sandbox path
+    # (e.g. /mnt/data/report.csv); store just the file name.
+    filename = openai_file.filename.removeprefix("/mnt/data/")
+    filename_parts = filename.split(".")
     content_type = (
         file_extension_to_mime_type(filename_parts[-1]) if filename_parts else None
     )
@@ -514,7 +620,7 @@ async def _fetch_or_create_local_file(
         {
             "file_id": openai_file_id,
             "private": local_thread.private,
-            "name": openai_file.filename,
+            "name": filename,
             "content_type": content_type,
             "anonymous_session_id": uploader.anonymous_session_id,
             "anonymous_link_id": uploader.anonymous_link_id,
@@ -541,7 +647,7 @@ async def _fetch_or_create_local_file(
         openai_file_id,
         local_file.id,
         source,
-        openai_file.filename,
+        filename,
         content_type,
         uploader.uploader_id,
         include_anonymous_context,
@@ -642,6 +748,10 @@ async def _backfill_s3_file(
     fetch the content of the files from OpenAI.
     """
     if local_file.s3_file_id is not None:
+        # A previous (possibly interrupted) run may have backfilled the content
+        # without a content type; the stored bytes still carry the type signal.
+        if not local_file.content_type:
+            await _sniff_content_type_from_store(session, local_file)
         return
 
     response = await openai_client.files.with_raw_response.retrieve_content(
@@ -653,6 +763,13 @@ async def _backfill_s3_file(
             f"OpenAI returned {response.status_code} while fetching file "
             f"during message part migration (id: {local_file.id})"
         )
+
+    if not local_file.content_type:
+        # OpenAI serves file content as application/octet-stream and code
+        # interpreter images have extensionless UUID filenames, so the magic
+        # bytes are the only type signal available.
+        local_file.content_type = _sniff_image_content_type(response.content)
+        session.add(local_file)
 
     # filename generation taken from `pingpong.files.handle_create_file`
     suffix = Path(local_file.name or "").suffix.lower()
@@ -676,6 +793,45 @@ async def _backfill_s3_file(
         local_file.file_id,
         s3_file.id,
     )
+
+
+async def _sniff_content_type_from_store(
+    session: AsyncSession,
+    local_file: models.File,
+) -> None:
+    s3_file = await session.get(models.S3File, local_file.s3_file_id)
+    if s3_file is None:
+        return
+
+    head = b""
+    async for chunk in config.file_store.store.get(name=s3_file.key):
+        head += chunk
+        if len(head) >= 16:
+            break
+
+    content_type = _sniff_image_content_type(head)
+    if content_type:
+        local_file.content_type = content_type
+        session.add(local_file)
+        logger.info(
+            "m16 sniffed content type from stored file. local_file_id=%s "
+            "openai_file_id=%s content_type=%s",
+            local_file.id,
+            local_file.file_id,
+            content_type,
+        )
+
+
+def _sniff_image_content_type(content: bytes) -> str | None:
+    if content.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png"
+    if content.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    if content.startswith((b"GIF87a", b"GIF89a")):
+        return "image/gif"
+    if content[:4] == b"RIFF" and content[8:12] == b"WEBP":
+        return "image/webp"
+    return None
 
 
 def _get_annotations_for_content(content: MessageContent) -> list[OpenAIAnnotation]:

@@ -110,6 +110,10 @@ class FakeFileStore:
         body.seek(0)
         self.stored_files[key] = (body.read(), content_type)
 
+    async def get(self, name):
+        data, _content_type = self.stored_files[name]
+        yield data
+
 
 def _fake_openai_client(messages_by_thread, *, file_responses=None):
     return SimpleNamespace(
@@ -320,6 +324,7 @@ async def test_migrate_message_parts_reuses_existing_local_file(db):
             id=50,
             file_id="file-same",
             name="shared.txt",
+            content_type="text/plain",
             class_id=1,
             s3_file=s3_file,
         )
@@ -365,18 +370,28 @@ async def test_migrate_message_parts_reuses_existing_local_file(db):
         annotations = await _all(
             session, models.Annotation, models.Annotation.annotation_index
         )
+        thread = await session.get(models.Thread, 100)
+        image_files = await thread.awaitable_attrs.image_files
 
+    # The assistant image content becomes a container-file-citation annotation on
+    # the text part (the native v3 shape), not an INPUT_IMAGE part.
     assert [part.type for part in parts] == [
-        schemas.MessagePartType.INPUT_IMAGE,
         schemas.MessagePartType.OUTPUT_TEXT,
     ]
-    assert parts[0].input_image_file_object_id == 50
     assert [
-        (annotation.file_object_id, annotation.filename) for annotation in annotations
+        (
+            annotation.type,
+            annotation.file_object_id,
+            annotation.vision_file_object_id,
+            annotation.filename,
+        )
+        for annotation in annotations
     ] == [
-        (50, "shared.txt"),
-        (50, "shared.txt"),
+        (schemas.AnnotationType.FILE_CITATION, 50, None, "shared.txt"),
+        (schemas.AnnotationType.CONTAINER_FILE_CITATION, 50, None, "shared.txt"),
+        (schemas.AnnotationType.CONTAINER_FILE_CITATION, None, 50, "shared.txt"),
     ]
+    assert [image_file.id for image_file in image_files] == [50]
 
 
 async def test_migrate_message_parts_backfills_missing_s3_file(db, monkeypatch):
@@ -451,9 +466,11 @@ async def test_migrate_message_parts_backfills_missing_s3_file(db, monkeypatch):
         thread = await session.get(models.Thread, 100)
         ci_files = await thread.awaitable_attrs.code_interpreter_files
         assert [ci_file.id for ci_file in ci_files] == [50]
+        image_files = await thread.awaitable_attrs.image_files
+        assert [image_file.id for image_file in image_files] == [50]
 
-    assert len(parts) == 2
-    assert len(annotations) == 1
+    assert len(parts) == 1
+    assert len(annotations) == 2
 
 
 async def test_migrate_message_parts_skips_existing_s3_file_backfill(db, monkeypatch):
@@ -514,6 +531,229 @@ async def test_migrate_message_parts_skips_existing_s3_file_backfill(db, monkeyp
         ci_files = await thread.awaitable_attrs.code_interpreter_files
         assert [ci_file.id for ci_file in ci_files] == [50]
     assert len(parts) == 1
+
+
+async def test_migrate_message_parts_creates_vision_annotation_for_assistant_image(
+    db, monkeypatch
+):
+    """Assistant `image_file` content (a code interpreter output image) becomes a
+    container-file-citation annotation with vision fields, an image-thread
+    association, and a sniffed image content type — the extensionless UUID
+    filename OpenAI assigns provides no type signal."""
+
+    async with db.async_session() as session:
+        await _seed_thread(session, class_id=1, assistant_id=10, thread_id=100)
+        await _seed_message(
+            session,
+            id_=1001,
+            thread_id=100,
+            run_id=100,
+            openai_message_id="msg-with-ci-image",
+            output_index=0,
+            metadata=MIGRATION_METADATA,
+        )
+        await session.commit()
+
+    fake_store = FakeFileStore()
+    monkeypatch.setattr(
+        migration.config, "file_store", SimpleNamespace(store=fake_store)
+    )
+    png_bytes = b"\x89PNG\r\n\x1a\n" + b"fake image data"
+    fake_client = _fake_openai_client(
+        {
+            "thread-100": [
+                _openai_message(
+                    "msg-with-ci-image",
+                    [
+                        _image_content("file-ci-image"),
+                        _text_content("Here is the plot."),
+                    ],
+                )
+            ],
+        },
+        file_responses={
+            "file-ci-image": SimpleNamespace(status_code=200, content=png_bytes)
+        },
+    )
+
+    async def fake_retrieve(_file_id):
+        return SimpleNamespace(
+            filename="484b93a8-fd8d-4e71-8b46-5e95189838de", created_at=0
+        )
+
+    fake_client.files.retrieve = fake_retrieve
+
+    async with db.async_session() as session:
+        message = await _load_single_message(session)
+        await migration._migrate_message_parts(
+            session, FakeAuthzClient(), fake_client, message, []
+        )
+        await session.commit()
+
+    async with db.async_session() as session:
+        parts = await _all(session, models.MessagePart, models.MessagePart.part_index)
+        annotations = await _all(session, models.Annotation)
+        file = await session.scalar(
+            select(models.File).where(models.File.file_id == "file-ci-image")
+        )
+        thread = await session.get(models.Thread, 100)
+        image_files = await thread.awaitable_attrs.image_files
+
+    assert [(part.type, part.text) for part in parts] == [
+        (schemas.MessagePartType.OUTPUT_TEXT, "Here is the plot."),
+    ]
+    assert len(annotations) == 1
+    annotation = annotations[0]
+    assert annotation.type == schemas.AnnotationType.CONTAINER_FILE_CITATION
+    assert annotation.message_part_id == parts[0].id
+    assert annotation.vision_file_id == "file-ci-image"
+    assert annotation.vision_file_object_id == file.id
+    assert annotation.file_object_id is None
+    assert annotation.container_id is None
+    assert file.content_type == "image/png"
+    assert [image_file.id for image_file in image_files] == [file.id]
+
+
+async def test_migrate_message_parts_sniffs_content_type_for_reused_backfilled_file(
+    db, monkeypatch
+):
+    """A file already backfilled to the store (e.g. by an interrupted earlier run)
+    but missing a content type gets its type sniffed from the stored bytes, not
+    refetched from OpenAI."""
+
+    async with db.async_session() as session:
+        await _seed_thread(session, class_id=1, assistant_id=10, thread_id=100)
+        await _seed_message(
+            session,
+            id_=1001,
+            thread_id=100,
+            run_id=100,
+            openai_message_id="msg-with-ci-image",
+            output_index=0,
+            metadata=MIGRATION_METADATA,
+        )
+        session.add(
+            models.File(
+                id=50,
+                file_id="file-backed-image",
+                name="484b93a8-fd8d-4e71-8b46-5e95189838de",
+                class_id=1,
+                s3_file=models.S3File(id=500, key="backed/image"),
+            )
+        )
+        await session.commit()
+
+    fake_store = FakeFileStore()
+    fake_store.stored_files["backed/image"] = (
+        b"\x89PNG\r\n\x1a\n" + b"stored image data",
+        None,
+    )
+    monkeypatch.setattr(
+        migration.config, "file_store", SimpleNamespace(store=fake_store)
+    )
+    fake_client = _fake_openai_client(
+        {
+            "thread-100": [
+                _openai_message(
+                    "msg-with-ci-image",
+                    [
+                        _image_content("file-backed-image"),
+                        _text_content("Here is the plot."),
+                    ],
+                )
+            ],
+        },
+    )
+
+    async with db.async_session() as session:
+        message = await _load_single_message(session)
+        await migration._migrate_message_parts(
+            session, FakeAuthzClient(), fake_client, message, []
+        )
+        await session.commit()
+
+    # No OpenAI content fetch — the type came from the stored bytes.
+    assert fake_client.files.with_raw_response.calls == []
+
+    async with db.async_session() as session:
+        file = await session.get(models.File, 50)
+        assert file.content_type == "image/png"
+        thread = await session.get(models.Thread, 100)
+        image_files = await thread.awaitable_attrs.image_files
+        assert [image_file.id for image_file in image_files] == [50]
+
+
+async def test_migrate_message_parts_keeps_input_image_for_user_messages(
+    db, monkeypatch
+):
+    """User-uploaded images stay INPUT_IMAGE parts — only assistant image content
+    is converted to container-file-citation annotations."""
+
+    async with db.async_session() as session:
+        await _seed_thread(session, class_id=1, assistant_id=10, thread_id=100)
+        await _seed_message(
+            session,
+            id_=1001,
+            thread_id=100,
+            run_id=100,
+            openai_message_id="msg-user-image",
+            output_index=0,
+            role=schemas.MessageRole.USER,
+            metadata=MIGRATION_METADATA,
+        )
+        await session.commit()
+
+    fake_store = FakeFileStore()
+    monkeypatch.setattr(
+        migration.config, "file_store", SimpleNamespace(store=fake_store)
+    )
+    fake_client = _fake_openai_client(
+        {
+            "thread-100": [
+                _openai_message(
+                    "msg-user-image",
+                    [
+                        _image_content("file-user-image"),
+                        _text_content("what is this?"),
+                    ],
+                )
+            ],
+        },
+        file_responses={
+            "file-user-image": SimpleNamespace(
+                status_code=200, content=b"\x89PNG\r\n\x1a\nuser bytes"
+            )
+        },
+    )
+
+    async def fake_retrieve(_file_id):
+        return SimpleNamespace(filename="photo.png", created_at=0)
+
+    fake_client.files.retrieve = fake_retrieve
+
+    async with db.async_session() as session:
+        message = await _load_single_message(session)
+        await migration._migrate_message_parts(
+            session, FakeAuthzClient(), fake_client, message, []
+        )
+        await session.commit()
+
+    async with db.async_session() as session:
+        parts = await _all(session, models.MessagePart, models.MessagePart.part_index)
+        annotations = await _all(session, models.Annotation)
+        file = await session.scalar(
+            select(models.File).where(models.File.file_id == "file-user-image")
+        )
+        thread = await session.get(models.Thread, 100)
+        image_files = await thread.awaitable_attrs.image_files
+
+    assert [part.type for part in parts] == [
+        schemas.MessagePartType.INPUT_IMAGE,
+        schemas.MessagePartType.INPUT_TEXT,
+    ]
+    assert parts[0].input_image_file_object_id == file.id
+    assert annotations == []
+    assert image_files == []
 
 
 async def test_migrate_message_parts_preserves_anonymous_context_for_image_file(
@@ -736,21 +976,29 @@ async def test_migrate_message_parts_revokes_grants_on_failure(db, monkeypatch):
         )
         await session.commit()
 
-    # The image references a brand-new file (so a grant is written), then a second
-    # file_path annotation references a file whose retrieve raises, failing the
-    # message after the grant was written.
+    # The file_path annotation references a brand-new file (so a grant is
+    # written), then the image content — processed after the text parts —
+    # references a file whose retrieve raises, failing the message after the
+    # grant was written.
+    fake_store = FakeFileStore()
+    monkeypatch.setattr(
+        migration.config, "file_store", SimpleNamespace(store=fake_store)
+    )
     fake_client = _fake_openai_client(
         {
             "thread-100": [
                 _openai_message(
                     "msg-fails-after-grant",
                     [
-                        _image_content("file-new"),
-                        _text_content("path", [_file_path("file-explodes")]),
+                        _text_content("path", [_file_path("file-new")]),
+                        _image_content("file-explodes"),
                     ],
                 )
             ],
-        }
+        },
+        file_responses={
+            "file-new": SimpleNamespace(status_code=200, content=b"new bytes")
+        },
     )
 
     async def fake_retrieve(file_id):
