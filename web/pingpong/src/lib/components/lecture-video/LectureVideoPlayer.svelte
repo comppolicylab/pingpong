@@ -487,7 +487,7 @@
 
 		// check this rather than `isFullscreen` because `document.fullscreenElement` is
 		// closer to the source of truth, whereas `isFullscreen` is used just to track
-		// reactivity for rendering only
+		// this state for reactive rendering
 		if (document.fullscreenElement) {
 			void document.exitFullscreen().catch(() => {});
 		} else {
