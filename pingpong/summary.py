@@ -26,7 +26,7 @@ from pingpong.schemas import (
 
 logger = logging.getLogger(__name__)
 
-CLASS_SUMMARY_OPENAI_MODEL = "gpt-5.4-mini"
+CLASS_SUMMARY_OPENAI_MODEL = "gpt-5.6-luna"
 CLASS_SUMMARY_SAFETY_IDENTIFIER_PREFIX = "pp:v1:class-summary:"
 
 

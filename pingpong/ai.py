@@ -345,7 +345,7 @@ def get_original_model_name_by_azure_equivalent(model_name: str) -> str:
 async def generate_name(
     cli: openai.AsyncClient,
     transcript: str,
-    model: str = "gpt-5.4-mini",
+    model: str = "gpt-5.6-luna",
     safety_identifier: str | None = None,
 ) -> ThreadName | None:
     """Generate a name for a prompt using the given model.

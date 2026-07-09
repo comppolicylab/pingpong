@@ -11129,11 +11129,7 @@ async def create_assistant(
     ):
         raise HTTPException(
             400,
-            (
-                "Temperature is only available for GPT-5.4 when reasoning effort is set to 'None'."
-                if model_record.id == "gpt-5.4"
-                else "The selected model does not support temperature settings. Please select a different model or remove the temperature setting."
-            ),
+            "The selected model and reasoning effort do not support temperature settings. Please select a different model or reasoning effort, or remove the temperature setting.",
         )
 
     # Check that the model is not admin-only
@@ -12687,23 +12683,15 @@ async def update_assistant(
     ):
         raise HTTPException(
             400,
-            (
-                "Temperature is only available for GPT-5.4 when reasoning effort is set to 'None'."
-                if model_record.id == "gpt-5.4"
-                else "The selected model does not support temperature settings. Please select a different model or remove the temperature setting."
-            ),
+            "The selected model and reasoning effort do not support temperature settings. Please select a different model or reasoning effort, or remove the temperature setting.",
         )
 
-    if model_record and model_record.id == "gpt-5.4":
-        if not supports_temperature_for_reasoning(
-            model_record.id, asst.reasoning_effort
-        ):
-            if (
-                "temperature" not in req.model_fields_set
-                and asst.temperature is not None
-            ):
-                openai_update["temperature"] = None
-            asst.temperature = None
+    if model_record and not supports_temperature_for_reasoning(
+        model_record.id, asst.reasoning_effort
+    ):
+        if "temperature" not in req.model_fields_set and asst.temperature is not None:
+            openai_update["temperature"] = None
+        asst.temperature = None
 
     uses_web_search = False
     if "tools" in req.model_fields_set:

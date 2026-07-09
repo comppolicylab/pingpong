@@ -1810,6 +1810,10 @@
 		is_new: model.is_new,
 		highlight: model.highlight
 	});
+	const getModelReleaseFamily = (modelId: string) =>
+		modelId.match(/^(gpt-5(?:\.\d+)?)(?:-(?:sol|terra|luna|mini|nano))?$/)?.[1] ??
+		modelId.match(/^(gpt-realtime-\d+(?:\.\d+)?)(?:-mini)?$/)?.[1] ??
+		modelId;
 	let allowSwitchingAssistantVersion = false;
 	let convertToNextGen: boolean | null = null;
 	$: canSwitchAssistantVersion =
@@ -1919,7 +1923,11 @@
 		: [];
 	$: showNewerModelsAvailableBadge =
 		!!selectedModelRecord &&
-		selectedModelGroupModels.some((model) => model.sort_order < selectedModelRecord.sort_order);
+		selectedModelGroupModels.some(
+			(model) =>
+				getModelReleaseFamily(model.id) !== getModelReleaseFamily(selectedModelRecord.id) &&
+				model.sort_order < selectedModelRecord.sort_order
+		);
 	$: supportVisionModels = (data.models.filter((model) => model.supports_vision) || []).map(
 		(model) => model.id
 	);
@@ -2450,8 +2458,6 @@
 	};
 	let reasoningEffortValue: number;
 	let reasoningEffortLevels: number[] = [];
-	let reasoningEffortMin = -1;
-	let reasoningEffortMax = 2;
 	let reasoningEffortLabels: string[] = [];
 	let defaultReasoningLabel = 'low';
 	$: if (
@@ -2502,8 +2508,6 @@
 	$: reasoningEffortLevels =
 		selectedModelRecord?.reasoning_effort_levels ??
 		(supportsNoneReasoningEffort || supportsMinimalReasoningEffort ? [-1, 0, 1, 2] : [0, 1, 2]);
-	$: reasoningEffortMin = reasoningEffortLevels.length ? Math.min(...reasoningEffortLevels) : 0;
-	$: reasoningEffortMax = reasoningEffortLevels.length ? Math.max(...reasoningEffortLevels) : 2;
 	$: reasoningEffortLabels = reasoningEffortLevels
 		.map(getReasoningEffortLabel)
 		.filter((label) => label);
@@ -4843,26 +4847,26 @@
 								modelOptions={latestModelOptions}
 								{selectedModel}
 								{updateSelectedModel}
-								{allowVisionUpload}
 								headerClass="latest-models"
 								bind:modelNodes
 								bind:modelHeaders
 							/>
-							<DropdownHeader
-								order={2}
-								name="versioned-models"
-								colorClasses="from-blue-dark-40 to-blue-dark-30">Fixed Versions</DropdownHeader
-							>
-							<ModelDropdownOptions
-								modelOptions={versionedModelOptions}
-								{selectedModel}
-								{updateSelectedModel}
-								{allowVisionUpload}
-								headerClass="versioned-models"
-								bind:modelNodes
-								bind:modelHeaders
-								smallNameText
-							/>
+							{#if versionedModelOptions.length > 0}
+								<DropdownHeader
+									order={2}
+									name="versioned-models"
+									colorClasses="from-blue-dark-40 to-blue-dark-30">Fixed Versions</DropdownHeader
+								>
+								<ModelDropdownOptions
+									modelOptions={versionedModelOptions}
+									{selectedModel}
+									{updateSelectedModel}
+									headerClass="versioned-models"
+									bind:modelNodes
+									bind:modelHeaders
+									smallNameText
+								/>
+							{/if}
 							<div slot="footer">
 								<DropdownFooter
 									colorClasses="from-gray-800 to-gray-600"
@@ -4894,6 +4898,41 @@
 						>
 					{/if}
 				</div>
+				{#if supportsReasoning}
+					<div class="mt-4 flex items-start justify-between gap-6">
+						<div>
+							<Label for="reasoning-effort">Reasoning effort</Label>
+							<Helper class="pb-1"
+								>Select your desired reasoning effort, which gives the model guidance on how much
+								time it should spend "reasoning" before creating a response to the prompt. {#if reasoningEffortLabels.length === 1}This
+									model supports only <span class="font-mono">{reasoningEffortLabels[0]}</span>
+									reasoning effort.{:else}You can specify one of
+									{#each reasoningEffortLabels as label, idx (label)}
+										<span class="font-mono">{label}</span>{idx < reasoningEffortLabels.length - 1
+											? ', '
+											: ''}
+									{/each} for this setting, where <span class="font-mono">low</span> will favor
+									speed, and <span class="font-mono">high</span> will favor more complete reasoning
+									at the cost of slower responses. The default value is
+									<span class="font-mono">{defaultReasoningLabel}</span>. Set reasoning effort to
+									<span class="font-mono">none</span> for the non-thinking version of this model.{/if}
+								{#if supportsTemperatureWithReasoningNone}Temperature controls become available only
+									when reasoning effort is set to <span class="font-mono">none</span>.{/if}</Helper
+							>
+						</div>
+						<select
+							id="reasoning-effort"
+							name="reasoning-effort"
+							class="block w-40 shrink-0 rounded-lg border border-gray-300 bg-gray-50 p-2.5 text-sm text-gray-900 focus:border-blue-500 focus:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
+							bind:value={reasoningEffortValue}
+							disabled={preventEdits || reasoningEffortLevels.length === 1}
+						>
+							{#each reasoningEffortLevels as level (level)}
+								<option value={level}>{getReasoningEffortLabel(level)}</option>
+							{/each}
+						</select>
+					</div>
+				{/if}
 			</div>
 		{/if}
 
@@ -5311,7 +5350,7 @@
 								if (el) {
 									el.scrollIntoView({ behavior: 'smooth', block: 'center' });
 								}
-							}}>Adjust in Advanced Options</Button
+							}}>Adjust</Button
 						>
 					</div>
 				</div>
@@ -6588,78 +6627,6 @@
 						{/if}
 
 						{#if !isLectureMode}
-							{#if supportsReasoning}
-								<div class="flex flex-col">
-									<Label for="reasoning-effort">Reasoning effort</Label>
-									<Helper class="pb-1"
-										>Select your desired reasoning effort, which gives the model guidance on how
-										much time it should spend "reasoning" before creating a response to the prompt. {#if reasoningEffortLabels.length !== 1}You
-											can specify one of
-											{#each reasoningEffortLabels as label, idx (label)}
-												<span class="font-mono">{label}</span>{idx <
-												reasoningEffortLabels.length - 1
-													? ', '
-													: ''}
-											{/each} for this setting, where <span class="font-mono">low</span> will favor
-											speed, and
-											<span class="font-mono">high</span>
-											will favor more complete reasoning at the cost of slower responses. The default
-											value is <span class="font-mono">{defaultReasoningLabel}</span>.{/if}
-										{#if supportsTemperatureWithReasoningNone}Temperature controls become available
-											only when reasoning effort is set to <span class="font-mono">none</span
-											>.{/if}</Helper
-									>
-									{#if reasoningEffortLabels.length === 1}
-										<div
-											class="mt-2 flex flex-row items-center justify-between gap-x-4 rounded-lg border border-amber-400 bg-gradient-to-b from-amber-50 to-amber-100 p-3 text-amber-800"
-										>
-											<div class="flex flex-row items-center gap-x-3">
-												<LightbulbSolid size="md" class="shrink-0" />
-												<div class="flex flex-col text-xs">
-													<span class="font-bold"
-														>This model only supports <span class="font-mono"
-															>{reasoningEffortLabels[0]}</span
-														> reasoning effort</span
-													>
-													<span
-														>For other models, you can control how long the model spends thinking
-														using this setting.</span
-													>
-												</div>
-											</div>
-										</div>
-									{/if}
-								</div>
-								{#if reasoningEffortLabels.length !== 1}
-									<Range
-										id="reasoning-effort"
-										name="reasoning-effort"
-										min={reasoningEffortMin}
-										max={reasoningEffortMax}
-										bind:value={reasoningEffortValue}
-										step="1"
-										disabled={preventEdits}
-										class="appearance-auto"
-									/>
-									<div class="mt-2 flex flex-row justify-between">
-										{#if reasoningEffortLabels.length < 4}
-											{#each reasoningEffortLabels as label (label)}
-												<p class="text-sm">{label}</p>
-											{/each}
-										{:else if supportsNoneReasoningEffort}
-											<p class="text-sm">{reasoningEffortLabels[0]}</p>
-											<p class="ml-4 text-sm">{reasoningEffortLabels[1]}</p>
-											<p class="ml-2 text-sm">{reasoningEffortLabels[2]}</p>
-											<p class="text-sm">{reasoningEffortLabels[3]}</p>
-										{:else}
-											<p class="text-sm">{reasoningEffortLabels[0]}</p>
-											<p class="-ml-2 text-sm">{reasoningEffortLabels[1]}</p>
-											<p class="ml-1 text-sm">{reasoningEffortLabels[2]}</p>
-											<p class="text-sm">{reasoningEffortLabels[3]}</p>
-										{/if}
-									</div>
-								{/if}
-							{/if}
 							{#if supportsTemperatureForCurrentReasoning && !isLectureMode}
 								<div class="flex flex-col">
 									<Label for="temperature">Temperature</Label>
