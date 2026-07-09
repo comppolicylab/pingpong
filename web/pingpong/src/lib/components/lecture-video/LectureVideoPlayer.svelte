@@ -204,6 +204,9 @@
 	let clusterCollapseTimeout: ReturnType<typeof setTimeout> | null = $state(null);
 	let playbackCompleted = $state(false);
 	let captionsEnabled = $state(false);
+	let captionsTrackElement: HTMLTrackElement | null = $state(null);
+	let activeCaptionLines: string[] = $state([]);
+	let controlsOverlayHeight = $state(0);
 	let isFullscreen = $state(false);
 	let isFullscreenSupported = $derived(
 		browser &&
@@ -211,9 +214,7 @@
 			playerContainerElement !== null &&
 			'requestFullscreen' in playerContainerElement
 	);
-	let captionsTrackElement: HTMLTrackElement | null = $state(null);
-	let activeCaptionLines: string[] = $state([]);
-	let controlsOverlayHeight = $state(0);
+
 	// Non-reactive: tracks the last shown question without retriggering the effect.
 	let lastQuestionPresentationKey: string | null = null;
 	let lastCaptionsSrc: string | null = null;
