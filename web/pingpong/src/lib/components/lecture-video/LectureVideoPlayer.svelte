@@ -4,6 +4,8 @@
 		CaptionSolid,
 		CheckOutline,
 		CloseOutline,
+		CompressOutline,
+		ExpandOutline,
 		PauseSolid,
 		PlaySolid,
 		RefreshOutline,
@@ -11,6 +13,7 @@
 		VolumeUpSolid,
 		VolumeMuteSolid
 	} from 'flowbite-svelte-icons';
+	import { browser } from '$app/environment';
 	import LectureVideoControlButton from '$lib/components/lecture-video/LectureVideoControlButton.svelte';
 	import SkipForwardIcon from '$lib/assets/icons/SkipForwardIcon.svelte';
 	import SkipBackwardIcon from '$lib/assets/icons/SkipBackwardIcon.svelte';
@@ -201,6 +204,13 @@
 	let clusterCollapseTimeout: ReturnType<typeof setTimeout> | null = $state(null);
 	let playbackCompleted = $state(false);
 	let captionsEnabled = $state(false);
+	let isFullscreen = $state(false);
+	let isFullscreenSupported = $derived(
+		browser &&
+			document.fullscreenEnabled &&
+			playerContainerElement !== null &&
+			'requestFullscreen' in playerContainerElement
+	);
 	let captionsTrackElement: HTMLTrackElement | null = $state(null);
 	let activeCaptionLines: string[] = $state([]);
 	let controlsOverlayHeight = $state(0);
@@ -470,6 +480,20 @@
 		syncCaptionTrackMode();
 	}
 
+	function toggleFullscreen() {
+		if (!isFullscreenSupported || typeof document === 'undefined' || !playerContainerElement)
+			return;
+
+		// check this rather than `isFullscreen` because `document.fullscreenElement` is
+		// closer to the source of truth, whereas `isFullscreen` is used just to track
+		// reactivity for rendering only
+		if (document.fullscreenElement) {
+			void document.exitFullscreen().catch(() => {});
+		} else {
+			void playerContainerElement.requestFullscreen().catch(() => {});
+		}
+	}
+
 	function syncMediaSessionState() {
 		if (typeof navigator === 'undefined' || !('mediaSession' in navigator)) {
 			return;
@@ -603,6 +627,15 @@
 
 	$effect(() => {
 		syncActiveCaptionLines();
+	});
+
+	$effect(() => {
+		if (typeof document === 'undefined') return;
+		const onFullscreenChange = () => {
+			isFullscreen = document.fullscreenElement === playerContainerElement;
+		};
+		document.addEventListener('fullscreenchange', onFullscreenChange);
+		return () => document.removeEventListener('fullscreenchange', onFullscreenChange);
 	});
 
 	$effect(() => () => clearClusterCollapseTimeout());
@@ -1342,6 +1375,9 @@
 		} else if (event.key === 'ArrowLeft') {
 			event.preventDefault();
 			handleKeyboardSkip('skipBackward');
+		} else if (event.key === 'f' || event.key === 'F') {
+			event.preventDefault();
+			toggleFullscreen();
 		}
 	}
 
@@ -1360,8 +1396,10 @@
 <div
 	bind:this={playerContainerElement}
 	class="relative overflow-hidden rounded-3xl border border-slate-800/80 bg-black"
-	class:aspect-video={measuredMediaAspectRatio == null}
-	style:aspect-ratio={measuredMediaAspectRatio ? String(measuredMediaAspectRatio) : undefined}
+	class:aspect-video={measuredMediaAspectRatio == null && !isFullscreen}
+	style:aspect-ratio={!isFullscreen && measuredMediaAspectRatio
+		? String(measuredMediaAspectRatio)
+		: undefined}
 	onkeydown={handleKeydown}
 	onmousemove={handleMouseMove}
 	onmouseenter={handleMouseEnter}
@@ -1806,6 +1844,7 @@
 							{/if}
 						</LectureVideoControlButton>
 						<LectureVideoControlButton
+							class="hidden sm:block"
 							label="Skip backward 15 seconds (left arrow)"
 							locked={questionControlsLocked}
 							onclick={() => skipBy('skipBackward')}
@@ -1813,6 +1852,7 @@
 							<SkipBackwardIcon class="size-5" />
 						</LectureVideoControlButton>
 						<LectureVideoControlButton
+							class="hidden sm:block"
 							label="Skip forward 15 seconds (right arrow)"
 							locked={questionControlsLocked}
 							onclick={() => skipBy('skipForward')}
@@ -1921,6 +1961,19 @@
 								{timeReadoutText}
 							</button>
 						</div>
+						{#if isFullscreenSupported}
+							<LectureVideoControlButton
+								label={isFullscreen ? 'Exit fullscreen (f)' : 'Enter fullscreen (f)'}
+								onclick={toggleFullscreen}
+								class="ml-auto"
+							>
+								{#if isFullscreen}
+									<CompressOutline class="size-5 text-white" />
+								{:else}
+									<ExpandOutline class="size-5 text-white" />
+								{/if}
+							</LectureVideoControlButton>
+						{/if}
 					</div>
 				</div>
 			</div>
