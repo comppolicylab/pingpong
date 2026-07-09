@@ -524,7 +524,7 @@ async def test_create_assistant_rejects_gpt_5_4_temperature_without_reasoning_no
     )
     assert response.status_code == 400
     assert response.json()["detail"] == (
-        "Temperature is only available for GPT-5.4 when reasoning effort is set to 'None'."
+        "The selected model and reasoning effort do not support temperature settings. Please select a different model or reasoning effort, or remove the temperature setting."
     )
 
 
@@ -582,18 +582,17 @@ async def test_create_assistant_rejects_unauthorized_deleted_private_files(
 
 @with_user(123)
 @with_authz(grants=[("user:123", "can_edit", "assistant:11")])
-async def test_update_assistant_clears_gpt_5_4_temperature_without_reasoning_none(
+async def test_update_assistant_clears_unsupported_persisted_temperature(
     api, db, valid_user_token, monkeypatch
 ):
     async def fake_list_class_models(class_id: str, request, openai_client):  # type: ignore[no-untyped-def]
         return _fake_class_models_response(
-            model_id="gpt-5.4",
-            model_name="GPT-5.4",
+            model_id="gpt-5.5",
+            model_name="GPT-5.5",
             supports_temperature=False,
             supports_reasoning=True,
             supports_none_reasoning_effort=True,
             supports_tools_with_none_reasoning_effort=True,
-            supports_temperature_with_reasoning_none=True,
             supports_classic_assistants=False,
         )
 
@@ -610,14 +609,14 @@ async def test_update_assistant_clears_gpt_5_4_temperature_without_reasoning_non
         )
         assistant = models.Assistant(
             id=11,
-            name="GPT-5.4 Assistant",
+            name="GPT-5.5 Assistant",
             version=3,
             instructions="You are helpful.",
             interaction_mode=schemas.InteractionMode.CHAT,
             description="Test assistant",
             tools="[]",
-            model="gpt-5.4",
-            reasoning_effort=-1,
+            model="gpt-5.5",
+            reasoning_effort=0,
             temperature=0.9,
             class_id=class_.id,
             creator_id=123,
@@ -630,7 +629,7 @@ async def test_update_assistant_clears_gpt_5_4_temperature_without_reasoning_non
 
     response = api.put(
         "/api/v1/class/1/assistant/11",
-        json={"reasoning_effort": 0, "tools": None},
+        json={"tools": None},
         headers={"Authorization": f"Bearer {valid_user_token}"},
     )
     assert response.status_code == 200

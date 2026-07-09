@@ -293,18 +293,24 @@ def test_realtime_tracing_config_sanitizes_group_id(monkeypatch):
     )
 
 
-def test_realtime_session_adds_low_reasoning_by_default_for_gpt_realtime_2():
+@pytest.mark.parametrize(
+    "model", ["gpt-realtime-2", "gpt-realtime-2.1", "gpt-realtime-2.1-mini"]
+)
+def test_realtime_reasoning_models_add_low_reasoning_by_default(model):
     session = websocket_module.build_realtime_session(
-        realtime_assistant(model="gpt-realtime-2"),
+        realtime_assistant(model=model),
         "Speak clearly.",
     )
 
     assert session["reasoning"] == {"effort": "low"}
 
 
-def test_realtime_session_uses_selected_reasoning_for_gpt_realtime_2():
+@pytest.mark.parametrize(
+    "model", ["gpt-realtime-2", "gpt-realtime-2.1", "gpt-realtime-2.1-mini"]
+)
+def test_realtime_reasoning_models_use_selected_reasoning(model):
     session = websocket_module.build_realtime_session(
-        realtime_assistant(model="gpt-realtime-2", reasoning_effort=-1),
+        realtime_assistant(model=model, reasoning_effort=-1),
         "Speak clearly.",
     )
 
@@ -542,13 +548,16 @@ async def test_single_realtime_session_rejects_finished_thread(
     )
 
 
-def test_gpt_realtime_2_model_metadata_supports_realtime_reasoning():
-    model = ai_models.KNOWN_MODELS["gpt-realtime-2"]
+@pytest.mark.parametrize(
+    "model_id", ["gpt-realtime-2", "gpt-realtime-2.1", "gpt-realtime-2.1-mini"]
+)
+def test_realtime_reasoning_model_metadata(model_id):
+    model = ai_models.KNOWN_MODELS[model_id]
 
     assert model["type"] == "voice"
     assert model["supports_reasoning"] is True
     assert model["supports_minimal_reasoning_effort"] is True
-    assert ai_models.get_reasoning_effort_map("gpt-realtime-2") == {
+    assert ai_models.get_reasoning_effort_map(model_id) == {
         -1: "minimal",
         0: "low",
         1: "medium",
