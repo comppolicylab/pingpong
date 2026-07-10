@@ -488,7 +488,7 @@
 		// check this rather than `isFullscreen` because `document.fullscreenElement` is
 		// closer to the source of truth, whereas `isFullscreen` is used just to track
 		// this state for reactive rendering
-		if (document.fullscreenElement) {
+		if (document.fullscreenElement === playerContainerElement) {
 			void document.exitFullscreen().catch(() => {});
 		} else {
 			void playerContainerElement.requestFullscreen().catch(() => {});
@@ -1396,7 +1396,9 @@
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div
 	bind:this={playerContainerElement}
-	class="relative overflow-hidden rounded-3xl border border-slate-800/80 bg-black"
+	class="relative overflow-hidden bg-black {isFullscreen
+		? ''
+		: 'rounded-3xl border border-slate-800/80'}"
 	class:aspect-video={measuredMediaAspectRatio == null && !isFullscreen}
 	style:aspect-ratio={!isFullscreen && measuredMediaAspectRatio
 		? String(measuredMediaAspectRatio)
