@@ -23,7 +23,7 @@ dependencies = [
     "beautifulsoup4~=4.15.0",
     "cryptography~=49.0.0",
     "discord-py~=2.7.1",
-    "elevenlabs~=2.56.0",
+    "elevenlabs~=2.57.0",
     "email-validator ~= 2.3.0",
     "fastapi[standard]~=0.139.0",
     "google-genai [aiohttp] ~= 1.67.0",
@@ -49,9 +49,9 @@ dependencies = [
     "sqlalchemy [asyncio] ~= 2.0.46",
     "starlette~=1.3.1",
     "tiktoken~=0.13.0",
-    "tqdm~=4.68.3",
-    "uuid-utils~=0.16.2",
-    "uvicorn~=0.49.0",
+    "tqdm~=4.68.4",
+    "uuid-utils~=0.17.0",
+    "uvicorn~=0.51.0",
 ]
 
 [project.urls]
