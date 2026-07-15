@@ -208,6 +208,27 @@ export const getLTISessionToken = () => {
 	return sessionStorage.getItem('lti_session');
 };
 
+/**
+ * Add credentials to media URLs whose native browser requests cannot send custom headers.
+ */
+export const withMediaAuthQuery = (url: string): string => {
+	const queryParts: string[] = [];
+	const anonymousSessionToken = getAnonymousSessionToken();
+	const anonymousShareToken = getAnonymousShareToken();
+	if (anonymousSessionToken) {
+		queryParts.push(`anonymous_session_token=${encodeURIComponent(anonymousSessionToken)}`);
+	}
+	if (anonymousShareToken) {
+		queryParts.push(`anonymous_share_token=${encodeURIComponent(anonymousShareToken)}`);
+	}
+	const ltiSessionToken = getLTISessionToken();
+	if (ltiSessionToken) {
+		queryParts.push(`lti_session=${encodeURIComponent(ltiSessionToken)}`);
+	}
+	if (queryParts.length === 0) return url;
+	return `${url}${url.includes('?') ? '&' : '?'}${queryParts.join('&')}`;
+};
+
 export const clearLTISessionToken = () => {
 	_ltiSessionToken = null;
 	if (browser) {

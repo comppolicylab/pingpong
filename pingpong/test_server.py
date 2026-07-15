@@ -12,10 +12,26 @@ import pingpong.schemas as schemas
 
 from .auth import encode_session_token
 from .now import offset
+from .session import is_media_route
 from .testutil import with_authz, with_authz_series, with_user, with_institution
 
 copy_module = importlib.import_module("pingpong.copy")
 server_module = importlib.import_module("pingpong.server")
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/api/v1/class/1/thread/109/lecture-video/captions.vtt",
+        "/api/v1/class/1/thread/109/lecture-slides/audio",
+        "/api/v1/class/1/thread/109/lecture-slides/captions.vtt",
+        "/api/v1/class/1/thread/109/lecture-slides/7/image",
+        "/api/v1/class/1/assistant/3/lecture-video/poster",
+        "/api/v1/class/1/assistant/3/lecture-slides/thumbnail",
+    ],
+)
+def test_shared_media_routes_allow_query_parameter_auth(path):
+    assert is_media_route(path)
 
 
 async def _async_return(value):
