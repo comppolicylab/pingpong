@@ -2581,7 +2581,7 @@ async def get_canvas_classes(class_id: str, tenant: str, request: StateRequest):
     response_model=schemas.GenericStatus,
 )
 async def verify_canvas_class_permissions(
-    class_id: str, tenant: str, canvas_class_id: str, request: StateRequest
+    class_id: str, tenant: str, canvas_class_id: int, request: StateRequest
 ):
     canvas_settings = get_canvas_config(tenant)
     async with LightweightCanvasClient(
@@ -2656,7 +2656,7 @@ async def verify_canvas_class_permissions(
     response_model=schemas.GenericStatus,
 )
 async def update_canvas_class(
-    class_id: str, tenant: str, canvas_class_id: str, request: StateRequest
+    class_id: str, tenant: str, canvas_class_id: int, request: StateRequest
 ):
     canvas_settings = get_canvas_config(tenant)
     async with LightweightCanvasClient(
@@ -11254,6 +11254,8 @@ async def create_assistant(
             detail="The selected model does not support MCP Servers. Please select a different model or remove the MCP Server tool.",
         )
     if uses_mcp_server and assistant_version <= 2:
+        # Intentionally retained while the deprecated Classic Assistants path remains.
+        # codeql[py/unreachable-statement]
         raise HTTPException(
             status_code=400,
             detail="Classic Assistants do not support MCP Server tools. To use MCP Servers, create a Next-Gen Assistant.",
@@ -11276,6 +11278,8 @@ async def create_assistant(
             )
 
     if uses_web_search and assistant_version <= 2:
+        # Intentionally retained while the deprecated Classic Assistants path remains.
+        # codeql[py/unreachable-statement]
         raise HTTPException(
             status_code=400,
             detail="Classic Assistants do not support Web Search capabilities. To use Web Search, create a Next-Gen Assistant.",
@@ -11465,6 +11469,8 @@ async def create_assistant(
         tool_resources["code_interpreter"] = {"file_ids": req.code_interpreter_file_ids}
 
     if assistant_version <= 2:
+        # Intentionally retained while the deprecated Classic Assistants path remains.
+        # codeql[py/unreachable-statement]
         try:
             if uses_voice:
                 _model = "gpt-4o"

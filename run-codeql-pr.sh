@@ -27,6 +27,7 @@ resolve_language_config() {
   CODEQL_LANGUAGE_NAME=""
   CODEQL_PACK=""
   CODEQL_SUITE_FILE=""
+  CODEQL_EXTRA_QUERY=""
 
   case "$lang" in
     actions)
@@ -43,6 +44,7 @@ resolve_language_config() {
       CODEQL_LANGUAGE_NAME="python"
       CODEQL_PACK="codeql/python-queries"
       CODEQL_SUITE_FILE="python-security-and-quality.qls"
+      CODEQL_EXTRA_QUERY="$CODEQL_PACK:AlertSuppression.ql"
       ;;
     *)
       return 1
@@ -177,6 +179,11 @@ run_codeql() {
   local out="$OUT_DIR/$CODEQL_LANGUAGE_NAME.sarif"
   local lgtm_index_filters="${LGTM_INDEX_FILTERS:-}"
   local gitignored_excludes
+  local -a queries=("$CODEQL_PACK:codeql-suites/$CODEQL_SUITE_FILE")
+
+  if [ -n "$CODEQL_EXTRA_QUERY" ]; then
+    queries+=("$CODEQL_EXTRA_QUERY")
+  fi
 
   gitignored_excludes="$(build_gitignored_lgtm_filters)"
   if [ -n "$gitignored_excludes" ]; then
@@ -214,7 +221,7 @@ run_codeql() {
 
   run_with_live_progress "$CODEQL_LANGUAGE_NAME" "analyze" \
     codeql database analyze "$db" \
-      "$CODEQL_PACK:codeql-suites/$CODEQL_SUITE_FILE" \
+      "${queries[@]}" \
       --format=sarifv2.1.0 \
       --output="$out" \
       --download \
@@ -267,11 +274,12 @@ for lang in "${languages_to_run[@]}"; do
   fi
 
   lang_name="$CODEQL_LANGUAGE_NAME"
-  count="$(jq '[.runs[].results[]] | length' "$sarif")"
+  count="$(jq '[.runs[].results[] | select((.suppressions // []) | length == 0)] | length' "$sarif")"
+  suppressed_count="$(jq '[.runs[].results[] | select((.suppressions // []) | length > 0)] | length' "$sarif")"
   if [ "$count" -gt 0 ]; then
     echo "=== $lang_name: $count finding(s) ==="
     jq -r '
-      [.runs[].results[]] | to_entries[] |
+      [.runs[].results[] | select((.suppressions // []) | length == 0)] | to_entries[] |
       "\(.key + 1). [\(.value.level // "warning")] \(.value.message.text)\n" +
       "   Rule: \(.value.ruleId)\n" +
       "   File: \(.value.locations[0].physicalLocation.artifactLocation.uri // "unknown"):" +
@@ -279,6 +287,10 @@ for lang in "${languages_to_run[@]}"; do
     ' "$sarif"
   else
     echo "=== $lang_name: no findings ==="
+  fi
+
+  if [ "$suppressed_count" -gt 0 ]; then
+    echo "=== $lang_name: $suppressed_count intentionally suppressed finding(s) ==="
   fi
 
   total=$(( total + count ))

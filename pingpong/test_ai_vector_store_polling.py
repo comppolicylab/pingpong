@@ -43,6 +43,25 @@ async def test_poll_vector_store_files_skips_missing_files(caplog):
     assert "vs-test" in caplog.text
 
 
+async def test_poll_vector_store_files_sanitizes_missing_file_ids_in_logs(caplog):
+    cli = AsyncMock()
+
+    async def fake_poll(*, file_id: str, vector_store_id: str):
+        raise _not_found_error("file-missing", vector_store_id)
+
+    cli.vector_stores.files.poll = AsyncMock(side_effect=fake_poll)
+
+    with caplog.at_level(logging.WARNING):
+        await poll_vector_store_files(
+            cli,
+            vector_store_id="vs-test",
+            file_ids=["file-valid", "file-malicious\nforged-entry"],
+        )
+
+    assert "file-valid" in caplog.text
+    assert "\nforged-entry" not in caplog.text
+
+
 async def test_poll_vector_store_files_noop_for_empty_file_list():
     cli = AsyncMock()
     cli.vector_stores.files.poll = AsyncMock()
