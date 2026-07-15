@@ -1,0 +1,418 @@
+@import 'tailwindcss';
+@import "tw-animate-css";
+@import "shadcn-svelte/tailwind.css";
+@import "@fontsource-variable/inter";
+@config '../tailwind.config.js';
+@plugin 'flowbite/plugin';
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+	--default-ring-width: 3px;
+	--default-ring-color: var(--color-blue-500);
+	--font-sans: 'Inter Variable', sans-serif;
+	--font-heading: 'Inter Variable', sans-serif;
+	--color-sidebar-ring: var(--sidebar-ring);
+	--color-sidebar-border: var(--sidebar-border);
+	--color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+	--color-sidebar-accent: var(--sidebar-accent);
+	--color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+	--color-sidebar-primary: var(--sidebar-primary);
+	--color-sidebar-foreground: var(--sidebar-foreground);
+	--color-sidebar: var(--sidebar);
+	--color-chart-5: var(--chart-5);
+	--color-chart-4: var(--chart-4);
+	--color-chart-3: var(--chart-3);
+	--color-chart-2: var(--chart-2);
+	--color-chart-1: var(--chart-1);
+	--color-ring: var(--ring);
+	--color-input: var(--input);
+	--color-border: var(--border);
+	--color-destructive: var(--destructive);
+	--color-accent-foreground: var(--accent-foreground);
+	--color-accent: var(--accent);
+	--color-muted-foreground: var(--muted-foreground);
+	--color-muted: var(--muted);
+	--color-secondary-foreground: var(--secondary-foreground);
+	--color-secondary: var(--secondary);
+	--color-primary-foreground: var(--primary-foreground);
+	--color-primary: var(--primary);
+	--color-popover-foreground: var(--popover-foreground);
+	--color-popover: var(--popover);
+	--color-card-foreground: var(--card-foreground);
+	--color-card: var(--card);
+	--color-foreground: var(--foreground);
+	--color-background: var(--background);
+	--radius-sm: calc(var(--radius) * 0.6);
+	--radius-md: calc(var(--radius) * 0.8);
+	--radius-lg: var(--radius);
+	--radius-xl: calc(var(--radius) * 1.4);
+	--radius-2xl: calc(var(--radius) * 1.8);
+	--radius-3xl: calc(var(--radius) * 2.2);
+	--radius-4xl: calc(var(--radius) * 2.6);
+}
+
+@layer base {
+	/* Flowbite form controls use --color-brand for checked/focus states. */
+	:root {
+		--color-brand: var(--color-blue-600);
+		--background: oklch(1 0 0);
+		--foreground: oklch(0.147 0.004 49.25);
+		--card: oklch(1 0 0);
+		--card-foreground: oklch(0.147 0.004 49.25);
+		--popover: oklch(1 0 0);
+		--popover-foreground: oklch(0.147 0.004 49.25);
+		--primary: oklch(0.553 0.195 38.402);
+		--primary-foreground: oklch(0.98 0.016 73.684);
+		--secondary: oklch(0.967 0.001 286.375);
+		--secondary-foreground: oklch(0.21 0.006 285.885);
+		--muted: oklch(0.97 0.001 106.424);
+		--muted-foreground: oklch(0.553 0.013 58.071);
+		--accent: oklch(0.553 0.195 38.402);
+		--accent-foreground: oklch(0.98 0.016 73.684);
+		--destructive: oklch(0.577 0.245 27.325);
+		--border: oklch(0.923 0.003 48.717);
+		--input: oklch(0.923 0.003 48.717);
+		--ring: oklch(0.709 0.01 56.259);
+		--chart-1: oklch(0.869 0.005 56.366);
+		--chart-2: oklch(0.553 0.013 58.071);
+		--chart-3: oklch(0.444 0.011 73.639);
+		--chart-4: oklch(0.374 0.01 67.558);
+		--chart-5: oklch(0.268 0.007 34.298);
+		--radius: 0.625rem;
+		--sidebar: oklch(0.985 0.001 106.423);
+		--sidebar-foreground: oklch(0.147 0.004 49.25);
+		--sidebar-primary: oklch(0.646 0.222 41.116);
+		--sidebar-primary-foreground: oklch(0.98 0.016 73.684);
+		--sidebar-accent: oklch(0.97 0.001 106.424);
+		--sidebar-accent-foreground: oklch(0.216 0.006 56.043);
+		--sidebar-border: oklch(0.923 0.003 48.717);
+		--sidebar-ring: oklch(0.709 0.01 56.259);
+	}
+	* {
+		@apply border-border outline-ring/50;
+	}
+	body {
+		@apply bg-background text-foreground;
+	}
+	html {
+		@apply font-sans;
+	}
+}
+
+@media print {
+	body {
+		background: white !important;
+		margin: 0 !important;
+		padding: 0 !important;
+	}
+	body > div {
+		margin: 0 !important;
+		max-width: none !important;
+		height: auto !important;
+	}
+}
+
+body.simple-view {
+	background: white !important;
+}
+body.simple-view > div {
+	margin: 0 !important;
+	max-width: none !important;
+	height: 100vh !important;
+}
+
+.katex-display {
+	display: block;
+	width: 100%;
+	margin: 1.5rem 0;
+}
+
+.eyebrow {
+	color: theme('colors.blue-light-40');
+	font-size: 10px;
+	font-weight: bold;
+	letter-spacing: 1px;
+	text-transform: uppercase;
+}
+.eyebrow-dark {
+	color: theme('colors.blue-dark-40');
+}
+
+.hidden-radio input[type='radio'] {
+	display: none !important;
+}
+
+.shimmer {
+	color: #4b5563;
+	animation-delay: 0s;
+	animation-duration: 2s;
+	animation-iteration-count: infinite;
+	animation-name: shimmer;
+}
+
+@supports ((background-clip: text) or (-webkit-background-clip: text)) {
+	.shimmer {
+		color: transparent;
+		-webkit-text-fill-color: transparent;
+		background-color: #4b5563;
+		background-image: linear-gradient(
+			to left,
+			#5d5d5d 0%,
+			#ffffffbf 40%,
+			#ffffffbf 60%,
+			#4b5563 100%
+		);
+		-webkit-background-clip: text;
+		background-clip: text;
+		background-position: -100% 0;
+		background-repeat: no-repeat;
+		background-size: 50% 200%;
+	}
+}
+
+@keyframes shimmer {
+	0% {
+		background-position: -100% 0;
+	}
+	100% {
+		background-position: 250% 0;
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.shimmer {
+		animation: none;
+	}
+}
+
+.shimmer:hover {
+	-webkit-text-fill-color: #374151;
+	color: #374151;
+	background: none;
+}
+
+.markdown {
+	h1,
+	h2,
+	h3,
+	h4,
+	h5,
+	h6 {
+		font-weight: bold;
+		margin-top: 1em;
+		margin-bottom: 0.75em;
+	}
+
+	h1 {
+		font-size: 1.5rem;
+	}
+
+	h2 {
+		font-size: 1.4rem;
+	}
+
+	h3 {
+		font-size: 1.3rem;
+	}
+
+	h4 {
+		font-size: 1.2rem;
+	}
+
+	h5 {
+		font-size: 1.1rem;
+	}
+
+	h6 {
+		font-size: 1rem;
+	}
+
+	strong {
+		font-weight: bold;
+	}
+
+	em {
+		font-style: italic;
+	}
+
+	a {
+		text-decoration: underline;
+		color: #0ea5e9;
+		&:hover {
+			color: #3b82f6;
+		}
+	}
+
+	blockquote {
+		background-color: #f9f9f9;
+		border-left: 10px solid #ccc;
+		padding: 1em 10px 0.1em;
+	}
+
+	code {
+		border-radius: 0.25rem;
+	}
+
+	hr {
+		border: 1px solid #aaa;
+	}
+
+	hr,
+	pre,
+	p,
+	ul,
+	ol,
+	blockquote,
+	table {
+		margin-bottom: 1rem;
+	}
+
+	ul {
+		list-style: initial;
+		margin-left: 1rem;
+	}
+
+	ol {
+		list-style: decimal;
+		margin-left: 1rem;
+	}
+
+	ul,
+	ol {
+		li {
+			margin-bottom: 0.25rem;
+			margin-left: 1rem;
+			line-height: 2;
+			p:last-child {
+				margin-bottom: 0;
+			}
+		}
+	}
+
+	table {
+		border-collapse: collapse;
+		&,
+		th,
+		td {
+			border: 1px solid #ccc;
+		}
+		th,
+		td {
+			padding: 0.5rem 1rem;
+		}
+	}
+
+	p,
+	li {
+		font-size: 15px;
+		font-weight: 400;
+		letter-spacing: 0.25px;
+		line-height: 1.65;
+		max-width: 52rem;
+	}
+}
+
+@source '../node_modules/flowbite-svelte/dist';
+@source '../node_modules/flowbite-svelte-icons/dist';
+
+@layer base {
+	/* disable chrome cancel button */
+	input[type='search']::-webkit-search-cancel-button {
+		display: none;
+	}
+}
+
+@layer base {
+	*,
+	::after,
+	::before,
+	::backdrop,
+	::file-selector-button {
+		border-color: var(--color-gray-200, currentColor);
+	}
+}
+
+/* Override Flowbite's placeholder color */
+input::placeholder,
+textarea::placeholder {
+	color: var(--color-gray-500);
+}
+
+@layer base {
+	button:not(:disabled),
+	[role='button']:not(:disabled) {
+		cursor: pointer;
+	}
+}
+
+@layer base {
+	dialog {
+		margin: auto;
+	}
+}
+
+/* Firefox range input styling - Flowbite only has WebKit styles */
+input[type='range']::-moz-range-track {
+	background: var(--color-gray-200);
+	border-radius: 0.5rem;
+	height: 0.5rem;
+}
+
+input[type='range']::-moz-range-thumb {
+	appearance: none;
+	background: var(--color-blue-500);
+	border: none;
+	border-radius: 50%;
+	height: 1.25rem;
+	width: 1.25rem;
+	cursor: pointer;
+}
+
+input[type='range']::-moz-range-progress {
+	background: var(--color-blue-500);
+	border-radius: 0.5rem;
+	height: 0.5rem;
+}
+
+input[type='range']:disabled::-moz-range-thumb {
+	background: var(--color-gray-400);
+	cursor: not-allowed;
+}
+
+input[type='range']:disabled::-moz-range-progress {
+	background: var(--color-gray-400);
+}
+
+.dark {
+	--background: oklch(0.147 0.004 49.25);
+	--foreground: oklch(0.985 0.001 106.423);
+	--card: oklch(0.216 0.006 56.043);
+	--card-foreground: oklch(0.985 0.001 106.423);
+	--popover: oklch(0.216 0.006 56.043);
+	--popover-foreground: oklch(0.985 0.001 106.423);
+	--primary: oklch(0.47 0.157 37.304);
+	--primary-foreground: oklch(0.98 0.016 73.684);
+	--secondary: oklch(0.274 0.006 286.033);
+	--secondary-foreground: oklch(0.985 0 0);
+	--muted: oklch(0.268 0.007 34.298);
+	--muted-foreground: oklch(0.709 0.01 56.259);
+	--accent: oklch(0.47 0.157 37.304);
+	--accent-foreground: oklch(0.98 0.016 73.684);
+	--destructive: oklch(0.704 0.191 22.216);
+	--border: oklch(1 0 0 / 10%);
+	--input: oklch(1 0 0 / 15%);
+	--ring: oklch(0.553 0.013 58.071);
+	--chart-1: oklch(0.869 0.005 56.366);
+	--chart-2: oklch(0.553 0.013 58.071);
+	--chart-3: oklch(0.444 0.011 73.639);
+	--chart-4: oklch(0.374 0.01 67.558);
+	--chart-5: oklch(0.268 0.007 34.298);
+	--sidebar: oklch(0.216 0.006 56.043);
+	--sidebar-foreground: oklch(0.985 0.001 106.423);
+	--sidebar-primary: oklch(0.705 0.213 47.604);
+	--sidebar-primary-foreground: oklch(0.98 0.016 73.684);
+	--sidebar-accent: oklch(0.268 0.007 34.298);
+	--sidebar-accent-foreground: oklch(0.985 0.001 106.423);
+	--sidebar-border: oklch(1 0 0 / 10%);
+	--sidebar-ring: oklch(0.553 0.013 58.071);
+}
