@@ -34,3 +34,4 @@ __pycache__/
 .mypy_cache/
 saml/**/certs/*
 web/
+.agents
