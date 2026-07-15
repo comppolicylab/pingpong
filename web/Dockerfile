@@ -1,3 +1,8 @@
+ARG PINGPONG_LANDING_IMAGE=pingpong-study-landing:prod
+
+########## Import study landing artifact ##########
+FROM ${PINGPONG_LANDING_IMAGE} AS study_landing
+
 ########## Build pingpong ##########
 FROM node:22.23.1-alpine3.24 AS build_pingpong
 
@@ -49,5 +54,9 @@ ENV NGINX_SSL_CERT_KEY=/etc/ssl/private/pingpong-self-signed.key
 # Use the nginx template stored at repo web/ level
 COPY default.conf.template /etc/nginx/templates/
 
-# Copy both build outputs into distinct roots
+# Import the study host configuration and rendered landing site from its image.
+COPY --from=study_landing /etc/nginx/templates/default.conf.template /etc/nginx/templates/study.conf.template
+COPY --from=study_landing /usr/share/nginx/html/study /usr/share/nginx/html/study
+
+# Copy the main application build.
 COPY --from=build_pingpong /app/pingpong/build /usr/share/nginx/html/pingpong

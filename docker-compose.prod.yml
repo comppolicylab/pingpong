@@ -7,6 +7,7 @@ services:
     image: 654654251079.dkr.ecr.us-east-1.amazonaws.com/pingpong-web:${WEB_VERSION}
     build:
       args:
+        PINGPONG_LANDING_IMAGE: 654654251079.dkr.ecr.us-east-1.amazonaws.com/pingpong-study-landing:prod
         sentry_dsn: https://54d1c8a998bf4cb271881a47e10f8070@o702726.ingest.sentry.io/4506613819506688
         node_env: production
         origin: https://pingpong.hks.harvard.edu
