@@ -762,6 +762,90 @@ async def test_rerun_clears_message_parts_and_attachments_before_resetting_metad
         assert code_interpreter_attachments == []
 
 
+async def test_resume_skips_checkpointed_thread_and_preserves_downstream_data(
+    db: DbDriver, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    messages = [
+        _generate_openai_message("msg_user", role="user", created_at=100, user_id=7)
+    ]
+    client = FakeOpenAIClient(messages, {})
+    _patch_client(monkeypatch, client)
+
+    async with db.async_session() as session:
+        await _generate_local_thread(session)
+        await session.commit()
+
+    async with db.async_session() as session:
+        await migration.migrate_threads_and_messages_to_v3(session)
+
+    async with db.async_session() as session:
+        user_msg = await models.Message.get_by_openai_message_id(session, "msg_user")
+        assert user_msg is not None
+        user_msg.message_metadata = {
+            "assistants_to_responses_api_thread_migration": {
+                "message": "complete",
+                "message_parts": "complete",
+                "attachments": "complete",
+            }
+        }
+        session.add(
+            models.MessagePart(
+                message_id=user_msg.id,
+                type=schemas.MessagePartType.INPUT_TEXT,
+                part_index=0,
+                text="preserved part",
+            )
+        )
+        await session.commit()
+
+    client.beta.threads.messages.calls.clear()
+    async with db.async_session() as session:
+        await migration.migrate_threads_and_messages_to_v3(session, resume=True)
+
+    assert client.message_calls == []
+    async with db.async_session() as session:
+        user_msg = await models.Message.get_by_openai_message_id(session, "msg_user")
+        assert user_msg is not None
+        assert user_msg.message_metadata == {
+            "assistants_to_responses_api_thread_migration": {
+                "message": "complete",
+                "message_parts": "complete",
+                "attachments": "complete",
+            }
+        }
+        parts = list(
+            (
+                await session.scalars(
+                    select(models.MessagePart).where(
+                        models.MessagePart.message_id == user_msg.id
+                    )
+                )
+            ).all()
+        )
+        assert [part.text for part in parts] == ["preserved part"]
+
+
+async def test_resume_migrates_thread_without_checkpoint(
+    db: DbDriver, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    messages = [
+        _generate_openai_message("msg_user", role="user", created_at=100, user_id=7)
+    ]
+    client = FakeOpenAIClient(messages, {})
+    _patch_client(monkeypatch, client)
+
+    async with db.async_session() as session:
+        await _generate_local_thread(session)
+        await session.commit()
+
+    async with db.async_session() as session:
+        await migration.migrate_threads_and_messages_to_v3(session, resume=True)
+
+    assert [call.thread_id for call in client.message_calls] == [
+        "sample_openai_thread_id"
+    ]
+
+
 async def test_none_message_status_defaults_to_completed(
     db: DbDriver, monkeypatch: pytest.MonkeyPatch
 ) -> None:

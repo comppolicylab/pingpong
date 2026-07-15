@@ -15,7 +15,7 @@ from openai.types.beta.threads.runs import (
     RunStep,
     ToolCallsStepDetails,
 )
-from sqlalchemy import delete, func, or_, select
+from sqlalchemy import delete, exists, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import pingpong.models as models
@@ -37,7 +37,9 @@ logger = logging.getLogger(__name__)
 LOCAL_BATCH_SIZE = 100
 
 
-async def migrate_threads_and_messages_to_v3(session: AsyncSession) -> None:
+async def migrate_threads_and_messages_to_v3(
+    session: AsyncSession, *, resume: bool = False
+) -> None:
     """
     Step 1 in multi-step migration from the Assistants API-based interactions with
     OpenAI and those based on the Responses API. In v2, most objects were stored in
@@ -48,13 +50,14 @@ async def migrate_threads_and_messages_to_v3(session: AsyncSession) -> None:
     migrations will handle message parts, attachments, and annotations.
     """
     logger.info(
-        "m15 starting thread/message migration. classes=%s assistants=%s",
-        await _count_v2_thread_classes(session),
-        await _count_assistants_with_v2_threads(session),
+        "m15 starting thread/message migration. mode=%s classes=%s assistants=%s",
+        "resume" if resume else "restart",
+        await _count_v2_thread_classes(session, resume=resume),
+        await _count_assistants_with_v2_threads(session, resume=resume),
     )
 
     failed_threads: list[str] = []
-    async for class_id in _v2_thread_class_ids(session):
+    async for class_id in _v2_thread_class_ids(session, resume=resume):
         try:
             openai_client = await get_openai_client_by_class_id(session, class_id)
         except Exception as e:
@@ -63,8 +66,12 @@ async def migrate_threads_and_messages_to_v3(session: AsyncSession) -> None:
             )
             continue
 
-        async for assistant in _assistants_with_v2_threads(session, class_id):
-            async for thread in _v2_threads_for_assistant(session, assistant.id):
+        async for assistant in _assistants_with_v2_threads(
+            session, class_id, resume=resume
+        ):
+            async for thread in _v2_threads_for_assistant(
+                session, assistant.id, resume=resume
+            ):
                 # Keep each OpenAI-backed thread sync isolated. _migrate_thread may
                 # flush several local rows before a later OpenAI request fails, so the
                 # savepoint lets us undo only this thread's partial work.
@@ -96,43 +103,63 @@ async def migrate_threads_and_messages_to_v3(session: AsyncSession) -> None:
         )
 
 
-async def _count_v2_thread_classes(session: AsyncSession) -> int:
+def _v2_thread_filters(*, resume: bool) -> tuple:
+    filters = (
+        models.Thread.version == 2,
+        models.Thread.interaction_mode == InteractionMode.CHAT,
+    )
+    if not resume:
+        return filters
+
+    migration_state = models.Message.message_metadata[
+        "assistants_to_responses_api_thread_migration"
+    ]["message"].as_string()
+    completed_m15_message = exists(
+        select(models.Message.id).where(
+            models.Message.thread_id == models.Thread.id,
+            models.Message.message_id.is_not(None),
+            migration_state == "complete",
+        )
+    )
+    return (*filters, ~completed_m15_message)
+
+
+async def _count_v2_thread_classes(
+    session: AsyncSession, *, resume: bool = False
+) -> int:
     class_ids = (
         select(models.Assistant.class_id)
         .join(models.Thread, models.Thread.assistant_id == models.Assistant.id)
-        .where(
-            models.Thread.version == 2,
-            models.Thread.interaction_mode == InteractionMode.CHAT,
-        )
+        .where(*_v2_thread_filters(resume=resume))
         .distinct()
         .subquery()
     )
     return await session.scalar(select(func.count()).select_from(class_ids)) or 0
 
 
-async def _count_assistants_with_v2_threads(session: AsyncSession) -> int:
+async def _count_assistants_with_v2_threads(
+    session: AsyncSession, *, resume: bool = False
+) -> int:
     assistant_ids = (
         select(models.Assistant.id)
         .join(models.Thread, models.Thread.assistant_id == models.Assistant.id)
-        .where(
-            models.Thread.version == 2,
-            models.Thread.interaction_mode == InteractionMode.CHAT,
-        )
+        .where(*_v2_thread_filters(resume=resume))
         .distinct()
         .subquery()
     )
     return await session.scalar(select(func.count()).select_from(assistant_ids)) or 0
 
 
-async def _v2_thread_class_ids(session: AsyncSession) -> AsyncIterator[int]:
+async def _v2_thread_class_ids(
+    session: AsyncSession, *, resume: bool = False
+) -> AsyncIterator[int]:
     last_class_id = 0
     while True:
         stmt = (
             select(models.Assistant.class_id)
             .join(models.Thread, models.Thread.assistant_id == models.Assistant.id)
             .where(
-                models.Thread.version == 2,
-                models.Thread.interaction_mode == InteractionMode.CHAT,
+                *_v2_thread_filters(resume=resume),
                 models.Assistant.class_id > last_class_id,
             )
             .distinct()
@@ -149,7 +176,7 @@ async def _v2_thread_class_ids(session: AsyncSession) -> AsyncIterator[int]:
 
 
 async def _assistants_with_v2_threads(
-    session: AsyncSession, class_id: int
+    session: AsyncSession, class_id: int, *, resume: bool = False
 ) -> AsyncIterator[models.Assistant]:
     last_assistant_id = 0
     while True:
@@ -160,8 +187,7 @@ async def _assistants_with_v2_threads(
             .where(
                 models.Assistant.id > last_assistant_id,
                 models.Assistant.class_id == class_id,
-                models.Thread.version == 2,
-                models.Thread.interaction_mode == InteractionMode.CHAT,
+                *_v2_thread_filters(resume=resume),
             )
             .distinct()
             .order_by(models.Assistant.id)
@@ -177,15 +203,18 @@ async def _assistants_with_v2_threads(
 
 
 async def _fetch_threads_for_assistant_batch(
-    session: AsyncSession, assistant_id: int, after_id: int
+    session: AsyncSession,
+    assistant_id: int,
+    after_id: int,
+    *,
+    resume: bool = False,
 ) -> list[models.Thread]:
     stmt = (
         select(models.Thread)
         .where(
             models.Thread.id > after_id,
             models.Thread.assistant_id == assistant_id,
-            models.Thread.version == 2,
-            models.Thread.interaction_mode == InteractionMode.CHAT,
+            *_v2_thread_filters(resume=resume),
         )
         .order_by(models.Thread.id)
         .limit(LOCAL_BATCH_SIZE)
@@ -195,12 +224,12 @@ async def _fetch_threads_for_assistant_batch(
 
 
 async def _v2_threads_for_assistant(
-    session: AsyncSession, assistant_id: int
+    session: AsyncSession, assistant_id: int, *, resume: bool = False
 ) -> AsyncIterator[models.Thread]:
     last_thread_id = 0
     while True:
         threads = await _fetch_threads_for_assistant_batch(
-            session, assistant_id, last_thread_id
+            session, assistant_id, last_thread_id, resume=resume
         )
         if not threads:
             break

@@ -1204,11 +1204,19 @@ def m14_migrate_lecture_slide_v4_context_to_v5(
 
 
 @db.command("m15_v3_migrate_threads_and_messages")
-def m15_v3_migrate_threads_and_messages() -> None:
+@click.option(
+    "--resume/--restart",
+    default=False,
+    help=(
+        "Resume by skipping threads already checkpointed by m15, preserving any "
+        "m16/m17-derived data. Restart re-syncs every eligible v2 chat thread."
+    ),
+)
+def m15_v3_migrate_threads_and_messages(resume: bool) -> None:
     async def _m15_v3_migrate_threads_and_messages() -> None:
         async with config.db.driver.async_session() as session:
             logger.info("Migrating threads and messages to v3...")
-            await migrate_threads_and_messages_to_v3(session)
+            await migrate_threads_and_messages_to_v3(session, resume=resume)
             logger.info("Done!")
 
     asyncio.run(_m15_v3_migrate_threads_and_messages())
