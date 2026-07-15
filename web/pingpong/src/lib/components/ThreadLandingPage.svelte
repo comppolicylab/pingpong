@@ -171,9 +171,13 @@
 	let lessonThumbnailAssistantId: number | undefined;
 	$: lessonThumbnailUrl =
 		assistant.interaction_mode === 'lecture_video' && data?.class?.id && assistant.id
-			? `/api/v1/class/${data.class.id}/assistant/${assistant.id}/lecture-video/poster`
+			? api.withMediaAuthQuery(
+					`/api/v1/class/${data.class.id}/assistant/${assistant.id}/lecture-video/poster`
+				)
 			: assistant.interaction_mode === 'lecture_slides' && data?.class?.id && assistant.id
-				? `/api/v1/class/${data.class.id}/assistant/${assistant.id}/lecture-slides/thumbnail`
+				? api.withMediaAuthQuery(
+						`/api/v1/class/${data.class.id}/assistant/${assistant.id}/lecture-slides/thumbnail`
+					)
 				: '';
 	$: {
 		// Reset failure state when the selected assistant changes so we re-attempt the new thumbnail.

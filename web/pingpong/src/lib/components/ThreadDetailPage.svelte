@@ -171,6 +171,9 @@
 	$: lectureSlideCaptionsSrc = threadLectureSlideCaptionsAvailable
 		? api.getLectureSlideCaptionsUrl(classId, threadId)
 		: null;
+	$: lectureSlideNarrationSrc = lectureSlideDeck?.continuous_narration_url
+		? api.withMediaAuthQuery(lectureSlideDeck.continuous_narration_url)
+		: '';
 	let lectureSlideMediaAspectRatio: number | null = null;
 	let lectureSlideMediaAspectRatioDeckId: number | null = null;
 	$: lectureSlidePages = ((lectureSlideDeck?.pages ?? []) as api.LectureSlidePage[])
@@ -1794,12 +1797,12 @@
 			</LectureVideoView>
 		{/key}
 	{:else if data.threadInteractionMode === 'lecture_slides'}
-		{#key `${classId}:${threadId}:${lectureSlideDeck?.continuous_narration_url ?? ''}:${effectiveLectureSlideMismatch}`}
+		{#key `${classId}:${threadId}:${lectureSlideNarrationSrc}:${effectiveLectureSlideMismatch}`}
 			<LectureVideoView
 				bind:this={lectureSlideViewRef}
 				{classId}
 				{threadId}
-				lectureVideoSrc={lectureSlideDeck?.continuous_narration_url ?? ''}
+				lectureVideoSrc={lectureSlideNarrationSrc}
 				captionsSrc={lectureSlideCaptionsSrc}
 				title={threadMgr.thread?.name || 'Lecture Slides'}
 				canParticipate={threadIsCurrentUserParticipant &&

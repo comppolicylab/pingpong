@@ -1,7 +1,42 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { expandResponse, getClassUploadInfo, getThread, type Fetcher } from '$lib/api';
-import { resetAnonymousShareToken, setAnonymousShareToken } from '$lib/stores/anonymous';
+import {
+	expandResponse,
+	getClassUploadInfo,
+	getThread,
+	withMediaAuthQuery,
+	type Fetcher
+} from '$lib/api';
+import {
+	resetAnonymousSessionToken,
+	resetAnonymousShareToken,
+	setAnonymousSessionToken,
+	setAnonymousShareToken
+} from '$lib/stores/anonymous';
+
+describe('withMediaAuthQuery', () => {
+	afterEach(() => {
+		resetAnonymousSessionToken();
+		resetAnonymousShareToken();
+	});
+
+	it('adds encoded anonymous credentials to native media requests', () => {
+		setAnonymousSessionToken('session/token');
+		setAnonymousShareToken('share token');
+
+		expect(withMediaAuthQuery('/api/v1/media')).toBe(
+			'/api/v1/media?anonymous_session_token=session%2Ftoken&anonymous_share_token=share%20token'
+		);
+	});
+
+	it('preserves existing query parameters', () => {
+		setAnonymousShareToken('share-token');
+
+		expect(withMediaAuthQuery('/api/v1/media?variant=poster')).toBe(
+			'/api/v1/media?variant=poster&anonymous_share_token=share-token'
+		);
+	});
+});
 
 describe('getThread', () => {
 	afterEach(() => {
