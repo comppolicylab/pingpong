@@ -124,6 +124,8 @@ jobs:
 
       - name: Login to Amazon ECR
         uses: aws-actions/amazon-ecr-login@d539f0932e70871a027e9d5a9d8fc38589180a64
+        with:
+          registries: "654654251079"
 
       - name: Check if this SHA is already deployed
         id: dedupe
@@ -295,7 +297,6 @@ jobs:
         id: push_server_image
         if: (inputs.target == 'all' || inputs.target == 'srv') && steps.dedupe.outputs.skip != 'true'
         run: |
-          aws ecr get-login-password --region "${{ vars.AWS_REGION }}" | docker login --username AWS --password-stdin "${{ vars.PINGPONG_REGISTRY_ENDPOINT }}"
           docker tag "${{ vars.PINGPONG_SRV_REGISTRY }}:${SRV_VERSION}" "${{ vars.PINGPONG_SRV_REGISTRY }}:${STABLE_TAG}"
           docker tag "${{ vars.PINGPONG_SRV_REGISTRY }}:${SRV_VERSION}" "${{ vars.PINGPONG_SRV_REGISTRY }}:${ENVIRONMENT}"
           docker push "${{ vars.PINGPONG_SRV_REGISTRY }}:${SRV_VERSION}"
@@ -330,7 +331,6 @@ jobs:
         id: push_authz_image
         if: (inputs.target == 'all' || inputs.target == 'authz') && steps.dedupe.outputs.skip != 'true'
         run: |
-          aws ecr get-login-password --region "${{ vars.AWS_REGION }}" | docker login --username AWS --password-stdin "${{ vars.PINGPONG_REGISTRY_ENDPOINT }}"
           docker tag "${AUTHZ_REGISTRY}:${AUTHZ_VERSION}" "${AUTHZ_REGISTRY}:${STABLE_TAG}"
           docker tag "${AUTHZ_REGISTRY}:${AUTHZ_VERSION}" "${AUTHZ_REGISTRY}:${ENVIRONMENT}"
           docker push "${AUTHZ_REGISTRY}:${AUTHZ_VERSION}"
@@ -365,7 +365,6 @@ jobs:
         id: push_web_image
         if: (inputs.target == 'all' || inputs.target == 'web') && steps.dedupe.outputs.skip != 'true'
         run: |
-          aws ecr get-login-password --region "${{ vars.AWS_REGION }}" | docker login --username AWS --password-stdin "${{ vars.PINGPONG_REGISTRY_ENDPOINT }}"
           docker tag "${{ vars.PINGPONG_WEB_REGISTRY }}:${WEB_VERSION}" "${{ vars.PINGPONG_WEB_REGISTRY }}:${STABLE_TAG}"
           docker tag "${{ vars.PINGPONG_WEB_REGISTRY }}:${WEB_VERSION}" "${{ vars.PINGPONG_WEB_REGISTRY }}:${ENVIRONMENT}"
           docker push "${{ vars.PINGPONG_WEB_REGISTRY }}:${WEB_VERSION}"
