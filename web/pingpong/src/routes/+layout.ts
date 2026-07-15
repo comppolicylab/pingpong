@@ -88,7 +88,7 @@ export const load: LayoutLoad = async ({ fetch, url }) => {
 	let doNotShowSidebar = false;
 	let forceShowSidebarButton = hasAuthenticatedContext;
 	let forceCollapsedLayout = hasAuthenticatedContext;
-	let openAllLinksInNewTab = isEmbedded;
+	let openAllLinksInNewTab = isEmbedded && !isLTIContext;
 	let logoIsClickable = true;
 	let showSidebarItems = true;
 
