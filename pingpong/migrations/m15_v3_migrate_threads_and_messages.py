@@ -532,7 +532,7 @@ async def _upsert_run(
     values = dict(
         thread_id=thread.id,
         assistant_id=assistant.id,
-        creator_id=_maybe_extract_user_id(openai_message),
+        creator_id=await _resolve_user_id(session, openai_message),
         model=assistant.model,
         temperature=assistant.temperature,
         instructions=thread.instructions,
@@ -630,7 +630,7 @@ async def _store_message(
         "assistant_id": (
             thread.assistant_id if openai_message.role == "assistant" else None
         ),
-        "user_id": _maybe_extract_user_id(openai_message),
+        "user_id": await _resolve_user_id(session, openai_message),
         "output_index": prev_output_index,
     }
 
@@ -686,6 +686,45 @@ def _maybe_extract_user_id(openai_message: Message | None) -> int | None:
             "because it couldn't be converted to an integer"
         )
         return None
+
+
+async def _resolve_user_id(
+    session: AsyncSession, openai_message: Message | None
+) -> int | None:
+    user_id = _maybe_extract_user_id(openai_message)
+    if user_id is None:
+        return None
+
+    if await session.get(models.User, user_id) is not None:
+        return user_id
+
+    stmt = (
+        select(models.user_merge_association.c.user_id)
+        .where(models.user_merge_association.c.merged_user_id == user_id)
+        .distinct()
+        .order_by(models.user_merge_association.c.user_id)
+    )
+    result = await session.execute(stmt)
+    merged_into_user_ids = list(result.scalars())
+    if len(merged_into_user_ids) == 1:
+        resolved_user_id = merged_into_user_ids[0]
+        logger.info(
+            "Resolved merged m15 message user. openai_message_id=%s "
+            "historical_user_id=%s current_user_id=%s",
+            openai_message.id if openai_message else None,
+            user_id,
+            resolved_user_id,
+        )
+        return resolved_user_id
+
+    logger.warning(
+        "Could not resolve missing m15 message user. openai_message_id=%s "
+        "historical_user_id=%s merged_into_user_ids=%s",
+        openai_message.id if openai_message else None,
+        user_id,
+        merged_into_user_ids,
+    )
+    return None
 
 
 async def _store_assistant_messages_and_tool_calls(

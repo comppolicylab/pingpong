@@ -274,7 +274,7 @@ async def _get_or_create_voice_run(
         verbosity=thread.assistant.verbosity if thread.assistant else None,
         temperature=thread.assistant.temperature if thread.assistant else None,
         tools_available=thread.tools_available,
-        creator_id=_maybe_extract_user_id(first_message),
+        creator_id=await _resolve_user_id(session, first_message),
         instructions=thread.instructions,
         created=_dt_from_ts(first_message.created_at),
         completed=_dt_from_ts(last_message.completed_at or last_message.created_at),
@@ -333,7 +333,7 @@ async def _store_message(
             else None,
             "output_index": output_index,
             "role": role,
-            "user_id": _maybe_extract_user_id(openai_message),
+            "user_id": await _resolve_user_id(session, openai_message),
             "message_metadata": _message_metadata(openai_message),
             "created": _dt_from_ts(openai_message.created_at),
             "completed": _dt_from_ts(openai_message.completed_at),
@@ -432,6 +432,45 @@ def _maybe_extract_user_id(openai_message: OpenAIMessage | None) -> int | None:
             raw_user_id,
         )
         return None
+
+
+async def _resolve_user_id(
+    session: AsyncSession, openai_message: OpenAIMessage | None
+) -> int | None:
+    user_id = _maybe_extract_user_id(openai_message)
+    if user_id is None:
+        return None
+
+    if await session.get(models.User, user_id) is not None:
+        return user_id
+
+    stmt = (
+        select(models.user_merge_association.c.user_id)
+        .where(models.user_merge_association.c.merged_user_id == user_id)
+        .distinct()
+        .order_by(models.user_merge_association.c.user_id)
+    )
+    result = await session.execute(stmt)
+    merged_into_user_ids = list(result.scalars())
+    if len(merged_into_user_ids) == 1:
+        resolved_user_id = merged_into_user_ids[0]
+        logger.info(
+            "Resolved merged v2 voice message user. openai_message_id=%s "
+            "historical_user_id=%s current_user_id=%s",
+            openai_message.id if openai_message else None,
+            user_id,
+            resolved_user_id,
+        )
+        return resolved_user_id
+
+    logger.warning(
+        "Could not resolve missing v2 voice message user. openai_message_id=%s "
+        "historical_user_id=%s merged_into_user_ids=%s",
+        openai_message.id if openai_message else None,
+        user_id,
+        merged_into_user_ids,
+    )
+    return None
 
 
 def _map_message_status(status: str | None) -> schemas.MessageStatus:
