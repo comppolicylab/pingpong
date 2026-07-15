@@ -1156,6 +1156,38 @@ async def test_maybe_extract_user_id_non_int() -> None:
     assert migration._maybe_extract_user_id(msg) is None
 
 
+async def test_resolve_user_id_uses_current_or_merged_user(db: DbDriver) -> None:
+    async with db.async_session() as session:
+        current_user = models.User(id=16480, email="current@example.com")
+        session.add(current_user)
+        await session.flush()
+        await session.execute(
+            models.user_merge_association.insert().values(
+                user_id=current_user.id,
+                merged_user_id=7041,
+            )
+        )
+
+        current_message = _generate_openai_message(
+            "current", role="user", created_at=1, user_id=current_user.id
+        )
+        merged_message = _generate_openai_message(
+            "merged", role="user", created_at=1, user_id=7041
+        )
+        missing_message = _generate_openai_message(
+            "missing", role="user", created_at=1, user_id=99999
+        )
+
+        assert (
+            await migration._resolve_user_id(session, current_message)
+            == current_user.id
+        )
+        assert (
+            await migration._resolve_user_id(session, merged_message) == current_user.id
+        )
+        assert await migration._resolve_user_id(session, missing_message) is None
+
+
 # --- Tool call backfill -----------------------------------------------------
 
 
