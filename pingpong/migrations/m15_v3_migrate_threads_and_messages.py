@@ -807,6 +807,17 @@ async def _store_run_step_tool_calls(
     created_count = 0
     for tool_call in run_step.step_details.tool_calls:
         if isinstance(tool_call, CodeInterpreterToolCall):
+            # OpenAI has returned code_interpreter tool-call shells with a null
+            # payload. They still deserialize as CodeInterpreterToolCall, so guard
+            # the nested object before trying to migrate it.
+            if getattr(tool_call, "code_interpreter", None) is None:
+                logger.warning(
+                    "m15 skipping code interpreter tool call without a payload. "
+                    "run_pk=%s tool_call_id=%s",
+                    local_run.id,
+                    tool_call.id,
+                )
+                continue
             prev_output_index += 1
             await _persist_code_interpreter_tool_call(
                 session,
@@ -821,6 +832,14 @@ async def _store_run_step_tool_calls(
             seen_tool_call_ids.add(tool_call.id)
             created_count += 1
         elif isinstance(tool_call, FileSearchToolCall):
+            if getattr(tool_call, "file_search", None) is None:
+                logger.warning(
+                    "m15 skipping file search tool call without a payload. "
+                    "run_pk=%s tool_call_id=%s",
+                    local_run.id,
+                    tool_call.id,
+                )
+                continue
             prev_output_index += 1
             await _persist_file_search_tool_call(
                 session,
@@ -931,15 +950,6 @@ async def _persist_code_interpreter_tool_call(
     created: datetime,
     completed: datetime | None,
 ) -> None:
-    code_interpreter = getattr(tool_call, "code_interpreter", None)
-    if code_interpreter is None:
-        logger.warning(
-            "m15 persisting code interpreter tool call without a payload. "
-            "run_pk=%s tool_call_id=%s",
-            local_run.id,
-            tool_call.id,
-        )
-
     local_tool_call = await _upsert_tool_call(
         session,
         local_run,
@@ -951,12 +961,11 @@ async def _persist_code_interpreter_tool_call(
         completed,
         {
             "container_id": None,  # because v2
-            "code": code_interpreter.input if code_interpreter is not None else None,
+            "code": tool_call.code_interpreter.input,
         },
     )
 
-    outputs = getattr(code_interpreter, "outputs", None) or []
-    for output in outputs:
+    for output in tool_call.code_interpreter.outputs:
         if output.type == "logs":
             await models.CodeInterpreterCallOutput.create(
                 session,
@@ -1009,15 +1018,6 @@ async def _persist_file_search_tool_call(
     created: datetime,
     completed: datetime | None,
 ) -> None:
-    file_search = getattr(tool_call, "file_search", None)
-    if file_search is None:
-        logger.warning(
-            "m15 persisting file search tool call without a payload. "
-            "run_pk=%s tool_call_id=%s",
-            local_run.id,
-            tool_call.id,
-        )
-
     local_tool_call = await _upsert_tool_call(
         session,
         local_run,
@@ -1031,8 +1031,7 @@ async def _persist_file_search_tool_call(
         {"queries": ""},
     )
 
-    results = getattr(file_search, "results", None) or []
-    for result in results:
+    for result in tool_call.file_search.results or []:
         text = "\n\n".join(c.text for c in (result.content or []) if c.text)
         local_file = await session.scalar(
             select(models.File).where(models.File.file_id == result.file_id)

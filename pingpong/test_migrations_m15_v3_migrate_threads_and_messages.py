@@ -1329,7 +1329,7 @@ async def test_code_interpreter_logs_tool_call_backfilled(
     assert outputs[0].logs == "1\n"
 
 
-async def test_code_interpreter_tool_call_without_payload_is_preserved(
+async def test_code_interpreter_tool_call_without_payload_is_skipped(
     db: DbDriver, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     messages = _single_turn_messages()
@@ -1361,17 +1361,10 @@ async def test_code_interpreter_tool_call_without_payload_is_preserved(
     async with db.async_session() as session:
         tool_calls = await _all_tool_calls(session, 1)
         msgs_local = await _all_messages(session, 1)
-        outputs = list(
-            (await session.execute(select(models.CodeInterpreterCallOutput))).scalars()
-        )
 
-    assert [tc.tool_call_id for tc in tool_calls] == ["tc-empty", "tc-valid"]
-    assert [tc.output_index for tc in tool_calls] == [1, 2]
-    assert tool_calls[0].code is None
-    assert tool_calls[1].code == "print(1)"
-    assert len(outputs) == 1
-    assert outputs[0].tool_call_id == tool_calls[1].id
-    assert [message.output_index for message in msgs_local] == [0, 3]
+    assert [tc.tool_call_id for tc in tool_calls] == ["tc-valid"]
+    assert tool_calls[0].output_index == 1
+    assert [message.output_index for message in msgs_local] == [0, 2]
 
 
 async def test_tool_call_sits_directly_before_its_own_assistant_message(
