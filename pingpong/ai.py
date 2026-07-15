@@ -3854,7 +3854,7 @@ async def poll_vector_store_files(
             "Skipping %s missing file(s) during vector store poll for vector store %s: %s",
             len(missing_file_ids),
             vector_store_id,
-            ", ".join(missing_file_ids),
+            sanitize_for_log(", ".join(missing_file_ids)),
         )
 
 

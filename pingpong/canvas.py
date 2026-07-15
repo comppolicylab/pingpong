@@ -132,6 +132,19 @@ class CanvasCourseClient(ABC):
     async def __aexit__(self, exc_type, exc, tb):
         await self.http_session.close()
 
+    @staticmethod
+    def _validate_course_id(course_id: int | str) -> int:
+        """Return a Canvas course ID that is safe to interpolate into an API path."""
+        try:
+            validated_course_id = int(course_id)
+        except (TypeError, ValueError) as e:
+            raise CanvasException("Invalid Canvas course ID", code=400) from e
+
+        if validated_course_id <= 0:
+            raise CanvasException("Invalid Canvas course ID", code=400)
+
+        return validated_course_id
+
     def _encode_token(self) -> str:
         """Generates the Canvas State Token.
 
@@ -503,8 +516,10 @@ class CanvasCourseClient(ABC):
                 return True
         return False
 
-    async def _roster_access_check(self, course_id: str) -> bool:
+    async def _roster_access_check(self, course_id: int | str) -> bool:
         """Check if the user has access to the course roster."""
+
+        course_id = self._validate_course_id(course_id)
 
         # List users in course
         # Scope: url:GET|/api/v1/courses/:course_id/search_users
@@ -576,8 +591,10 @@ class CanvasCourseClient(ABC):
                 detail="You are not authorized to access the enrollment list for this Canvas class.",
             )
 
-    async def _get_course_details(self, course_id: str) -> CanvasClassSchema:
+    async def _get_course_details(self, course_id: int | str) -> CanvasClassSchema:
         """Get the details of a course."""
+
+        course_id = self._validate_course_id(course_id)
 
         # Get a single course
         # Scope: url:GET|/api/v1/courses/:id
@@ -708,8 +725,12 @@ class CanvasCourseClient(ABC):
                 last_active=latest_activity,
             )
 
-    async def _get_course_users(self, course_id: str) -> list[CreateUserClassRole]:
+    async def _get_course_users(
+        self, course_id: int | str
+    ) -> list[CreateUserClassRole]:
         """Get the users in a course."""
+
+        course_id = self._validate_course_id(course_id)
 
         # List users in course
         # Scope: url:GET|/api/v1/courses/:course_id/users
