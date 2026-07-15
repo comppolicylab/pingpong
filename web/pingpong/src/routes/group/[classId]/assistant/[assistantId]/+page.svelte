@@ -1896,7 +1896,8 @@
 		}
 	}
 	$: if (isLectureMode && data.isCreating && latestModelOptions.length > 0) {
-		selectedModel = latestModelOptions[0].value;
+		const highlighted = latestModelOptions.find((model) => model.highlight);
+		selectedModel = highlighted ? highlighted.value : latestModelOptions[0].value;
 	}
 	$: if (isLectureMode && !data.isCreating && assistant?.model) {
 		selectedModel = assistant.model;
@@ -2533,7 +2534,7 @@
 		verbosityValue === undefined &&
 		(data.isCreating || assistant?.verbosity === undefined || assistant?.verbosity === null)
 	) {
-		verbosityValue = 1;
+		verbosityValue = 0;
 	}
 
 	let dropdownOpen = false;
@@ -2923,7 +2924,7 @@
 			notes: preventEdits ? assistant?.notes || '' : normalizeNewlines(notes),
 			model: isLectureMode
 				? data.isCreating
-					? latestModelOptions[0]?.value || selectedModel
+					? selectedModel
 					: assistant?.model || selectedModel
 				: selectedModel,
 			tools: includeTooling ? tools : [],
@@ -2952,7 +2953,7 @@
 					? reasoningEffortValue
 					: null,
 			verbosity: isLectureMode
-				? (assistant?.verbosity ?? null)
+				? (assistant?.verbosity ?? (data.isCreating && supportsVerbosity ? verbosityValue : null))
 				: supportsVerbosity
 					? verbosityValue
 					: null,
@@ -6775,7 +6776,7 @@
 											</li>
 										</ol>
 										Models before GPT-5 have used medium verbosity by default. With GPT-5, this option
-										is configurable as one of<span class="font-mono">high</span>,
+										is configurable as one of&nbsp;<span class="font-mono">high</span>,
 										<span class="font-mono">medium</span>, or <span class="font-mono">low</span>.
 										When generating code, <span class="font-mono">medium</span> and
 										<span class="font-mono">high</span>
@@ -6783,7 +6784,7 @@
 										<span class="font-mono">low</span>
 										verbosity produces shorter, more concise code with minimal commentary. The default
 										value is
-										<span class="font-mono">medium</span>.</Helper
+										<span class="font-mono">low</span>.</Helper
 									>
 								</div>
 								<Range
