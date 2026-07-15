@@ -931,6 +931,15 @@ async def _persist_code_interpreter_tool_call(
     created: datetime,
     completed: datetime | None,
 ) -> None:
+    code_interpreter = getattr(tool_call, "code_interpreter", None)
+    if code_interpreter is None:
+        logger.warning(
+            "m15 persisting code interpreter tool call without a payload. "
+            "run_pk=%s tool_call_id=%s",
+            local_run.id,
+            tool_call.id,
+        )
+
     local_tool_call = await _upsert_tool_call(
         session,
         local_run,
@@ -942,11 +951,12 @@ async def _persist_code_interpreter_tool_call(
         completed,
         {
             "container_id": None,  # because v2
-            "code": tool_call.code_interpreter.input,
+            "code": code_interpreter.input if code_interpreter is not None else None,
         },
     )
 
-    for output in tool_call.code_interpreter.outputs:
+    outputs = getattr(code_interpreter, "outputs", None) or []
+    for output in outputs:
         if output.type == "logs":
             await models.CodeInterpreterCallOutput.create(
                 session,
@@ -999,6 +1009,15 @@ async def _persist_file_search_tool_call(
     created: datetime,
     completed: datetime | None,
 ) -> None:
+    file_search = getattr(tool_call, "file_search", None)
+    if file_search is None:
+        logger.warning(
+            "m15 persisting file search tool call without a payload. "
+            "run_pk=%s tool_call_id=%s",
+            local_run.id,
+            tool_call.id,
+        )
+
     local_tool_call = await _upsert_tool_call(
         session,
         local_run,
@@ -1012,7 +1031,8 @@ async def _persist_file_search_tool_call(
         {"queries": ""},
     )
 
-    for result in tool_call.file_search.results or []:
+    results = getattr(file_search, "results", None) or []
+    for result in results:
         text = "\n\n".join(c.text for c in (result.content or []) if c.text)
         local_file = await session.scalar(
             select(models.File).where(models.File.file_id == result.file_id)

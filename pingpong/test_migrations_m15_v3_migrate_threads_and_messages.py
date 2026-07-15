@@ -1178,6 +1178,14 @@ def _ci_tool_call(id_: str, code: str, outputs: list) -> Any:
     )
 
 
+def _ci_tool_call_without_payload(id_: str) -> Any:
+    from openai.types.beta.threads.runs import CodeInterpreterToolCall
+
+    return CodeInterpreterToolCall.construct(
+        id=id_, type="code_interpreter", code_interpreter=None
+    )
+
+
 def _fs_content(text: str) -> SimpleNamespace:
     return SimpleNamespace(type="text", text=text)
 
@@ -1319,6 +1327,51 @@ async def test_code_interpreter_logs_tool_call_backfilled(
     assert len(outputs) == 1
     assert outputs[0].output_type == schemas.CodeInterpreterOutputType.LOGS
     assert outputs[0].logs == "1\n"
+
+
+async def test_code_interpreter_tool_call_without_payload_is_preserved(
+    db: DbDriver, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    messages = _single_turn_messages()
+    runs = {"run_1": _generate_openai_run("run_1", completed_at=120)}
+    client = FakeOpenAIClient(
+        messages,
+        runs,
+        steps_by_run={
+            "run_1": [
+                _tool_calls_step(
+                    "step-1",
+                    [
+                        _ci_tool_call_without_payload("tc-empty"),
+                        _ci_tool_call("tc-valid", "print(1)", [_ci_logs("1\n")]),
+                    ],
+                )
+            ]
+        },
+    )
+    _patch_client(monkeypatch, client)
+
+    async with db.async_session() as session:
+        await _generate_local_thread(session)
+        await session.commit()
+
+    async with db.async_session() as session:
+        await migration.migrate_threads_and_messages_to_v3(session)
+
+    async with db.async_session() as session:
+        tool_calls = await _all_tool_calls(session, 1)
+        msgs_local = await _all_messages(session, 1)
+        outputs = list(
+            (await session.execute(select(models.CodeInterpreterCallOutput))).scalars()
+        )
+
+    assert [tc.tool_call_id for tc in tool_calls] == ["tc-empty", "tc-valid"]
+    assert [tc.output_index for tc in tool_calls] == [1, 2]
+    assert tool_calls[0].code is None
+    assert tool_calls[1].code == "print(1)"
+    assert len(outputs) == 1
+    assert outputs[0].tool_call_id == tool_calls[1].id
+    assert [message.output_index for message in msgs_local] == [0, 3]
 
 
 async def test_tool_call_sits_directly_before_its_own_assistant_message(
