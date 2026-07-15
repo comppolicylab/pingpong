@@ -7,6 +7,7 @@
 		locked = false,
 		active = false,
 		pressed = undefined,
+		class: className = '',
 		children
 	}: {
 		label: string;
@@ -14,6 +15,7 @@
 		locked?: boolean;
 		active?: boolean;
 		pressed?: boolean;
+		class?: string;
 		children: Snippet;
 	} = $props();
 
@@ -26,7 +28,7 @@
 <div
 	class="shrink-0 rounded-full bg-black/30 p-1 {locked
 		? 'pointer-events-none invisible'
-		: 'pointer-events-auto'}"
+		: 'pointer-events-auto'} {className}"
 >
 	<button
 		class="flex h-8 w-8 items-center justify-center rounded-full text-white hover:bg-white/10 {active
