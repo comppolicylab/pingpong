@@ -88,6 +88,10 @@ async def test_openai_class_models_include_latest_gpt_5_models(monkeypatch):
         "chat-latest",
         "gpt-5.5",
     ]
+    highlighted_models = [
+        model["id"] for model in response["models"] if model["highlight"]
+    ]
+    assert highlighted_models == ["gpt-5.6-terra"]
     reasoning_models = [
         model for model in response["models"] if model["id"] != "chat-latest"
     ]
