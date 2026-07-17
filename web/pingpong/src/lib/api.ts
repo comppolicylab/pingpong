@@ -1785,6 +1785,9 @@ export type InteractiveLessonSessionController = {
 export type InteractiveLessonSession = {
 	state: InteractiveLessonSessionState;
 	lesson_chat_available: boolean;
+	playback_rate_min: number;
+	playback_rate_max: number;
+	playback_rate_step: number;
 	timeline_bypass_enabled: boolean;
 	last_known_offset_ms: number | null;
 	furthest_offset_ms: number | null;
@@ -2001,6 +2004,9 @@ export type LectureVideoSessionController = {
 export type LectureVideoSession = {
 	state: LectureVideoSessionState;
 	lecture_video_chat_available: boolean;
+	playback_rate_min: number;
+	playback_rate_max: number;
+	playback_rate_step: number;
 	timeline_bypass_enabled: boolean;
 	last_known_offset_ms: number | null;
 	furthest_offset_ms: number | null;

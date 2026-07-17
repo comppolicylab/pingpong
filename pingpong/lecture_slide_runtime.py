@@ -16,6 +16,9 @@ ERROR_CONTROLLER_LEASE_EXPIRED = (
 PLAYBACK_PROGRESS_TOLERANCE_MS = (
     interactive_lesson_runtime.PLAYBACK_PROGRESS_TOLERANCE_MS
 )
+MIN_PLAYBACK_RATE = interactive_lesson_runtime.MIN_PLAYBACK_RATE
+MAX_PLAYBACK_RATE = interactive_lesson_runtime.MAX_PLAYBACK_RATE
+PLAYBACK_RATE_STEP = interactive_lesson_runtime.PLAYBACK_RATE_STEP
 
 MSG_STALE_PAGE = interactive_lesson_runtime.MSG_STALE_PAGE
 MSG_TAB_DISCONNECTED = interactive_lesson_runtime.MSG_TAB_DISCONNECTED
