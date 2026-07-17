@@ -860,16 +860,23 @@
 		liveLectureSlideSession = e.detail as api.InteractiveLessonSession;
 	};
 
+	const interruptLectureChatTts = () => {
+		threadMgr.interruptTts().catch(() => {});
+	};
+
 	const handleLecturePlaybackResumed = () => {
 		lectureChatContinuePromptDismissedByPlayback = true;
-		threadMgr.interruptTts().catch(() => {});
+		interruptLectureChatTts();
 	};
 
 	const handleLectureNarrationPlaybackStarted = () => {
-		threadMgr.interruptTts().catch(() => {});
+		interruptLectureChatTts();
 	};
 
 	const handleLectureChatContinueWatching = async () => {
+		// Programmatic playback suppresses the regular playbackresumed event, so stop
+		// chat speech directly while this click still has browser media activation.
+		interruptLectureChatTts();
 		return (
 			(await lectureVideoViewRef?.continueWatchingAfterChat()) ??
 			(await lectureSlideViewRef?.continueWatchingAfterChat()) ??
@@ -1821,6 +1828,7 @@
 				mediaAspectRatio={lectureSlideMediaAspectRatio}
 				on:sessionchange={handleLectureSlideSessionChange}
 				on:playbackresumed={handleLecturePlaybackResumed}
+				on:narrationplaybackstarted={handleLectureNarrationPlaybackStarted}
 				on:lessonupdated={handleLectureSlideLessonUpdated}
 			>
 				{#snippet statusAction()}
