@@ -1106,6 +1106,9 @@ def test_lecture_video_session_rejects_negative_furthest_offset_ms():
     with pytest.raises(ValidationError) as exc_info:
         schemas.LectureVideoSession(
             state=schemas.LectureVideoSessionState.PLAYING,
+            playback_rate_min=lecture_video_runtime.MIN_PLAYBACK_RATE,
+            playback_rate_max=lecture_video_runtime.MAX_PLAYBACK_RATE,
+            playback_rate_step=lecture_video_runtime.PLAYBACK_RATE_STEP,
             furthest_offset_ms=-1,
             state_version=1,
             controller=schemas.LectureVideoSessionController(),
@@ -1243,6 +1246,11 @@ async def test_get_thread_returns_lecture_video_session(
     assert "---Formatting: Lecture Follow-ups---" in data["instructions"]
     session_data = data["lecture_video_session"]
     assert session_data["state"] == "playing"
+    assert session_data["playback_rate_min"] == lecture_video_runtime.MIN_PLAYBACK_RATE
+    assert session_data["playback_rate_max"] == lecture_video_runtime.MAX_PLAYBACK_RATE
+    assert (
+        session_data["playback_rate_step"] == lecture_video_runtime.PLAYBACK_RATE_STEP
+    )
     assert session_data["last_known_offset_ms"] == 0
     assert session_data["furthest_offset_ms"] == 0
     assert session_data["latest_interaction_at"] is not None
@@ -3885,7 +3893,9 @@ async def test_initialize_thread_state_plays_when_lecture_video_has_no_questions
     [
         (
             schemas.LectureVideoSessionState.PLAYING,
-            1000 + 120000 + lecture_video_runtime.PLAYBACK_PROGRESS_TOLERANCE_MS,
+            1000
+            + int(120000 * lecture_video_runtime.MAX_PLAYBACK_RATE)
+            + lecture_video_runtime.PLAYBACK_PROGRESS_TOLERANCE_MS,
         ),
         (schemas.LectureVideoSessionState.AWAITING_ANSWER, 1000),
         (schemas.LectureVideoSessionState.AWAITING_POST_ANSWER_RESUME, 1000),

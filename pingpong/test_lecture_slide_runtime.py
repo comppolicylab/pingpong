@@ -273,6 +273,9 @@ async def test_initialize_thread_state_and_acquire_control_for_lecture_slides(
         )
 
     assert controller_session_id
+    assert slide_session.playback_rate_min == lecture_slide_runtime.MIN_PLAYBACK_RATE
+    assert slide_session.playback_rate_max == lecture_slide_runtime.MAX_PLAYBACK_RATE
+    assert slide_session.playback_rate_step == lecture_slide_runtime.PLAYBACK_RATE_STEP
     assert slide_session.controller.has_control is True
     assert slide_session.controller.has_active_controller is True
     assert slide_session.current_question is not None
@@ -900,7 +903,9 @@ async def test_initialize_thread_state_plays_when_lecture_slides_have_no_questio
     [
         (
             schemas.InteractiveLessonSessionState.PLAYING,
-            1_000 + 120_000 + lecture_slide_runtime.PLAYBACK_PROGRESS_TOLERANCE_MS,
+            1_000
+            + int(120_000 * lecture_slide_runtime.MAX_PLAYBACK_RATE)
+            + lecture_slide_runtime.PLAYBACK_PROGRESS_TOLERANCE_MS,
         ),
         (schemas.InteractiveLessonSessionState.AWAITING_ANSWER, 1_000),
         (

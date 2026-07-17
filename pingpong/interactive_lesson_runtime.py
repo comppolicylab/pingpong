@@ -14,6 +14,9 @@ CONTROLLER_LEASE_DURATION = timedelta(seconds=30)
 CONTROLLER_LEASE_DURATION_MS = int(CONTROLLER_LEASE_DURATION.total_seconds() * 1000)
 ERROR_CONTROLLER_LEASE_EXPIRED = "controller_lease_expired"
 PLAYBACK_PROGRESS_TOLERANCE_MS = 2_000
+MIN_PLAYBACK_RATE = 0.25
+MAX_PLAYBACK_RATE = 2.0
+PLAYBACK_RATE_STEP = 0.05
 
 MSG_STALE_PAGE = "This page was inactive for too long. Refresh the lesson to continue."
 MSG_OTHER_CONTROLLER = (
@@ -376,6 +379,9 @@ def build_interactive_lesson_session(
         lesson_chat_available=bool(
             asset is not None and adapter.lesson_chat_available(asset)
         ),
+        playback_rate_min=MIN_PLAYBACK_RATE,
+        playback_rate_max=MAX_PLAYBACK_RATE,
+        playback_rate_step=PLAYBACK_RATE_STEP,
         timeline_bypass_enabled=_is_timeline_bypass_enabled(thread, adapter=adapter),
         last_known_offset_ms=state.last_known_offset_ms,
         furthest_offset_ms=furthest_offset_ms,
@@ -518,7 +524,9 @@ async def get_plausible_playback_offset_ms(
     )
     return max(
         unlocked_offset_ms,
-        state.last_known_offset_ms + elapsed_ms + PLAYBACK_PROGRESS_TOLERANCE_MS,
+        state.last_known_offset_ms
+        + int(elapsed_ms * MAX_PLAYBACK_RATE)
+        + PLAYBACK_PROGRESS_TOLERANCE_MS,
     )
 
 

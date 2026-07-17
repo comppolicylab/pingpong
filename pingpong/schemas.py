@@ -661,6 +661,9 @@ class InteractiveLessonSessionController(BaseModel):
 class InteractiveLessonSession(BaseModel):
     state: InteractiveLessonSessionState
     lesson_chat_available: bool = False
+    playback_rate_min: float = Field(..., gt=0)
+    playback_rate_max: float = Field(..., gt=0)
+    playback_rate_step: float = Field(..., gt=0)
     timeline_bypass_enabled: bool = False
     last_known_offset_ms: int | None = None
     furthest_offset_ms: int | None = Field(None, ge=0)
@@ -1424,6 +1427,9 @@ class LectureVideoSessionController(BaseModel):
 class LectureVideoSession(BaseModel):
     state: LectureVideoSessionState
     lecture_video_chat_available: bool = False
+    playback_rate_min: float = Field(..., gt=0)
+    playback_rate_max: float = Field(..., gt=0)
+    playback_rate_step: float = Field(..., gt=0)
     timeline_bypass_enabled: bool = False
     last_known_offset_ms: int | None = None
     furthest_offset_ms: int | None = Field(None, ge=0)

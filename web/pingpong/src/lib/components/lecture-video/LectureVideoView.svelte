@@ -78,6 +78,7 @@
 		initialSession = null,
 		chatAvailable = false,
 		playerVolume = $bindable(1),
+		playbackRate = $bindable(1),
 		chat = undefined,
 		statusAction = undefined,
 		lessonMode = 'lecture_video',
@@ -99,6 +100,7 @@
 		initialSession?: LessonSession | null;
 		chatAvailable?: boolean;
 		playerVolume?: number;
+		playbackRate?: number;
 		chat?: Snippet<[boolean]>;
 		statusAction?: Snippet;
 		lessonMode?: LessonMode;
@@ -146,6 +148,9 @@
 	let questionPresentationVersion: number = $state(0);
 	let furthestOffsetMs: number = $state(0);
 	let timelineBypassEnabled: boolean = $state(false);
+	let playbackRateMin: number | null = $state(null);
+	let playbackRateMax: number | null = $state(null);
+	let playbackRateStep: number | null = $state(null);
 	let initialStartOffsetMs: number = $state(0);
 	let videoReadyForPlayback: boolean = $state(false);
 	let introNarrationPending: boolean = $state(false);
@@ -447,6 +452,12 @@
 	$effect(() => {
 		if (currentNarrationAudio) {
 			currentNarrationAudio.volume = narrationVolume;
+		}
+	});
+
+	$effect(() => {
+		if (currentNarrationAudio) {
+			currentNarrationAudio.playbackRate = playbackRate;
 		}
 	});
 
@@ -1408,6 +1419,9 @@
 		}
 		furthestOffsetMs = session.furthest_offset_ms ?? 0;
 		timelineBypassEnabled = session.timeline_bypass_enabled;
+		playbackRateMin = session.playback_rate_min;
+		playbackRateMax = session.playback_rate_max;
+		playbackRateStep = session.playback_rate_step;
 		questionPlaybackLocked =
 			session.state === 'awaiting_answer' || session.state === 'awaiting_post_answer_resume';
 		if (
@@ -1771,6 +1785,7 @@
 			}
 			const audio = new Audio(narrationSrc);
 			audio.volume = narrationVolume;
+			audio.playbackRate = playbackRate;
 			currentNarrationAudio = audio;
 			audio.addEventListener('ended', () => {
 				if (playbackGeneration !== narrationPlaybackGeneration) {
@@ -2242,6 +2257,10 @@
 								bind:paused
 								bind:endedPlayback={videoAtEnd}
 								bind:effectiveVolume={playerVolume}
+								bind:playbackRate
+								{playbackRateMin}
+								{playbackRateMax}
+								{playbackRateStep}
 								ontimeupdate={handleTimeUpdate}
 								onseek={handleSeek}
 								onended={handleVideoEnded}

@@ -52,6 +52,9 @@ def test_lesson_timeline_bypass_schema_defaults():
     assert (
         schemas.InteractiveLessonSession(
             state=schemas.InteractiveLessonSessionState.PLAYING,
+            playback_rate_min=0.25,
+            playback_rate_max=2.0,
+            playback_rate_step=0.05,
             state_version=1,
             controller=schemas.InteractiveLessonSessionController(),
         ).timeline_bypass_enabled
@@ -60,6 +63,9 @@ def test_lesson_timeline_bypass_schema_defaults():
     assert (
         schemas.LectureVideoSession(
             state=schemas.LectureVideoSessionState.PLAYING,
+            playback_rate_min=0.25,
+            playback_rate_max=2.0,
+            playback_rate_step=0.05,
             state_version=1,
             controller=schemas.LectureVideoSessionController(),
         ).timeline_bypass_enabled

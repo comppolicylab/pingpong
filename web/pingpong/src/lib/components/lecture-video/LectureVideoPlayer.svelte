@@ -4,10 +4,13 @@
 		CaptionSolid,
 		CheckOutline,
 		CloseOutline,
+		CogOutline,
 		CompressOutline,
 		ExpandOutline,
+		MinusOutline,
 		PauseSolid,
 		PlaySolid,
+		PlusOutline,
 		RefreshOutline,
 		VolumeDownSolid,
 		VolumeUpSolid,
@@ -18,7 +21,9 @@
 	import SkipForwardIcon from '$lib/assets/icons/SkipForwardIcon.svelte';
 	import SkipBackwardIcon from '$lib/assets/icons/SkipBackwardIcon.svelte';
 	import type { Snippet } from 'svelte';
-	import { fade } from 'svelte/transition';
+	import { fade, fly } from 'svelte/transition';
+	import { Tween } from 'svelte/motion';
+	import { cubicOut } from 'svelte/easing';
 
 	function formatTime(ms: number): string {
 		const totalSeconds = Math.floor(ms / 1000);
@@ -49,6 +54,9 @@
 	const OVERLAY_TEXT_SHADOW = 'text-shadow: rgb(0 0 0) 0 0 2px;';
 	const CAPTION_CONTROL_GAP_PX = 12;
 	const CAPTIONS_PREFERENCE_STORAGE_KEY = 'pingpong:lecture-video:captions-enabled';
+	const PLAYBACK_RATE_PREFERENCE_STORAGE_KEY = 'pingpong:lecture-lesson:playback-rate';
+	const PLAYBACK_RATE_PRESETS = [0.25, 0.5, 1, 1.5, 2] as const;
+	type PlaybackRatePolicy = { min: number; max: number; step: number };
 
 	type QuestionMarker = {
 		id: number;
@@ -111,6 +119,10 @@
 		paused = $bindable(true),
 		endedPlayback = $bindable(false),
 		effectiveVolume = $bindable(1),
+		playbackRate = $bindable(1),
+		playbackRateMin = null,
+		playbackRateMax = null,
+		playbackRateStep = null,
 		mediaAspectRatio = $bindable(null),
 		ontimeupdate,
 		onseek,
@@ -145,6 +157,10 @@
 		paused?: boolean;
 		endedPlayback?: boolean;
 		effectiveVolume?: number;
+		playbackRate?: number;
+		playbackRateMin?: number | null;
+		playbackRateMax?: number | null;
+		playbackRateStep?: number | null;
 		mediaAspectRatio?: number | null;
 		ontimeupdate?: () => void;
 		onseek?: (toOffsetMs: number, fromOffsetMs: number) => void;
@@ -206,7 +222,13 @@
 	let clusterCollapseTimeout: ReturnType<typeof setTimeout> | null = $state(null);
 	let playbackCompleted = $state(false);
 	let captionsEnabled = $state(false);
+	let showPlaybackSpeedMenu = $state(false);
+	let playbackRatePreferenceLoaded = $state(false);
+	let playbackRateDirection: 1 | -1 = $state(1);
+	const sliderPlaybackRate = new Tween(1, { duration: 0 });
 	let captionsTrackElement: HTMLTrackElement | null = $state(null);
+	let playbackSpeedButtonElement: HTMLButtonElement | null = $state(null);
+	let playbackSpeedMenuElement: HTMLDivElement | null = $state(null);
 	let activeCaptionLines: string[] = $state([]);
 	let controlsOverlayHeight = $state(0);
 	let isFullscreen = $state(false);
@@ -215,6 +237,25 @@
 			document.fullscreenEnabled &&
 			fullscreenTarget !== null &&
 			'requestFullscreen' in fullscreenTarget
+	);
+	let playbackRatePolicy: PlaybackRatePolicy | null = $derived.by(() => {
+		if (
+			playbackRateMin == null ||
+			playbackRateMax == null ||
+			playbackRateStep == null ||
+			!Number.isFinite(playbackRateMin) ||
+			!Number.isFinite(playbackRateMax) ||
+			!Number.isFinite(playbackRateStep) ||
+			playbackRateMin <= 0 ||
+			playbackRateMax < playbackRateMin ||
+			playbackRateStep <= 0
+		) {
+			return null;
+		}
+		return { min: playbackRateMin, max: playbackRateMax, step: playbackRateStep };
+	});
+	let playbackRatePresets = $derived(
+		playbackRatePolicy ? PLAYBACK_RATE_PRESETS.filter((rate) => isSupportedPlaybackRate(rate)) : []
 	);
 
 	// Non-reactive: tracks the last shown question without retriggering the effect.
@@ -239,6 +280,98 @@
 		} catch {
 			// Ignore blocked or full browser storage; caption toggles should still work.
 		}
+	}
+
+	function isSupportedPlaybackRate(rate: number): boolean {
+		const policy = playbackRatePolicy;
+		if (!policy || !Number.isFinite(rate) || rate < policy.min || rate > policy.max) {
+			return false;
+		}
+		const stepsFromMinimum = (rate - policy.min) / policy.step;
+		return Math.abs(stepsFromMinimum - Math.round(stepsFromMinimum)) < 0.000001;
+	}
+
+	function normalizePlaybackRate(rate: number): number {
+		const policy = playbackRatePolicy;
+		if (!policy) return 1;
+		const clampedRate = clamp(rate, policy.min, policy.max);
+		const stepsFromMinimum = Math.round((clampedRate - policy.min) / policy.step);
+		return Number((policy.min + stepsFromMinimum * policy.step).toFixed(2));
+	}
+
+	function formatPlaybackRateNumber(rate: number): string {
+		return rate.toFixed(2);
+	}
+
+	function formatPlaybackRate(rate: number): string {
+		return `${formatPlaybackRateNumber(rate)}×`;
+	}
+
+	function getStoredPlaybackRate(): number {
+		if (typeof localStorage === 'undefined') return 1;
+		try {
+			const storedRate = Number(localStorage.getItem(PLAYBACK_RATE_PREFERENCE_STORAGE_KEY));
+			return isSupportedPlaybackRate(storedRate) ? storedRate : 1;
+		} catch {
+			return 1;
+		}
+	}
+
+	function storePlaybackRate(rate: number) {
+		if (typeof localStorage === 'undefined') return;
+		try {
+			localStorage.setItem(PLAYBACK_RATE_PREFERENCE_STORAGE_KEY, String(rate));
+		} catch {
+			// Ignore blocked or full browser storage; playback speed should still work.
+		}
+	}
+
+	function setPlaybackRate(rate: number, { animateSlider = false } = {}) {
+		if (!playbackRatePolicy || !Number.isFinite(rate)) return;
+		const normalizedRate = normalizePlaybackRate(rate);
+		if (normalizedRate !== playbackRate) {
+			playbackRateDirection = normalizedRate > playbackRate ? 1 : -1;
+		}
+		playbackRate = normalizedRate;
+		void sliderPlaybackRate.set(
+			normalizedRate,
+			animateSlider ? { duration: 250, easing: cubicOut } : { duration: 0 }
+		);
+		if (videoElement) {
+			videoElement.defaultPlaybackRate = normalizedRate;
+			videoElement.playbackRate = normalizedRate;
+		}
+		storePlaybackRate(normalizedRate);
+		syncMediaSessionPositionState();
+	}
+
+	function adjustPlaybackRate(direction: -1 | 1) {
+		if (!playbackRatePolicy) return;
+		setPlaybackRate(playbackRate + direction * playbackRatePolicy.step);
+	}
+
+	function closePlaybackSpeedMenu({ restoreFocus = false } = {}) {
+		if (!showPlaybackSpeedMenu) return;
+		showPlaybackSpeedMenu = false;
+		if (restoreFocus) playbackSpeedButtonElement?.focus();
+		scheduleHide();
+	}
+
+	function togglePlaybackSpeedMenu() {
+		showPlaybackSpeedMenu = !showPlaybackSpeedMenu;
+		showControls = true;
+		if (hideTimeout) {
+			clearTimeout(hideTimeout);
+			hideTimeout = null;
+		}
+		if (!showPlaybackSpeedMenu) scheduleHide();
+	}
+
+	function handlePlaybackSpeedMenuKeydown(event: KeyboardEvent) {
+		event.stopPropagation();
+		if (event.key !== 'Escape') return;
+		event.preventDefault();
+		closePlaybackSpeedMenu({ restoreFocus: true });
 	}
 
 	let effectiveOffsetMs = $derived(
@@ -305,7 +438,9 @@
 		return clusters;
 	});
 	let seekBarActive = $derived(seekPreviewVisible || draggingSeek);
-	let knowledgeChecksVisible = $derived(!manualPlaybackPrompt && !seekBarActive);
+	let knowledgeChecksVisible = $derived(
+		!manualPlaybackPrompt && !seekBarActive && !showPlaybackSpeedMenu
+	);
 	let previewVideoSrc = $derived(mediaKind === 'video' && previewVideoActivated ? src : undefined);
 	let previewVideoPreload: 'auto' | 'metadata' = $derived(
 		previewVideoActivated ? 'auto' : 'metadata'
@@ -563,6 +698,22 @@
 	});
 
 	$effect(() => {
+		if (!browser || playbackRatePreferenceLoaded || !playbackRatePolicy) return;
+		playbackRatePreferenceLoaded = true;
+		setPlaybackRate(getStoredPlaybackRate());
+	});
+
+	$effect(() => {
+		if (!videoElement || !isSupportedPlaybackRate(playbackRate)) return;
+		if (videoElement.defaultPlaybackRate !== playbackRate) {
+			videoElement.defaultPlaybackRate = playbackRate;
+		}
+		if (videoElement.playbackRate !== playbackRate) {
+			videoElement.playbackRate = playbackRate;
+		}
+	});
+
+	$effect(() => {
 		if (captionsSrc !== lastCaptionsSrc) {
 			lastCaptionsSrc = captionsSrc;
 			captionsEnabled = captionsSrc ? getStoredCaptionsPreference() : false;
@@ -582,6 +733,7 @@
 
 	$effect(() => {
 		if (questionPendingControls) {
+			showPlaybackSpeedMenu = false;
 			if (questionPresentationKey !== lastQuestionPresentationKey) {
 				lastQuestionPresentationKey = questionPresentationKey;
 				showControls = true;
@@ -619,6 +771,25 @@
 			clearClusterCollapseTimeout();
 			activeClusterKey = null;
 		}
+	});
+
+	$effect(() => {
+		if (!showPlaybackSpeedMenu || typeof document === 'undefined') return;
+
+		const handlePointerDown = (event: PointerEvent) => {
+			const target = event.target;
+			if (!(target instanceof Node)) return;
+			if (
+				playbackSpeedMenuElement?.contains(target) ||
+				playbackSpeedButtonElement?.contains(target)
+			) {
+				return;
+			}
+			closePlaybackSpeedMenu();
+		};
+
+		document.addEventListener('pointerdown', handlePointerDown);
+		return () => document.removeEventListener('pointerdown', handlePointerDown);
 	});
 
 	$effect(() => {
@@ -793,6 +964,13 @@
 
 	function handleRateChange() {
 		if (!videoElement) return;
+		if (isSupportedPlaybackRate(videoElement.playbackRate)) {
+			if (videoElement.playbackRate !== playbackRate) {
+				playbackRateDirection = videoElement.playbackRate > playbackRate ? 1 : -1;
+				playbackRate = videoElement.playbackRate;
+				void sliderPlaybackRate.set(playbackRate, { duration: 0 });
+			}
+		}
 		syncMediaSessionPositionState();
 	}
 
@@ -1209,7 +1387,8 @@
 				draggingSeek ||
 				draggingVolume ||
 				seekPreviewVisible ||
-				showVolumeSlider
+				showVolumeSlider ||
+				showPlaybackSpeedMenu
 			) {
 				scheduleHide(delayMs);
 				return;
@@ -1256,6 +1435,7 @@
 
 	function handleMouseLeave() {
 		pointerInsidePlayer = false;
+		showPlaybackSpeedMenu = false;
 		if (hideTimeout) {
 			clearTimeout(hideTimeout);
 			hideTimeout = null;
@@ -1840,22 +2020,34 @@
 								<PauseSolid class="size-6 text-white" />
 							{/if}
 						</LectureVideoControlButton>
-						<LectureVideoControlButton
-							class="hidden sm:block"
-							label="Skip backward 15 seconds (left arrow)"
-							locked={questionControlsLocked}
-							onclick={() => skipBy('skipBackward')}
+						<div
+							class="hidden shrink-0 items-center gap-1 rounded-full bg-black/30 p-1 sm:flex {questionControlsLocked
+								? 'pointer-events-none invisible'
+								: 'pointer-events-auto'}"
 						>
-							<SkipBackwardIcon class="size-5" />
-						</LectureVideoControlButton>
-						<LectureVideoControlButton
-							class="hidden sm:block"
-							label="Skip forward 15 seconds (right arrow)"
-							locked={questionControlsLocked}
-							onclick={() => skipBy('skipForward')}
-						>
-							<SkipForwardIcon class="size-5" />
-						</LectureVideoControlButton>
+							<button
+								class="flex h-8 w-8 items-center justify-center rounded-full text-white transition-colors duration-200 hover:bg-white/10"
+								onclick={(event: MouseEvent) => {
+									event.stopPropagation();
+									skipBy('skipBackward');
+								}}
+								onkeydown={(event) => event.stopPropagation()}
+								aria-label="Skip backward 15 seconds (left arrow)"
+							>
+								<SkipBackwardIcon class="size-5" />
+							</button>
+							<button
+								class="flex h-8 w-8 items-center justify-center rounded-full text-white transition-colors duration-200 hover:bg-white/10"
+								onclick={(event: MouseEvent) => {
+									event.stopPropagation();
+									skipBy('skipForward');
+								}}
+								onkeydown={(event) => event.stopPropagation()}
+								aria-label="Skip forward 15 seconds (right arrow)"
+							>
+								<SkipForwardIcon class="size-5" />
+							</button>
+						</div>
 						<!-- svelte-ignore a11y_no_static_element_interactions -->
 						<div
 							class="relative shrink-0 rounded-full bg-black/30 p-1 {questionControlsLocked
@@ -1926,21 +2118,6 @@
 								</div>
 							</div>
 						</div>
-						{#if captionsAvailable}
-							<LectureVideoControlButton
-								label={captionsEnabled ? 'Turn captions off' : 'Turn captions on'}
-								locked={questionControlsLocked}
-								active={captionsEnabled}
-								pressed={captionsEnabled}
-								onclick={toggleCaptions}
-							>
-								{#if captionsEnabled}
-									<CaptionSolid class="size-5 text-white" />
-								{:else}
-									<CaptionOutline class="size-5 text-white" />
-								{/if}
-							</LectureVideoControlButton>
-						{/if}
 						<div
 							class="shrink-0 rounded-full bg-black/30 p-1 {questionControlsLocked
 								? 'pointer-events-none invisible'
@@ -1958,18 +2135,142 @@
 								{timeReadoutText}
 							</button>
 						</div>
-						{#if isFullscreenSupported}
-							<LectureVideoControlButton
-								label={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
-								onclick={toggleFullscreen}
-								class="ml-auto"
+						{#if !questionControlsLocked || isFullscreenSupported}
+							<div
+								class="relative ml-auto flex shrink-0 items-center gap-1 rounded-full bg-black/30 p-1"
 							>
-								{#if isFullscreen}
-									<CompressOutline class="size-5 text-white" />
-								{:else}
-									<ExpandOutline class="size-5 text-white" />
+								{#if captionsAvailable && !questionControlsLocked}
+									<button
+										class="flex h-8 w-8 items-center justify-center rounded-full text-white transition-colors duration-200 hover:bg-white/10 {captionsEnabled
+											? 'bg-white/15'
+											: ''}"
+										onclick={(event: MouseEvent) => {
+											event.stopPropagation();
+											toggleCaptions();
+										}}
+										onkeydown={(event) => event.stopPropagation()}
+										aria-label={captionsEnabled ? 'Turn captions off' : 'Turn captions on'}
+										aria-pressed={captionsEnabled}
+									>
+										{#if captionsEnabled}
+											<CaptionSolid class="size-5 text-white" />
+										{:else}
+											<CaptionOutline class="size-5 text-white" />
+										{/if}
+									</button>
 								{/if}
-							</LectureVideoControlButton>
+								{#if playbackRatePolicy && !questionControlsLocked}
+									<button
+										bind:this={playbackSpeedButtonElement}
+										class="flex h-8 w-8 items-center justify-center rounded-full text-white transition-colors duration-200 hover:bg-white/10 {showPlaybackSpeedMenu
+											? 'bg-white/15'
+											: ''}"
+										onclick={(event: MouseEvent) => {
+											event.stopPropagation();
+											togglePlaybackSpeedMenu();
+										}}
+										onkeydown={(event) => event.stopPropagation()}
+										aria-label={`Playback speed, ${formatPlaybackRate(playbackRate)}`}
+										aria-haspopup="dialog"
+										aria-expanded={showPlaybackSpeedMenu}
+									>
+										<CogOutline class="size-5 text-white" />
+									</button>
+									{#if showPlaybackSpeedMenu}
+										<div
+											bind:this={playbackSpeedMenuElement}
+											class="pointer-events-auto absolute right-0 bottom-12 z-30 w-60 max-w-[calc(100vw-3rem)] rounded-xl bg-black/45 p-2 text-white shadow-lg backdrop-blur-sm sm:bottom-20 sm:w-64 sm:p-3"
+											role="dialog"
+											aria-label="Playback speed"
+											tabindex={-1}
+											onclick={(event: MouseEvent) => event.stopPropagation()}
+											onkeydown={handlePlaybackSpeedMenuKeydown}
+											transition:fade={{ duration: 120 }}
+										>
+											<div class="flex h-5 items-center justify-between">
+												<div class="text-xs font-medium text-white/80">Playback speed</div>
+												<div class="flex text-sm font-normal text-white/90">
+													<span class="relative h-5 w-9 overflow-hidden">
+														{#key playbackRate}
+															<span
+																class="absolute inset-0 text-right tabular-nums"
+																in:fly={{ y: 10 * playbackRateDirection, duration: 150 }}
+																out:fly={{ y: -10 * playbackRateDirection, duration: 150 }}
+																>{formatPlaybackRateNumber(playbackRate)}</span
+															>
+														{/key}
+													</span><span class="h-5 text-left">×</span>
+												</div>
+											</div>
+											<div class="mt-2 flex items-center gap-2">
+												<button
+													class="flex size-8 shrink-0 items-center justify-center rounded-full bg-white/10 text-white transition hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-35"
+													onclick={() => adjustPlaybackRate(-1)}
+													disabled={playbackRate <= playbackRatePolicy.min}
+													aria-label="Decrease playback speed"
+												>
+													<MinusOutline class="size-4" />
+												</button>
+												<input
+													type="range"
+													class="h-1.5 min-w-0 grow cursor-pointer appearance-none rounded-full bg-white/25 [&::-moz-range-thumb]:size-3 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:bg-white [&::-moz-range-thumb]:transition-transform [&::-moz-range-thumb]:duration-150 [&::-moz-range-thumb:hover]:scale-110 [&::-moz-range-thumb:active]:scale-125 [&::-webkit-slider-thumb]:size-3 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:transition-transform [&::-webkit-slider-thumb]:duration-150 [&::-webkit-slider-thumb:hover]:scale-110 [&::-webkit-slider-thumb:active]:scale-125"
+													min={playbackRatePolicy.min}
+													max={playbackRatePolicy.max}
+													step={playbackRatePolicy.step}
+													value={sliderPlaybackRate.current}
+													oninput={(event) => setPlaybackRate(Number(event.currentTarget.value))}
+													aria-label="Playback speed"
+												/>
+												<button
+													class="flex size-8 shrink-0 items-center justify-center rounded-full bg-white/10 text-white transition hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-35"
+													onclick={() => adjustPlaybackRate(1)}
+													disabled={playbackRate >= playbackRatePolicy.max}
+													aria-label="Increase playback speed"
+												>
+													<PlusOutline class="size-4" />
+												</button>
+											</div>
+											<div class="mt-2.5 grid grid-cols-5 gap-1.5">
+												{#each playbackRatePresets as rate (rate)}
+													<div class="flex flex-col items-center gap-1">
+														<button
+															class="w-full rounded-full bg-black/25 px-1 py-1.5 text-xs font-medium text-white tabular-nums transition hover:bg-black/40"
+															onclick={() => setPlaybackRate(rate, { animateSlider: true })}
+															aria-label={rate === 1
+																? 'Normal playback speed'
+																: `Set playback speed to ${formatPlaybackRate(rate)}`}
+														>
+															{formatPlaybackRate(rate)}
+														</button>
+														{#if rate === 1}
+															<span class="hidden text-[10px] leading-none text-white/70 sm:block"
+																>Normal</span
+															>
+														{/if}
+													</div>
+												{/each}
+											</div>
+										</div>
+									{/if}
+								{/if}
+								{#if isFullscreenSupported}
+									<button
+										class="flex h-8 w-8 items-center justify-center rounded-full text-white transition-colors duration-200 hover:bg-white/10"
+										onclick={(event: MouseEvent) => {
+											event.stopPropagation();
+											toggleFullscreen();
+										}}
+										onkeydown={(event) => event.stopPropagation()}
+										aria-label={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
+									>
+										{#if isFullscreen}
+											<CompressOutline class="size-5 text-white" />
+										{:else}
+											<ExpandOutline class="size-5 text-white" />
+										{/if}
+									</button>
+								{/if}
+							</div>
 						{/if}
 					</div>
 				</div>
