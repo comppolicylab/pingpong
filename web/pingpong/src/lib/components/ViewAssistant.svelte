@@ -60,6 +60,9 @@
 
 	let sharedAssistantModalOpen = false;
 	let qualtricsCodeModalOpen = false;
+	let genericIframeModalOpen = false;
+	let genericIframeLinkName = '';
+	let genericIframeSnippet = '';
 	let copyAssistantModalOpen = false;
 	let deleteAssistantModalOpen = false;
 	let notesAssistantModalOpen = false;
@@ -146,6 +149,22 @@
 		qualtricsQuestionJavaScript = snippets.questionJavaScript;
 		qualtricsQuestionHTML = snippets.questionHTML;
 		qualtricsCodeModalOpen = true;
+	};
+
+	const openGenericIFrameInstructionsModal = (
+		linkName: string | null | undefined,
+		shareToken: string
+	) => {
+		const linkUrl = `${sharedAssistantLinkWithParam}${shareToken}`;
+		genericIframeLinkName = linkName?.trim() || 'Shared Link';
+		genericIframeSnippet = `<iframe
+	style="border:0"
+	src="${linkUrl}"
+	height="1000px"
+	width="100%"
+	allow="clipboard-write *; microphone *; fullscreen *"
+></iframe>`;
+		genericIframeModalOpen = true;
 	};
 
 	const checkCopyPermission = async (targetClassId: string) => {
@@ -337,6 +356,15 @@
 									size="sm"
 									class="flex w-fit shrink-0 flex-row items-center justify-center gap-1.5 rounded-full border border-blue-dark-40 bg-white p-1 px-3 text-xs text-blue-dark-40 transition-all hover:bg-blue-dark-40 hover:text-white"
 									disabled={!link.active}
+									onclick={() => openGenericIFrameInstructionsModal(link.name, link.share_token)}
+								>
+									Embed in Other Site
+								</Button>
+								<Button
+									pill
+									size="sm"
+									class="flex w-fit shrink-0 flex-row items-center justify-center gap-1.5 rounded-full border border-blue-dark-40 bg-white p-1 px-3 text-xs text-blue-dark-40 transition-all hover:bg-blue-dark-40 hover:text-white"
+									disabled={!link.active}
 									onclick={() => openQualtricsCodeModal(link.name, link.share_token)}
 								>
 									Qualtrics Instructions
@@ -444,6 +472,41 @@
 			Conversation ID for each respondent that is used to track their conversation in PingPong.
 		</li>
 	</ol>
+</Modal>
+
+<Modal size="xl" bind:open={genericIframeModalOpen}>
+	<slot name="header">
+		<Heading
+			tag="h2"
+			class="mr-5 mb-2 max-w-max shrink-0 font-serif text-3xl font-medium text-blue-dark-40"
+			color="blue">Embedding in Other Site</Heading
+		>
+	</slot>
+	<p class="mb-2 text-sm text-blue-dark-50">
+		Use the code below to embed <i>&ldquo;{assistant.name}&rdquo; ({genericIframeLinkName})</i> in
+		another website. Copy the snippet and paste it into the HTML of the page where you want the
+		assistant to appear. You can change the <span class="font-mono">height="1000px"</span> attribute in
+		the code if you want to adjust the assistant&rsquo;s height.
+	</p>
+	<div class="mt-2 mb-3 rounded-xl border border-blue-light-30 bg-white p-4">
+		<div class="mb-2 flex items-center justify-between gap-2">
+			<Heading tag="h3" class="text-lg font-medium text-blue-dark-40">Embed Code</Heading>
+			<button
+				class="rounded-full border border-blue-dark-40 bg-white px-3 py-1 text-xs text-blue-dark-40 transition-all hover:bg-blue-dark-40 hover:text-white"
+				onclick={(event) => {
+					event.preventDefault();
+				}}
+				use:copy={{
+					text: genericIframeSnippet,
+					onCopy: () => showCopiedText('Embed code')
+				}}
+			>
+				Copy
+			</button>
+		</div>
+		<pre
+			class="max-h-56 overflow-auto rounded-lg bg-gray-50 p-3 font-mono text-xs leading-5 whitespace-pre text-gray-800">{genericIframeSnippet}</pre>
+	</div>
 </Modal>
 
 <div
