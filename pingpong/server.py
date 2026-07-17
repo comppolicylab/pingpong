@@ -620,9 +620,49 @@ def _lecture_slide_deck_view(
             schemas.LectureSlidePageView(
                 id=page.id,
                 position=page.position,
+                content_kind=page.content_kind,
+                source_page_number=page.source_page_number,
                 start_offset_ms=page.start_offset_ms,
                 end_offset_ms=page.end_offset_ms,
                 image_stored_object_id=page.image_stored_object_id,
+                media_stored_object_id=page.media_stored_object_id,
+                media_url=(
+                    str(
+                        request.url_for(
+                            "get_thread_lecture_slide_page_image",
+                            class_id=str(thread.class_id),
+                            thread_id=str(thread.id),
+                            page_id=str(page.id),
+                        )
+                    )
+                    if page.media_stored_object_id is not None
+                    else None
+                ),
+                media_content_type=(
+                    page.media_stored_object.content_type
+                    if page.media_stored_object is not None
+                    else None
+                ),
+                media_filename=(
+                    page.media_stored_object.original_filename
+                    if page.media_stored_object is not None
+                    else None
+                ),
+                media_duration_ms=(
+                    page.media_stored_object.duration_ms
+                    if page.media_stored_object is not None
+                    else None
+                ),
+                media_width_px=(
+                    page.media_stored_object.width_px
+                    if page.media_stored_object is not None
+                    else None
+                ),
+                media_height_px=(
+                    page.media_stored_object.height_px
+                    if page.media_stored_object is not None
+                    else None
+                ),
             )
             for page in sorted(deck.pages, key=lambda item: item.position)
         ],
@@ -752,7 +792,8 @@ async def begin_db_session(request: StateRequest, call_next):
             status_code = getattr(result, "status_code", 0)
             if not status_code or status_code >= 400:
                 await db.rollback()
-            await db.commit()
+            else:
+                await db.commit()
             return result
         except Exception as e:
             await db.rollback()
@@ -5109,6 +5150,75 @@ async def _stream_audio_file_response(
     )
 
 
+async def _stream_video_store_response(
+    *,
+    key: str,
+    content_length: int,
+    content_type: str | None,
+    range_header: str | None,
+    cache_control: str | None = None,
+    retrieval_error_detail: str,
+) -> StreamingResponse:
+    if not config.video_store:
+        raise HTTPException(status_code=404, detail="No Video Store exists.")
+    try:
+        start, end, is_partial = _parse_single_byte_range(range_header, content_length)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=416,
+            detail=str(exc),
+            headers={
+                "Accept-Ranges": "bytes",
+                "Content-Range": f"bytes */{content_length}",
+            },
+        ) from exc
+
+    try:
+        stream = await prefetch_stream(
+            config.video_store.store.stream_video_range(
+                key=key,
+                start=start,
+                end=end,
+            ),
+            store_error=VideoStoreError,
+            logger=logger,
+            store_error_log="VideoStoreError while streaming lecture slide media; aborting stream.",
+            unexpected_error_log="Unexpected error while streaming lecture slide media",
+        )
+    except VideoStoreError as exc:
+        if exc.detail and "range" in exc.detail.lower():
+            raise HTTPException(
+                status_code=416,
+                detail=exc.detail,
+                headers={
+                    "Accept-Ranges": "bytes",
+                    "Content-Range": f"bytes */{content_length}",
+                },
+            ) from exc
+        raise HTTPException(status_code=404, detail=retrieval_error_detail) from exc
+
+    response_headers = {
+        "Accept-Ranges": "bytes",
+        "Content-Length": str(
+            (end - start + 1)
+            if is_partial and start is not None and end is not None
+            else content_length
+        ),
+    }
+    if cache_control is not None:
+        response_headers["Cache-Control"] = cache_control
+    status_code = 200
+    if is_partial and start is not None and end is not None:
+        response_headers["Content-Range"] = f"bytes {start}-{end}/{content_length}"
+        status_code = 206
+    return StreamingResponse(
+        stream,
+        status_code=status_code,
+        media_type=content_type or "application/octet-stream",
+        headers=response_headers,
+    )
+
+
 @v1.get(
     "/class/{class_id}/thread/{thread_id}/video",
     dependencies=[
@@ -5505,10 +5615,13 @@ async def get_thread_lecture_slide_page_image(
     )
     deck = cast(models.LectureSlideDeck, thread.lecture_slide_deck)
     page = next((page for page in deck.pages if page.id == page_id), None)
-    if page is None or page.image_stored_object is None:
-        raise HTTPException(status_code=404, detail="Lecture slide image not found.")
+    if page is None or (
+        page.image_stored_object is None and page.media_stored_object is None
+    ):
+        raise HTTPException(status_code=404, detail="Lecture slide content not found.")
 
-    image = page.image_stored_object
+    image = page.media_stored_object or page.image_stored_object
+    assert image is not None
     total_length = image.content_length
     range_header = request.headers.get("range")
     try:
@@ -5571,7 +5684,7 @@ async def get_thread_lecture_slide_page_image(
         logger.exception("get_thread_lecture_slide_page_image: Exception occurred")
         raise HTTPException(
             status_code=500,
-            detail="An internal error occurred while streaming the lecture slide image.",
+            detail="An internal error occurred while streaming the lecture slide content.",
         ) from e
 
 
@@ -9924,6 +10037,93 @@ async def upload_lecture_slide_deck_for_assistant(
     return await lecture_slide_service.lecture_slide_summary_from_model(deck)
 
 
+async def _create_lecture_slide_media_response(
+    class_id: str, request: StateRequest, upload: UploadFile
+) -> schemas.LectureSlideMediaUpload:
+    media = await lecture_slide_service.create_lecture_slide_media_upload(
+        request.state["db"],
+        class_id=int(class_id),
+        uploader_id=request.state["session"].user.id,
+        upload=upload,
+    )
+    return lecture_slide_service.lecture_slide_media_summary_from_model(media)
+
+
+@v1.post(
+    "/class/{class_id}/lecture-slides/media",
+    dependencies=[
+        Depends(Authz("admin", "class:{class_id}")),
+        Depends(ClassNotArchived()),
+    ],
+    response_model=schemas.LectureSlideMediaUpload,
+)
+async def upload_lecture_slide_media(
+    class_id: str, request: StateRequest, upload: UploadFile
+):
+    return await _create_lecture_slide_media_response(class_id, request, upload)
+
+
+@v1.post(
+    "/class/{class_id}/assistant/{assistant_id}/lecture-slides/media/upload",
+    dependencies=[
+        Depends(Authz("can_edit", "assistant:{assistant_id}")),
+        Depends(ClassNotArchived()),
+    ],
+    response_model=schemas.LectureSlideMediaUpload,
+)
+async def upload_lecture_slide_media_for_assistant(
+    class_id: str, assistant_id: str, request: StateRequest, upload: UploadFile
+):
+    await lecture_slide_service.get_lecture_slide_assistant_for_class(
+        request.state["db"], int(assistant_id), int(class_id)
+    )
+    return await _create_lecture_slide_media_response(class_id, request, upload)
+
+
+async def _delete_unattached_lecture_slide_media_response(
+    class_id: str, media_id: int, request: StateRequest
+) -> schemas.GenericStatus:
+    await lecture_slide_service.delete_unattached_lecture_slide_media(
+        request.state["db"],
+        media_id=media_id,
+        class_id=int(class_id),
+        uploader_id=request.state["session"].user.id,
+    )
+    return schemas.GenericStatus(status="ok")
+
+
+@v1.delete(
+    "/class/{class_id}/lecture-slides/media/{media_id}",
+    dependencies=[Depends(Authz("admin", "class:{class_id}"))],
+    response_model=schemas.GenericStatus,
+)
+async def delete_lecture_slide_media(
+    class_id: str, media_id: int, request: StateRequest
+):
+    return await _delete_unattached_lecture_slide_media_response(
+        class_id, media_id, request
+    )
+
+
+@v1.delete(
+    "/class/{class_id}/assistant/{assistant_id}/lecture-slides/media/{media_id}",
+    dependencies=[Depends(Authz("can_edit", "assistant:{assistant_id}"))],
+    response_model=schemas.GenericStatus,
+)
+async def delete_lecture_slide_media_for_assistant(
+    class_id: str,
+    assistant_id: str,
+    media_id: int,
+    request: StateRequest,
+):
+    await lecture_slide_service.get_lecture_slide_assistant_for_class(
+        request.state["db"], int(assistant_id), int(class_id)
+    )
+    return await _delete_unattached_lecture_slide_media_response(
+        class_id, media_id, request
+    )
+
+
 @v1.post(
     "/class/{class_id}/lecture-slides/additional-context",
     dependencies=[
@@ -10072,6 +10272,49 @@ async def get_assistant_lecture_slide_source(
     if deck is None:
         raise HTTPException(status_code=404, detail="Lecture slide deck not found.")
     return await _stream_lecture_slide_source_pdf(deck)
+
+
+@v1.get(
+    "/class/{class_id}/assistant/{assistant_id}/lecture-slides/media/{media_id}",
+    dependencies=[Depends(Authz("can_edit", "assistant:{assistant_id}"))],
+    response_class=StreamingResponse,
+)
+async def get_assistant_lecture_slide_media(
+    class_id: str,
+    assistant_id: str,
+    media_id: int,
+    request: StateRequest,
+):
+    if not config.video_store:
+        raise HTTPException(status_code=404, detail="No Video Store exists.")
+    assistant = await lecture_slide_service.get_lecture_slide_assistant_for_class(
+        request.state["db"], int(assistant_id), int(class_id)
+    )
+    if assistant.lecture_slide_deck_id is None:
+        raise HTTPException(status_code=404, detail="Lecture slide deck not found.")
+    media = await request.state["db"].scalar(
+        select(models.LectureSlideMediaStoredObject)
+        .join(
+            models.LectureSlidePage,
+            models.LectureSlidePage.media_stored_object_id
+            == models.LectureSlideMediaStoredObject.id,
+        )
+        .where(
+            models.LectureSlideMediaStoredObject.id == media_id,
+            models.LectureSlidePage.lecture_slide_deck_id
+            == assistant.lecture_slide_deck_id,
+        )
+    )
+    if media is None:
+        raise HTTPException(status_code=404, detail="Lecture slide media not found.")
+    return await _stream_video_store_response(
+        key=media.key,
+        content_length=media.content_length,
+        content_type=media.content_type,
+        range_header=request.headers.get("range"),
+        cache_control="private, max-age=86400",
+        retrieval_error_detail="Unable to stream lecture slide media.",
+    )
 
 
 @v1.get(
@@ -10519,9 +10762,49 @@ async def get_assistant_lecture_slide_config(
         schemas.LectureSlidePageView(
             id=page.id,
             position=page.position,
+            content_kind=page.content_kind,
+            source_page_number=page.source_page_number,
             start_offset_ms=page.start_offset_ms,
             end_offset_ms=page.end_offset_ms,
             image_stored_object_id=page.image_stored_object_id,
+            media_stored_object_id=page.media_stored_object_id,
+            media_url=(
+                str(
+                    request.url_for(
+                        "get_assistant_lecture_slide_media",
+                        class_id=class_id,
+                        assistant_id=assistant_id,
+                        media_id=str(page.media_stored_object_id),
+                    )
+                )
+                if page.media_stored_object_id is not None
+                else None
+            ),
+            media_content_type=(
+                page.media_stored_object.content_type
+                if page.media_stored_object is not None
+                else None
+            ),
+            media_filename=(
+                page.media_stored_object.original_filename
+                if page.media_stored_object is not None
+                else None
+            ),
+            media_duration_ms=(
+                page.media_stored_object.duration_ms
+                if page.media_stored_object is not None
+                else None
+            ),
+            media_width_px=(
+                page.media_stored_object.width_px
+                if page.media_stored_object is not None
+                else None
+            ),
+            media_height_px=(
+                page.media_stored_object.height_px
+                if page.media_stored_object is not None
+                else None
+            ),
             user_notes=page.user_notes,
             narration_text=page.narration_text,
         )
@@ -11312,7 +11595,18 @@ async def create_assistant(
     lecture_slide_voice_id = None
     lecture_slide_generation_prompt = None
     lecture_slide_narration_prompt = None
+    lecture_slide_page_notes_present = (
+        "lecture_slide_page_notes" in req.model_fields_set
+    )
+    lecture_slide_content_items_present = (
+        "lecture_slide_content_items" in req.model_fields_set
+    )
+    lecture_slide_context_files_present = (
+        "lecture_slide_additional_context_file_ids" in req.model_fields_set
+    )
+    lecture_slide_questions_present = "lecture_slide_questions" in req.model_fields_set
     lecture_slide_page_notes = req.lecture_slide_page_notes
+    lecture_slide_content_items = req.lecture_slide_content_items
     lecture_slide_additional_context_file_ids = (
         req.lecture_slide_additional_context_file_ids
     )
@@ -11382,6 +11676,7 @@ async def create_assistant(
         or req.lecture_video_manifest is not None
         or req.lecture_slide_deck_id is not None
         or req.lecture_slide_page_notes
+        or req.lecture_slide_content_items
         or req.lecture_slide_additional_context_file_ids
         or req.lecture_slide_questions
         or req.voice_id is not None
@@ -11531,6 +11826,7 @@ async def create_assistant(
         del req.lecture_video_manifest
         del req.lecture_slide_deck_id
         del req.lecture_slide_page_notes
+        del req.lecture_slide_content_items
         del req.lecture_slide_additional_context_file_ids
         del req.lecture_slide_questions
         del req.voice_id
@@ -11615,18 +11911,39 @@ async def create_assistant(
             lecture_slide_deck.voice_id = lecture_slide_voice_id
             lecture_slide_deck.generation_prompt = lecture_slide_generation_prompt
             lecture_slide_deck.narration_prompt = lecture_slide_narration_prompt
-            await lecture_slide_service.apply_lecture_slide_page_notes(
-                request.state["db"], lecture_slide_deck, lecture_slide_page_notes
-            )
-            await lecture_slide_service.apply_lecture_slide_additional_context_files(
-                request.state["db"],
-                lecture_slide_deck,
-                lecture_slide_additional_context_file_ids,
-                uploader_id=request.state["session"].user.id,
-            )
-            await lecture_slide_service.apply_lecture_slide_question_drafts(
-                request.state["db"], lecture_slide_deck, lecture_slide_questions
-            )
+            if lecture_slide_content_items_present:
+                await lecture_slide_service.apply_lecture_slide_content_items(
+                    request.state["db"],
+                    lecture_slide_deck,
+                    lecture_slide_content_items,
+                    uploader_id=request.state["session"].user.id,
+                )
+            elif not lecture_slide_deck.pages:
+                await lecture_slide_service.apply_lecture_slide_content_items(
+                    request.state["db"],
+                    lecture_slide_deck,
+                    lecture_slide_service.default_lecture_slide_content_items(
+                        lecture_slide_deck
+                    ),
+                    uploader_id=request.state["session"].user.id,
+                )
+            if lecture_slide_page_notes_present:
+                await lecture_slide_service.apply_lecture_slide_page_notes(
+                    request.state["db"], lecture_slide_deck, lecture_slide_page_notes
+                )
+            if lecture_slide_context_files_present:
+                await (
+                    lecture_slide_service.apply_lecture_slide_additional_context_files(
+                        request.state["db"],
+                        lecture_slide_deck,
+                        lecture_slide_additional_context_file_ids,
+                        uploader_id=request.state["session"].user.id,
+                    )
+                )
+            if lecture_slide_questions_present:
+                await lecture_slide_service.apply_lecture_slide_question_drafts(
+                    request.state["db"], lecture_slide_deck, lecture_slide_questions
+                )
             await lecture_slide_processing.queue_lecture_slide_processing_run(
                 request.state["db"],
                 lecture_slide_deck,
@@ -12140,6 +12457,24 @@ async def update_assistant_share_name(
     return {"status": "ok"}
 
 
+def _lecture_slide_update_processing_stage(
+    *,
+    needs_full_processing: bool,
+    needs_narration_text: bool,
+    needs_audio: bool,
+    needs_questions: bool,
+) -> schemas.LectureSlideProcessingStage | None:
+    if needs_full_processing:
+        return schemas.LectureSlideProcessingStage.SLIDE_ASSET_EXTRACTION
+    if needs_narration_text:
+        return schemas.LectureSlideProcessingStage.NARRATION_TEXT
+    if needs_audio:
+        return schemas.LectureSlideProcessingStage.NARRATION_AUDIO
+    if needs_questions:
+        return schemas.LectureSlideProcessingStage.MANIFEST_GENERATION
+    return None
+
+
 @v1.put(
     "/class/{class_id}/assistant/{assistant_id}",
     dependencies=[
@@ -12286,6 +12621,7 @@ async def update_assistant(
     lecture_slide_specific_fields_present = (
         "lecture_slide_deck_id" in req.model_fields_set
         or "lecture_slide_page_notes" in req.model_fields_set
+        or "lecture_slide_content_items" in req.model_fields_set
         or "lecture_slide_additional_context_file_ids" in req.model_fields_set
         or "lecture_slide_questions" in req.model_fields_set
         or "narration_prompt" in req.model_fields_set
@@ -13568,6 +13904,9 @@ async def update_assistant(
             prompt_present = "generation_prompt" in req.model_fields_set
             narration_prompt_present = "narration_prompt" in req.model_fields_set
             notes_present = "lecture_slide_page_notes" in req.model_fields_set
+            content_items_present = (
+                "lecture_slide_content_items" in req.model_fields_set
+            )
             context_files_present = (
                 "lecture_slide_additional_context_file_ids" in req.model_fields_set
             )
@@ -13595,6 +13934,7 @@ async def update_assistant(
                 or generation_prompt_changed
                 or narration_prompt_changed
                 or notes_present
+                or content_items_present
                 or context_files_present
                 or questions_present
                 or regenerate_narration_requested
@@ -13631,9 +13971,28 @@ async def update_assistant(
                 )
             notes_changed = False
             narration_text_changed = False
+            content_items_changed = False
+            content_requires_narration = False
             question_audio_changed = False
             question_generation_requested_by_draft = False
             additional_context_files_changed = False
+            if content_items_present:
+                content_update_result = (
+                    await lecture_slide_service.apply_lecture_slide_content_items(
+                        request.state["db"],
+                        target_lecture_slide_deck,
+                        req.lecture_slide_content_items or [],
+                        uploader_id=request.state["session"].user.id,
+                    )
+                )
+                content_items_changed = content_update_result.structure_changed
+                content_requires_narration = (
+                    content_update_result.requires_narration_generation
+                )
+                notes_changed = notes_changed or content_update_result.notes_changed
+                narration_text_changed = (
+                    narration_text_changed or content_update_result.narration_changed
+                )
             if notes_present:
                 page_update_result = (
                     await lecture_slide_service.apply_lecture_slide_page_notes(
@@ -13642,8 +14001,10 @@ async def update_assistant(
                         req.lecture_slide_page_notes or [],
                     )
                 )
-                notes_changed = page_update_result.notes_changed
-                narration_text_changed = page_update_result.narration_changed
+                notes_changed = notes_changed or page_update_result.notes_changed
+                narration_text_changed = (
+                    narration_text_changed or page_update_result.narration_changed
+                )
             if context_files_present:
                 additional_context_files_changed = await lecture_slide_service.apply_lecture_slide_additional_context_files(
                     request.state["db"],
@@ -13672,18 +14033,23 @@ async def update_assistant(
             )
             needs_narration_text = (
                 regenerate_narration_requested
+                or content_requires_narration
                 or narration_prompt_changed
                 or additional_context_files_changed
                 or (notes_changed and not narration_text_changed)
             )
             needs_questions = (
                 regenerate_questions_requested
+                or content_items_changed
                 or generation_prompt_changed
                 or additional_context_files_changed
                 or question_generation_requested_by_draft
             )
             needs_audio = (
-                regenerate_audio_requested or voice_changed or question_audio_changed
+                regenerate_audio_requested
+                or voice_changed
+                or question_audio_changed
+                or content_items_changed
             )
             if narration_text_changed:
                 needs_audio = True
@@ -13720,8 +14086,17 @@ async def update_assistant(
                     target_lecture_slide_deck.context_data = context_data
                     request.state["db"].add(target_lecture_slide_deck)
 
+            processing_stage = _lecture_slide_update_processing_stage(
+                needs_full_processing=needs_full_processing,
+                needs_narration_text=needs_narration_text,
+                needs_audio=needs_audio,
+                needs_questions=needs_questions,
+            )
             queued_run = None
-            if needs_full_processing or (needs_narration_text and needs_questions):
+            if (
+                processing_stage
+                == schemas.LectureSlideProcessingStage.SLIDE_ASSET_EXTRACTION
+            ):
                 queued_run = (
                     await lecture_slide_processing.queue_lecture_slide_processing_run(
                         request.state["db"],
@@ -13729,7 +14104,7 @@ async def update_assistant(
                         requested_by_assistant_id=asst.id,
                     )
                 )
-            elif needs_narration_text:
+            elif processing_stage == schemas.LectureSlideProcessingStage.NARRATION_TEXT:
                 queued_run = (
                     await lecture_slide_processing.queue_narration_text_processing_run(
                         request.state["db"],
@@ -13737,26 +14112,26 @@ async def update_assistant(
                         requested_by_assistant_id=asst.id,
                     )
                 )
-            elif needs_audio:
+            elif (
+                processing_stage == schemas.LectureSlideProcessingStage.NARRATION_AUDIO
+            ):
                 queued_run = await lecture_slide_processing.queue_audio_processing_run(
                     request.state["db"],
                     target_lecture_slide_deck,
                     requested_by_assistant_id=asst.id,
                     force_manifest_generation=needs_questions,
                 )
-            elif needs_questions:
+            elif (
+                processing_stage
+                == schemas.LectureSlideProcessingStage.MANIFEST_GENERATION
+            ):
                 queued_run = await lecture_slide_processing.queue_manifest_generation_processing_run(
                     request.state["db"],
                     target_lecture_slide_deck,
                     requested_by_assistant_id=asst.id,
                 )
 
-            if queued_run is None and (
-                needs_full_processing
-                or needs_narration_text
-                or needs_questions
-                or needs_audio
-            ):
+            if queued_run is None and processing_stage is not None:
                 raise HTTPException(
                     status_code=409,
                     detail="Lecture slide processing could not be queued for the current deck state.",

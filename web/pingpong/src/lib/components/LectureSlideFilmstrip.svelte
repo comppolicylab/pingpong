@@ -7,10 +7,16 @@
 	import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.mjs';
 	import pdfWorkerUrl from 'pdfjs-dist/legacy/build/pdf.worker.mjs?url';
 	import type { PDFDocumentProxy } from 'pdfjs-dist/types/src/pdf';
-	import { QuestionCircleOutline, PlusOutline } from 'flowbite-svelte-icons';
+	import { QuestionCircleOutline } from 'flowbite-svelte-icons';
+	import LectureSlideAddMenu from './LectureSlideAddMenu.svelte';
 
 	type FilmstripPage = {
+		id: number;
 		position: number;
+		content_kind?: 'slide' | 'image' | 'gif' | 'video';
+		source_page_number?: number | null;
+		media_url?: string | null;
+		media_filename?: string | null;
 		narration_text?: string | null;
 	};
 
@@ -22,16 +28,21 @@
 	export let onSelectSlide: (position: number) => void = () => {};
 	export let onSelectQuestion: (question: Q) => void = () => {};
 	export let onAddQuestion: ((position: number) => void) | null = null;
+	export let onInsertMedia: ((insertIndex: number) => void) | null = null;
+	export let onReorder: ((fromPosition: number, toPosition: number) => void) | null = null;
 
 	pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
 	const THUMB_WIDTH = 220;
+	const thumbnailKey = (page: FilmstripPage) => page.source_page_number ?? page.position;
 
 	let pdfDocument: PDFDocumentProxy | null = null;
 	let currentSourceUrl = '';
 	let loadToken = 0;
 	let thumbnails: Record<number, string> = {};
 	let renderInProgress: Promise<void> | null = null;
+	let draggedPosition: number | null = null;
+	let reorderAnnouncement = '';
 
 	const questionSequence = (clientId: string) => {
 		const sequence = Number(clientId.replace('lecture-slide-question-draft-', ''));
@@ -54,6 +65,17 @@
 	const questionNumber = (questionClientId: string) =>
 		orderedQuestions.findIndex((question) => question.client_id === questionClientId) + 1;
 
+	const reorderPageBy = (page: FilmstripPage, pageIndex: number, delta: -1 | 1) => {
+		const targetIndex = pageIndex + delta;
+		const target = pages[targetIndex];
+		if (!onReorder || !target) return;
+		onReorder(page.position, target.position);
+		reorderAnnouncement = '';
+		queueMicrotask(() => {
+			reorderAnnouncement = `Moved item ${pageIndex + 1} to position ${targetIndex + 1}.`;
+		});
+	};
+
 	const renderThumbnails = async (doc: PDFDocumentProxy) => {
 		const token = loadToken;
 		if (renderInProgress) {
@@ -68,10 +90,14 @@
 				if (token !== loadToken) {
 					return;
 				}
-				if (thumbnails[page.position]) {
+				const key = thumbnailKey(page);
+				if ((page.content_kind || 'slide') !== 'slide' || thumbnails[key]) {
 					continue;
 				}
-				const pageNumber = Math.min(Math.max(page.position + 1, 1), doc.numPages);
+				const pageNumber = Math.min(
+					Math.max((page.source_page_number ?? page.position) + 1, 1),
+					doc.numPages
+				);
 				try {
 					const pdfPage = await doc.getPage(pageNumber);
 					const base = pdfPage.getViewport({ scale: 1 });
@@ -88,7 +114,7 @@
 					if (token !== loadToken) {
 						return;
 					}
-					thumbnails = { ...thumbnails, [page.position]: canvas.toDataURL('image/png') };
+					thumbnails = { ...thumbnails, [key]: canvas.toDataURL('image/png') };
 				} catch {
 					// Skip thumbnails that fail to render; the label fallback is shown instead.
 				}
@@ -148,30 +174,78 @@
 	});
 </script>
 
+<div class="sr-only" aria-live="polite">{reorderAnnouncement}</div>
+
 <div class="flex items-stretch gap-1.5 overflow-x-auto px-1 pb-2 pt-2">
+	{#if onInsertMedia}
+		<LectureSlideAddMenu
+			insertIndex={0}
+			label="Add content before the first item"
+			{onInsertMedia}
+		/>
+	{/if}
 	{#each pages as page, pageIndex (page.position)}
 		{@const isSlideActive = !selectedQuestionClientId && page.position === selectedPosition}
 		{@const pageQuestions = questionsByPosition[page.position] || []}
 		<button
 			type="button"
+			draggable={onReorder !== null}
+			ondragstart={() => (draggedPosition = page.position)}
+			ondragover={(event) => {
+				if (onReorder) event.preventDefault();
+			}}
+			ondrop={(event) => {
+				event.preventDefault();
+				if (draggedPosition !== null) onReorder?.(draggedPosition, page.position);
+				draggedPosition = null;
+			}}
+			ondragend={() => (draggedPosition = null)}
+			onkeydown={(event) => {
+				if (!event.altKey || !onReorder) return;
+				if (event.key === 'ArrowLeft' && pageIndex > 0) {
+					event.preventDefault();
+					reorderPageBy(page, pageIndex, -1);
+				} else if (event.key === 'ArrowRight' && pageIndex < pages.length - 1) {
+					event.preventDefault();
+					reorderPageBy(page, pageIndex, 1);
+				}
+			}}
 			onclick={() => onSelectSlide(page.position)}
 			aria-label={`Slide ${pageIndex + 1}`}
 			aria-pressed={isSlideActive}
+			aria-keyshortcuts={onReorder ? 'Alt+ArrowLeft Alt+ArrowRight' : undefined}
+			title={onReorder ? 'Use Alt+Left or Alt+Right to reorder' : undefined}
 			class="group relative flex w-32 shrink-0 flex-col overflow-hidden rounded-xl border bg-white transition-all duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-900/15 {isSlideActive
 				? 'border-gray-900 shadow-md'
 				: 'border-gray-200 hover:border-gray-400 hover:shadow-sm'}"
 		>
 			<div class="relative aspect-video w-full overflow-hidden bg-gray-50">
-				{#if thumbnails[page.position]}
+				{#if page.content_kind === 'video' && page.media_url}
+					<video src={page.media_url} class="h-full w-full object-contain" muted preload="metadata"
+					></video>
+				{:else if page.content_kind !== 'slide' && page.media_url}
 					<img
-						src={thumbnails[page.position]}
+						src={page.media_url}
+						alt={page.media_filename || `${page.content_kind} ${pageIndex + 1}`}
+						class="h-full w-full object-contain"
+						draggable="false"
+					/>
+				{:else if (page.content_kind || 'slide') === 'slide' && thumbnails[thumbnailKey(page)]}
+					<img
+						src={thumbnails[thumbnailKey(page)]}
 						alt={`Slide ${pageIndex + 1} thumbnail`}
 						class="h-full w-full object-contain"
 						draggable="false"
 					/>
 				{:else}
 					<div class="flex h-full w-full items-center justify-center text-xs text-gray-400">
-						Slide {pageIndex + 1}
+						{page.content_kind === 'video'
+							? 'Video'
+							: page.content_kind === 'gif'
+								? 'GIF'
+								: page.content_kind === 'image'
+									? 'Image'
+									: `Slide ${pageIndex + 1}`}
 					</div>
 				{/if}
 				<span
@@ -186,7 +260,9 @@
 						? 'text-gray-900'
 						: 'text-gray-600'}"
 				>
-					Slide {pageIndex + 1}
+					{page.content_kind === 'slide'
+						? `Slide ${(page.source_page_number ?? pageIndex) + 1}`
+						: page.media_filename || page.content_kind}
 				</span>
 			</div>
 		</button>
@@ -209,20 +285,14 @@
 			</button>
 		{/each}
 
-		{#if onAddQuestion}
-			<button
-				type="button"
-				onclick={() => onAddQuestion?.(page.position)}
-				aria-label={`Add a question after slide ${pageIndex + 1}`}
-				title={`Add a question after slide ${pageIndex + 1}`}
-				class="group/add flex w-6 shrink-0 items-center justify-center self-stretch rounded-lg text-gray-300 hover:bg-gray-50 hover:text-gray-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-900/15"
-			>
-				<span
-					class="flex h-6 w-6 items-center justify-center rounded-full border border-dashed border-gray-300 bg-white group-hover/add:border-gray-700 group-hover/add:bg-gray-900 group-hover/add:text-white"
-				>
-					<PlusOutline class="h-3 w-3" />
-				</span>
-			</button>
+		{#if onInsertMedia || onAddQuestion}
+			<LectureSlideAddMenu
+				insertIndex={pageIndex + 1}
+				questionPosition={page.position}
+				label={`Add content after item ${pageIndex + 1}`}
+				{onInsertMedia}
+				{onAddQuestion}
+			/>
 		{/if}
 	{/each}
 </div>

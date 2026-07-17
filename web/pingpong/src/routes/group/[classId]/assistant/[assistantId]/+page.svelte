@@ -33,6 +33,7 @@
 	import * as api from '$lib/api';
 	import { setsEqual } from '$lib/set';
 	import { happyToast, sadToast } from '$lib/toast';
+	import { errorMessage as formatErrorMessage } from '$lib/errors';
 	import { normalizeNewlines } from '$lib/content.js';
 	import { humanSize } from '$lib/size';
 	import {
@@ -197,6 +198,65 @@
 		mode: api.LectureSlideQuestionDraftMode;
 		options: LectureSlideQuestionDraftOption[];
 	};
+	type LectureSlideContentDraft = api.LectureSlideContentItemInput & {
+		id: number;
+		position: number;
+		media_url?: string | null;
+		media_content_type?: string | null;
+		media_filename?: string | null;
+		media_duration_ms?: number | null;
+		media_width_px?: number | null;
+		media_height_px?: number | null;
+	};
+
+	const lectureSlidePageToDraft = (page: api.LectureSlidePage): LectureSlideContentDraft => ({
+		id: page.id,
+		position: page.position,
+		content_kind: page.content_kind || 'slide',
+		source_page_number: page.source_page_number ?? page.position,
+		media_stored_object_id: page.media_stored_object_id,
+		media_url: page.media_url,
+		media_content_type: page.media_content_type,
+		media_filename: page.media_filename,
+		media_duration_ms: page.media_duration_ms,
+		media_width_px: page.media_width_px,
+		media_height_px: page.media_height_px,
+		user_notes: page.user_notes || '',
+		narration_text: (page.content_kind || 'slide') === 'video' ? '' : page.narration_text || ''
+	});
+
+	const lectureSlidePagesToDrafts = (
+		pages: api.LectureSlidePage[],
+		slideCount: number
+	): LectureSlideContentDraft[] =>
+		pages.length
+			? pages.map(lectureSlidePageToDraft)
+			: Array.from({ length: slideCount }, (_, position) => ({
+					id: -(position + 1),
+					position,
+					content_kind: 'slide',
+					source_page_number: position,
+					user_notes: '',
+					narration_text: ''
+				}));
+
+	const lectureSlideDraftToContentItem = (
+		page: LectureSlideContentDraft
+	): api.LectureSlideContentItemInput => ({
+		content_kind: page.content_kind,
+		source_page_number: page.content_kind === 'slide' ? page.source_page_number : undefined,
+		media_stored_object_id: page.content_kind === 'slide' ? undefined : page.media_stored_object_id,
+		user_notes: page.user_notes,
+		narration_text: page.content_kind === 'video' ? undefined : page.narration_text
+	});
+
+	const lectureSlideDraftToPageNotes = (
+		page: LectureSlideContentDraft
+	): api.LectureSlidePageNotes => ({
+		position: page.position,
+		user_notes: page.user_notes,
+		narration_text: page.content_kind === 'video' ? undefined : page.narration_text
+	});
 
 	const lectureSlideQuestionModeDetails: Record<
 		api.LectureSlideQuestionDraftMode,
@@ -535,8 +595,13 @@
 	const lectureSlideAdditionalContextFileFilter = data.uploadInfo.getFileSupportFilter({
 		input_file: true
 	});
-	let lectureSlidePageDrafts: api.LectureSlidePageNotes[] = [];
+	let lectureSlidePageDrafts: LectureSlideContentDraft[] = [];
 	let hasSetLectureSlidePageDrafts = false;
+	let uploadingLectureSlideMedia = false;
+	let lectureSlideMediaInput: HTMLInputElement;
+	let lectureSlideMediaInsertIndex = 0;
+	let lectureSlideUploadedMediaIds = new SvelteSet<number>();
+	const lectureSlideMediaUploadTasks = new SvelteSet<Promise<void>>();
 	let lectureSlideQuestionDrafts: LectureSlideQuestionDraft[] = [];
 	let selectedLectureSlideQuestionClientId: string | null = null;
 	let hasSetLectureSlideQuestionDrafts = false;
@@ -1253,11 +1318,10 @@
 		voiceId.trim() !== currentVoiceId.trim() &&
 		voiceId.trim() !== lastValidatedVoiceId;
 	$: if (!hasSetLectureSlidePageDrafts && lectureSlideConfigReady && !lectureSlideConfigLoadError) {
-		lectureSlidePageDrafts = (data.lectureSlideConfig?.pages || []).map((page) => ({
-			position: page.position,
-			user_notes: page.user_notes || '',
-			narration_text: page.narration_text || ''
-		}));
+		lectureSlidePageDrafts = lectureSlidePagesToDrafts(
+			data.lectureSlideConfig?.pages || [],
+			currentLectureSlideDeck?.slide_count || 0
+		);
 		hasSetLectureSlidePageDrafts = true;
 	}
 	$: if (
@@ -1289,14 +1353,8 @@
 			data.lectureSlideConfig?.narration_prompt || lectureSlideDefaultNarrationPrompt;
 		hasSetSlideNarrationPrompt = true;
 	}
-	$: lectureSlidePages = Array.from(
-		{ length: selectedLectureSlideDeck?.slide_count || lectureSlidePageDrafts.length || 0 },
-		(_, position) =>
-			lectureSlidePageDrafts.find((page) => page.position === position) || {
-				position,
-				user_notes: '',
-				narration_text: ''
-			}
+	$: lectureSlidePages = [...lectureSlidePageDrafts].sort(
+		(left, right) => left.position - right.position
 	);
 	$: if (
 		lectureSlidePages.length > 0 &&
@@ -1311,13 +1369,25 @@
 	$: currentLectureSlidePagesNormalized = JSON.stringify(
 		(data.lectureSlideConfig?.pages || []).map((page) => ({
 			position: page.position,
+			content_kind: page.content_kind || 'slide',
+			source_page_number: page.source_page_number ?? page.position,
+			media_stored_object_id: page.media_stored_object_id ?? null,
 			user_notes: page.user_notes || '',
-			narration_text: page.narration_text || ''
+			narration_text: (page.content_kind || 'slide') === 'video' ? '' : page.narration_text || ''
 		}))
 	);
 	$: lectureSlidePagesChanged =
 		hasSetLectureSlidePageDrafts &&
-		JSON.stringify(lectureSlidePageDrafts) !== currentLectureSlidePagesNormalized;
+		JSON.stringify(
+			lectureSlidePageDrafts.map((page) => ({
+				position: page.position,
+				content_kind: page.content_kind,
+				source_page_number: page.source_page_number ?? null,
+				media_stored_object_id: page.media_stored_object_id ?? null,
+				user_notes: page.user_notes || '',
+				narration_text: page.content_kind === 'video' ? '' : page.narration_text || ''
+			}))
+		) !== currentLectureSlidePagesNormalized;
 	$: currentLectureSlideQuestionsNormalized = JSON.stringify(
 		sortLectureSlideQuestionComparables(
 			currentLectureSlideQuestionDraftInputs(data.lectureSlideConfig).map(
@@ -1373,7 +1443,9 @@
 	);
 	$: selectedLectureSlideLabel =
 		selectedLectureSlideIndex >= 0
-			? `Slide ${selectedLectureSlideIndex + 1} of ${lectureSlidePages.length}`
+			? selectedLectureSlidePage?.content_kind === 'slide'
+				? `Slide ${(selectedLectureSlidePage.source_page_number ?? selectedLectureSlideIndex) + 1} · item ${selectedLectureSlideIndex + 1} of ${lectureSlidePages.length}`
+				: `${selectedLectureSlidePage?.content_kind === 'gif' ? 'GIF' : selectedLectureSlidePage?.content_kind === 'video' ? 'Video' : 'Image'} · item ${selectedLectureSlideIndex + 1} of ${lectureSlidePages.length}`
 			: 'No slide selected';
 	$: selectedLectureSlideHasNarration =
 		!!selectedLectureSlidePage &&
@@ -2851,6 +2923,7 @@
 			lecture_video_manifest?: api.LectureVideoManifest;
 			lecture_slide_deck_id?: number;
 			lecture_slide_page_notes?: api.LectureSlidePageNotes[];
+			lecture_slide_content_items?: api.LectureSlideContentItemInput[];
 			lecture_slide_questions?: api.LectureSlideQuestionInput[];
 			voice_id?: string;
 		};
@@ -3014,7 +3087,12 @@
 			lecture_slide_deck_id: isLectureSlideMode
 				? (selectedLectureSlideDeck?.id ?? undefined)
 				: undefined,
-			lecture_slide_page_notes: isLectureSlideMode ? lectureSlidePageDrafts : undefined,
+			lecture_slide_page_notes: isLectureSlideMode
+				? lectureSlidePageDrafts.map(lectureSlideDraftToPageNotes)
+				: undefined,
+			lecture_slide_content_items: isLectureSlideMode
+				? lectureSlidePageDrafts.map(lectureSlideDraftToContentItem)
+				: undefined,
 			lecture_slide_additional_context_file_ids: isLectureSlideMode
 				? lectureSlideAdditionalContextFiles.map((file) => file.id)
 				: undefined,
@@ -3124,6 +3202,48 @@
 		);
 	};
 
+	const deleteLectureSlideMediaUploadById = async (mediaId: number) => {
+		const response = await api.deleteLectureSlideMedia(
+			fetch,
+			data.class.id,
+			mediaId,
+			data.isCreating ? null : data.assistantId
+		);
+		const expanded = api.expandResponse(response);
+		if (expanded.error) {
+			throw new Error(expanded.error.detail || 'Unknown error');
+		}
+		lectureSlideUploadedMediaIds.delete(mediaId);
+	};
+
+	const cleanupLectureSlideMediaUploads = async (
+		mediaIds = [...lectureSlideUploadedMediaIds.values()]
+	) => {
+		const results = await Promise.all(
+			mediaIds.map(async (mediaId) => {
+				try {
+					await deleteLectureSlideMediaUploadById(mediaId);
+					return true;
+				} catch (error) {
+					sadToast(
+						`Could not clean up lecture slide media ${mediaId}:\n${formatErrorMessage(
+							error,
+							'Unknown error'
+						)}`
+					);
+					return false;
+				}
+			})
+		);
+		return results.every(Boolean);
+	};
+
+	const waitForLectureSlideMediaUploads = async () => {
+		while (lectureSlideMediaUploadTasks.size > 0) {
+			await Promise.all([...lectureSlideMediaUploadTasks]);
+		}
+	};
+
 	const uploadLectureVideoDraft = async (file: File) => {
 		uploadingLectureVideo = true;
 		try {
@@ -3230,11 +3350,16 @@
 				return;
 			}
 			lectureSlideDraftIds.add(uploadedLectureSlides.id);
+			await waitForLectureSlideMediaUploads();
+			await cleanupLectureSlideMediaUploads();
 			selectedLectureSlideDeck = uploadedLectureSlides;
 			lectureSlidePageDrafts = Array.from(
 				{ length: uploadedLectureSlides.slide_count },
 				(_, position) => ({
+					id: -(position + 1),
 					position,
+					content_kind: 'slide' as const,
+					source_page_number: position,
 					user_notes: '',
 					narration_text: ''
 				})
@@ -3274,6 +3399,132 @@
 		}
 		await uploadLectureSlideDraft(file);
 		target.value = '';
+	};
+
+	const openLectureSlideMediaPicker = (insertIndex: number) => {
+		lectureSlideMediaInsertIndex = insertIndex;
+		lectureSlideMediaInput?.click();
+	};
+
+	const insertLectureSlideMediaDraft = (
+		media: api.LectureSlideMediaUpload,
+		previewUrl: string,
+		insertIndex: number
+	) => {
+		lectureSlideQuestionDrafts = lectureSlideQuestionDrafts.map((question) => ({
+			...question,
+			slide_position:
+				question.slide_position >= insertIndex
+					? question.slide_position + 1
+					: question.slide_position
+		}));
+		lectureSlideUploadedMediaIds.add(media.id);
+		const nextPages = [...lectureSlidePageDrafts];
+		nextPages.splice(insertIndex, 0, {
+			id: -1_000_000 - media.id,
+			position: insertIndex,
+			content_kind: media.content_kind,
+			media_stored_object_id: media.id,
+			media_url: previewUrl,
+			media_content_type: media.content_type,
+			media_filename: media.filename,
+			media_duration_ms: media.duration_ms,
+			media_width_px: media.width_px,
+			media_height_px: media.height_px,
+			user_notes: '',
+			narration_text: ''
+		});
+		lectureSlidePageDrafts = nextPages.map((page, position) => ({ ...page, position }));
+		selectedLectureSlidePosition = insertIndex;
+		selectedLectureSlideQuestionClientId = null;
+	};
+
+	const handleLectureSlideMediaFileChange = async (event: Event) => {
+		const target = event.target as HTMLInputElement;
+		const files = Array.from(target.files || []);
+		target.value = '';
+		if (!files.length) return;
+		const uploadTask = (async () => {
+			uploadingLectureSlideMedia = true;
+			try {
+				let insertIndex = lectureSlideMediaInsertIndex;
+				for (const file of files) {
+					const upload = api.uploadLectureSlideMedia(
+						fetch,
+						data.class.id,
+						file,
+						data.isCreating ? null : data.assistantId
+					);
+					const result = await upload.promise;
+					if (api.isFileUploadFailure(result)) {
+						throw new Error(result.error.detail || 'Could not upload media.');
+					}
+					insertLectureSlideMediaDraft(result, URL.createObjectURL(file), insertIndex);
+					insertIndex += 1;
+				}
+				happyToast(files.length === 1 ? 'Media added' : `${files.length} media items added`);
+			} catch (error) {
+				sadToast(
+					`Could not add lecture slide media:\n${formatErrorMessage(error, 'Unknown error')}`
+				);
+			}
+		})();
+		lectureSlideMediaUploadTasks.add(uploadTask);
+		try {
+			await uploadTask;
+		} finally {
+			lectureSlideMediaUploadTasks.delete(uploadTask);
+			uploadingLectureSlideMedia = lectureSlideMediaUploadTasks.size > 0;
+		}
+	};
+
+	const removeLectureSlideMedia = async (position: number) => {
+		const page = lectureSlidePageDrafts.find((item) => item.position === position);
+		if (!page || page.content_kind === 'slide') return;
+		if (
+			page.media_stored_object_id != null &&
+			lectureSlideUploadedMediaIds.has(page.media_stored_object_id)
+		) {
+			await cleanupLectureSlideMediaUploads([page.media_stored_object_id]);
+		}
+		lectureSlidePageDrafts = lectureSlidePageDrafts
+			.filter((item) => item.position !== position)
+			.map((item, nextPosition) => ({ ...item, position: nextPosition }));
+		lectureSlideQuestionDrafts = lectureSlideQuestionDrafts
+			.filter((question) => question.slide_position !== position)
+			.map((question) => ({
+				...question,
+				slide_position:
+					question.slide_position > position ? question.slide_position - 1 : question.slide_position
+			}));
+		selectedLectureSlidePosition = Math.min(
+			position,
+			Math.max(lectureSlidePageDrafts.length - 1, 0)
+		);
+		selectedLectureSlideQuestionClientId = null;
+	};
+
+	const reorderLectureSlideContent = (fromPosition: number, toPosition: number) => {
+		if (fromPosition === toPosition) return;
+		const previous = [...lectureSlidePageDrafts].sort((a, b) => a.position - b.position);
+		const moved = previous.splice(fromPosition, 1)[0];
+		if (!moved) return;
+		previous.splice(toPosition, 0, moved);
+		const newPositionById = new Map(previous.map((page, position) => [page.id, position]));
+		const oldPageIdByPosition = new Map(
+			lectureSlidePageDrafts.map((page) => [page.position, page.id])
+		);
+		lectureSlideQuestionDrafts = lectureSlideQuestionDrafts.map((question) => {
+			const pageId = oldPageIdByPosition.get(question.slide_position);
+			return {
+				...question,
+				slide_position:
+					pageId == null ? question.slide_position : (newPositionById.get(pageId) ?? 0)
+			};
+		});
+		lectureSlidePageDrafts = previous.map((page, position) => ({ ...page, position }));
+		selectedLectureSlidePosition = newPositionById.get(moved.id) ?? toPosition;
+		selectedLectureSlideQuestionClientId = null;
 	};
 
 	const uploadLectureSlideAdditionalContextFiles = async (files: FileList | File[]) => {
@@ -3389,10 +3640,10 @@
 		value: string
 	) => {
 		const existing = lectureSlidePageDrafts.find((page) => page.position === position);
-		const next = existing || { position, user_notes: '', narration_text: '' };
+		if (!existing) return;
 		lectureSlidePageDrafts = [
 			...lectureSlidePageDrafts.filter((page) => page.position !== position),
-			{ ...next, [field]: value }
+			{ ...existing, [field]: value }
 		].sort((left, right) => left.position - right.position);
 	};
 
@@ -3436,11 +3687,10 @@
 
 			syncLectureSlideSummary(expanded.data.lecture_slide_deck);
 			data.lectureSlideConfig = expanded.data;
-			lectureSlidePageDrafts = expanded.data.pages.map((page) => ({
-				position: page.position,
-				user_notes: page.user_notes || '',
-				narration_text: page.narration_text || ''
-			}));
+			lectureSlidePageDrafts = lectureSlidePagesToDrafts(
+				expanded.data.pages,
+				expanded.data.lecture_slide_deck.slide_count
+			);
 			hydrateLectureSlideQuestionDrafts(expanded.data.question_drafts || []);
 		} finally {
 			refreshingLectureSlideStatus = false;
@@ -3812,6 +4062,12 @@
 				$loadingMessage = '';
 				return;
 			}
+			if (uploadingLectureSlideMedia) {
+				sadToast('Please wait for lecture slide media uploads to finish before saving.');
+				$loading = false;
+				$loadingMessage = '';
+				return;
+			}
 			if (uploadingLectureSlideContext) {
 				sadToast('Please wait for lecture slide context uploads to finish before saving.');
 				$loading = false;
@@ -3866,7 +4122,14 @@
 
 			if (data.isCreating || lectureSlideFieldsChanged) {
 				params.lecture_slide_deck_id = selectedLectureSlideDeckId;
-				params.lecture_slide_page_notes = lectureSlidePageDrafts;
+				params.lecture_slide_page_notes = lectureSlidePageDrafts.map(lectureSlideDraftToPageNotes);
+				if (data.isCreating || lectureSlideDeckIdChanged || lectureSlidePagesChanged) {
+					params.lecture_slide_content_items = lectureSlidePageDrafts.map(
+						lectureSlideDraftToContentItem
+					);
+				} else {
+					delete params.lecture_slide_content_items;
+				}
 				params.lecture_slide_additional_context_file_ids = lectureSlideAdditionalContextFiles.map(
 					(file) => file.id
 				);
@@ -3886,6 +4149,7 @@
 			} else {
 				delete params.lecture_slide_deck_id;
 				delete params.lecture_slide_page_notes;
+				delete params.lecture_slide_content_items;
 				delete params.lecture_slide_additional_context_file_ids;
 				delete params.lecture_slide_questions;
 				delete params.voice_id;
@@ -4010,6 +4274,22 @@
 				$loading = false;
 				$loadingMessage = '';
 			}
+			if (lectureSlideMediaUploadTasks.size > 0) {
+				$loadingMessage = 'Waiting for lecture slide media uploads...';
+				$loading = true;
+				await waitForLectureSlideMediaUploads();
+			}
+			if (lectureSlideUploadedMediaIds.size > 0) {
+				$loadingMessage = 'Cleaning up lecture slide media...';
+				$loading = true;
+				const cleanupSucceeded = await cleanupLectureSlideMediaUploads();
+				$loading = false;
+				$loadingMessage = '';
+				if (!cleanupSucceeded) {
+					nav.cancel();
+					return;
+				}
+			}
 
 			// Now manually navigate to the intended destination
 			checkForChanges = false;
@@ -4133,6 +4413,14 @@
 				instructionsPreview
 			)}</pre></Modal
 	>
+	<input
+		bind:this={lectureSlideMediaInput}
+		type="file"
+		multiple
+		accept="image/png,image/jpeg,image/webp,image/gif,video/mp4,video/webm"
+		class="hidden"
+		onchange={handleLectureSlideMediaFileChange}
+	/>
 	{#if showMCPServerModal}
 		<MCPServerModal
 			mcpServerRecordFromServer={mcpServerEditFromServer}
@@ -4163,10 +4451,10 @@
 				class="grid min-h-0 flex-1 border-y border-gray-200 lg:grid-cols-[minmax(0,1.2fr)_minmax(360px,0.8fr)]"
 			>
 				<div class="flex min-h-[420px] overflow-hidden bg-gray-50 lg:border-r lg:border-gray-200">
-					{#if lectureSlideSourceUrl && selectedLectureSlidePage}
+					{#if selectedLectureSlidePage?.content_kind === 'slide' && lectureSlideSourceUrl}
 						<PdfPageViewer
 							sourceUrl={lectureSlideSourceUrl}
-							pageNumber={selectedLectureSlidePage.position + 1}
+							pageNumber={(selectedLectureSlidePage.source_page_number ?? 0) + 1}
 							slideLabel={selectedLectureSlideLabel}
 							previousDisabled={selectedLectureSlideIndex <= 0}
 							nextDisabled={selectedLectureSlideIndex < 0 ||
@@ -4174,6 +4462,34 @@
 							onPrevious={() => goToAdjacentLectureSlide(-1)}
 							onNext={() => goToAdjacentLectureSlide(1)}
 						/>
+					{:else if selectedLectureSlidePage?.media_url}
+						<div class="relative flex h-full w-full items-center justify-center bg-black">
+							{#if selectedLectureSlidePage.content_kind === 'video'}
+								<!-- svelte-ignore a11y_media_has_caption -->
+								<video
+									src={selectedLectureSlidePage.media_url}
+									controls
+									class="h-full w-full object-contain"
+								></video>
+							{:else}
+								<img
+									src={selectedLectureSlidePage.media_url}
+									alt={selectedLectureSlidePage.media_filename || 'Inserted media'}
+									class="h-full w-full object-contain"
+								/>
+							{/if}
+							{#if !preventEdits}
+								<Button
+									type="button"
+									color="red"
+									size="xs"
+									class="absolute right-3 top-3"
+									onclick={() => removeLectureSlideMedia(selectedLectureSlidePage?.position ?? 0)}
+								>
+									Remove media
+								</Button>
+							{/if}
+						</div>
 					{:else}
 						<div
 							class="flex h-full min-h-[420px] w-full items-center justify-center text-sm text-gray-500"
@@ -4525,30 +4841,39 @@
 								>
 									Narration
 								</Label>
-								{#if !selectedLectureSlideHasNarration}
+								{#if selectedLectureSlidePage.content_kind === 'video'}
+									<div
+										class="rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm text-gray-600"
+									>
+										This clip uses its original audio. PingPong transcribes it for captions, chat
+										context, and knowledge checks; generated narration is not added.
+									</div>
+								{:else if !selectedLectureSlideHasNarration}
 									<div
 										class="mb-1 rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm text-gray-600"
 									>
 										Narration will become editable after it has been generated.
 									</div>
 								{/if}
-								<Textarea
-									id="slide_narration_text"
-									rows={9}
-									placeholder="The spoken narration for this slide."
-									class="resize-none rounded-lg border-gray-300 text-sm focus:border-gray-900 focus:ring-gray-900"
-									value={selectedLectureSlidePage.narration_text || ''}
-									disabled={preventEdits || !selectedLectureSlideHasNarration}
-									oninput={(event) =>
-										updateLectureSlidePageDraft(
-											selectedLectureSlidePage.position,
-											'narration_text',
-											(event.target as HTMLTextAreaElement).value
-										)}
-								/>
-								<Helper class="text-xs text-gray-400"
-									>Saving manual narration edits regenerates audio.</Helper
-								>
+								{#if selectedLectureSlidePage.content_kind !== 'video'}
+									<Textarea
+										id="slide_narration_text"
+										rows={9}
+										placeholder="The spoken narration for this slide."
+										class="resize-none rounded-lg border-gray-300 text-sm focus:border-gray-900 focus:ring-gray-900"
+										value={selectedLectureSlidePage.narration_text || ''}
+										disabled={preventEdits || !selectedLectureSlideHasNarration}
+										oninput={(event) =>
+											updateLectureSlidePageDraft(
+												selectedLectureSlidePage.position,
+												'narration_text',
+												(event.target as HTMLTextAreaElement).value
+											)}
+									/>
+									<Helper class="text-xs text-gray-400"
+										>Saving manual narration edits regenerates audio.</Helper
+									>
+								{/if}
 							</div>
 							<div class="space-y-3 border-t border-gray-200 pt-4">
 								<div class="flex items-center justify-between">
@@ -4665,6 +4990,8 @@
 						onSelectSlide={selectLectureSlide}
 						onSelectQuestion={selectLectureSlideQuestion}
 						onAddQuestion={preventEdits ? null : (position) => addLectureSlideQuestion(position)}
+						onInsertMedia={preventEdits ? null : openLectureSlideMediaPicker}
+						onReorder={preventEdits ? null : reorderLectureSlideContent}
 					/>
 				</div>
 			{/if}

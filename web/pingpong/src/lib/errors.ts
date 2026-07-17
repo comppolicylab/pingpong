@@ -4,7 +4,7 @@
  * Usually we expect an `Error` object here.
  */
 
-import { isValidationError, isErrorResponse } from '$lib/api';
+import { isValidationError, isErrorResponse, isFileUploadFailure } from '$lib/api';
 
 export const errorMessage = (error: unknown, fallback: string = 'unknown error'): string => {
 	console.error(error);
@@ -12,6 +12,8 @@ export const errorMessage = (error: unknown, fallback: string = 'unknown error')
 		return fallback;
 	} else if (error instanceof Error) {
 		return error.message || fallback;
+	} else if (isFileUploadFailure(error)) {
+		return error.error.detail || fallback;
 	} else if (isErrorResponse(error)) {
 		return error.detail || fallback;
 	} else if (isValidationError(error)) {

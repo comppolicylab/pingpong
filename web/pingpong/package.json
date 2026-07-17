@@ -63,6 +63,7 @@
 		"dayjs": "^1.11.21",
 		"dotenv": "^17.4.2",
 		"flowbite-svelte-icons": "^3.1.0",
+		"gifuct-js": "^2.1.2",
 		"highlight.js": "^11.11.1",
 		"isomorphic-dompurify": "^3.18.0",
 		"katex": "^0.17.0",

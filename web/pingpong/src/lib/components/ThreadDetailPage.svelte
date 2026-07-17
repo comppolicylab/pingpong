@@ -81,6 +81,8 @@
 	import LectureVideoView, {
 		type LectureVideoViewHandle
 	} from '$lib/components/lecture-video/LectureVideoView.svelte';
+	import LectureSlideTimedGif from '$lib/components/lecture-video/LectureSlideTimedGif.svelte';
+	import LectureSlideTimedVideo from '$lib/components/lecture-video/LectureSlideTimedVideo.svelte';
 	import { LECTURE_CHAT_TTS_VOLUME_SCALE } from '$lib/components/lecture-video/audio-levels';
 	import LectureVideoChatPanel from '$lib/components/lecture-video/LectureVideoChatPanel.svelte';
 
@@ -1846,13 +1848,37 @@
 						</button>
 					{/if}
 				{/snippet}
-				{#snippet visual(offsetMs)}
+				{#snippet visual(offsetMs, playbackPaused, timelineMedia)}
 					{@const visiblePage = lectureSlidePageAtOffset(offsetMs)}
 					{@const visiblePageIndex = visiblePage ? lectureSlidePageIndex(visiblePage) : -1}
 					{@const slideImageUrl = visiblePage ? lectureSlidePageImageUrl(visiblePage) : null}
 					<div class="flex h-full w-full items-center justify-center bg-black">
 						{#if visiblePage}
-							{#if slideImageUrl}
+							{#if visiblePage.content_kind === 'video' && visiblePage.media_url && visiblePage.start_offset_ms != null && visiblePage.end_offset_ms != null}
+								<LectureSlideTimedVideo
+									src={api.withMediaAuthQuery(visiblePage.media_url)}
+									{offsetMs}
+									startOffsetMs={visiblePage.start_offset_ms}
+									endOffsetMs={visiblePage.end_offset_ms}
+									{timelineMedia}
+									paused={playbackPaused}
+								/>
+							{:else if visiblePage.content_kind === 'gif' && visiblePage.media_url && visiblePage.start_offset_ms != null && visiblePage.end_offset_ms != null}
+								<LectureSlideTimedGif
+									src={api.withMediaAuthQuery(visiblePage.media_url)}
+									{offsetMs}
+									startOffsetMs={visiblePage.start_offset_ms}
+									endOffsetMs={visiblePage.end_offset_ms}
+									{timelineMedia}
+									paused={playbackPaused}
+								/>
+							{:else if visiblePage.media_url}
+								<img
+									src={api.withMediaAuthQuery(visiblePage.media_url)}
+									alt={`${visiblePage.content_kind} ${visiblePageIndex + 1}`}
+									class="h-full w-full object-contain"
+								/>
+							{:else if slideImageUrl}
 								<img
 									src={slideImageUrl}
 									alt={`Slide ${visiblePageIndex + 1}`}

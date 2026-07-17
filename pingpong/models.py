@@ -3182,6 +3182,92 @@ class LectureSlideImageStoredObject(Base):
     updated = Column(DateTime(timezone=True), onupdate=func.now())
 
 
+class LectureSlideMediaStoredObject(Base):
+    __tablename__ = "lecture_slide_media_stored_objects"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    class_id = Column(Integer, ForeignKey("classes.id"), nullable=False, index=True)
+    uploader_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    key = Column(String, nullable=False, unique=True)
+    original_filename = Column(String, nullable=False)
+    content_type = Column(String, nullable=False)
+    content_length = Column(Integer, nullable=False, server_default="0")
+    content_kind: Mapped[schemas.LectureSlideContentKind] = mapped_column(
+        SQLEnum(schemas.LectureSlideContentKind), nullable=False
+    )
+    duration_ms = Column(Integer, nullable=True)
+    width_px = Column(Integer, nullable=True)
+    height_px = Column(Integer, nullable=True)
+    pages = relationship("LectureSlidePage", back_populates="media_stored_object")
+    created = Column(DateTime(timezone=True), server_default=func.now())
+    updated = Column(DateTime(timezone=True), onupdate=func.now())
+
+    @classmethod
+    async def create(
+        cls,
+        session: AsyncSession,
+        *,
+        class_id: int,
+        uploader_id: int | None,
+        key: str,
+        original_filename: str,
+        content_type: str,
+        content_length: int,
+        content_kind: schemas.LectureSlideContentKind,
+        duration_ms: int | None,
+        width_px: int | None,
+        height_px: int | None,
+    ) -> "LectureSlideMediaStoredObject":
+        media = cls(
+            class_id=class_id,
+            uploader_id=uploader_id,
+            key=key,
+            original_filename=original_filename,
+            content_type=content_type,
+            content_length=content_length,
+            content_kind=content_kind,
+            duration_ms=duration_ms,
+            width_px=width_px,
+            height_px=height_px,
+        )
+        session.add(media)
+        await session.flush()
+        await session.refresh(media)
+        return media
+
+    @classmethod
+    async def get_all_by_ids(
+        cls, session: AsyncSession, ids: Sequence[int], *, for_update: bool = False
+    ) -> list["LectureSlideMediaStoredObject"]:
+        normalized_ids = list(dict.fromkeys(int(id_) for id_ in ids))
+        if not normalized_ids:
+            return []
+        stmt = select(cls).where(cls.id.in_(normalized_ids))
+        if for_update:
+            stmt = stmt.with_for_update()
+        rows = list((await session.scalars(stmt)).all())
+        rows_by_id = {row.id: row for row in rows}
+        return [rows_by_id[id_] for id_ in normalized_ids if id_ in rows_by_id]
+
+    @classmethod
+    async def get_unreferenced_by_ids(
+        cls, session: AsyncSession, ids: Sequence[int]
+    ) -> list["LectureSlideMediaStoredObject"]:
+        normalized_ids = list(dict.fromkeys(int(id_) for id_ in ids))
+        if not normalized_ids:
+            return []
+        candidates = await cls.get_all_by_ids(session, normalized_ids, for_update=True)
+        candidate_ids = [media.id for media in candidates]
+        referenced_ids = set(
+            await session.scalars(
+                select(LectureSlidePage.media_stored_object_id).where(
+                    LectureSlidePage.media_stored_object_id.in_(candidate_ids)
+                )
+            )
+        )
+        return [media for media in candidates if media.id not in referenced_ids]
+
+
 class LectureSlideNarrationStoredObject(Base):
     __tablename__ = "lecture_slide_narration_stored_objects"
 
@@ -3345,6 +3431,7 @@ class LectureSlideDeck(Base):
     uploader_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
     source_lecture_slide_deck_id_snapshot = Column(Integer, nullable=True)
     slide_count = Column(Integer, nullable=False)
+    source_page_count = Column(Integer, nullable=False, server_default="0")
     total_duration_ms = Column(Integer, nullable=True)
     continuous_narration_fingerprint = Column(String, nullable=True)
     created = Column(DateTime(timezone=True), server_default=func.now())
@@ -3360,6 +3447,7 @@ class LectureSlideDeck(Base):
         uploader_id: int | None,
         display_name: str,
         slide_count: int,
+        source_page_count: int | None = None,
         voice_id: str | None = None,
         generation_prompt: str | None = None,
         narration_prompt: str | None = None,
@@ -3390,6 +3478,9 @@ class LectureSlideDeck(Base):
             error_message=error_message,
             source_lecture_slide_deck_id_snapshot=source_lecture_slide_deck_id_snapshot,
             slide_count=slide_count,
+            source_page_count=source_page_count
+            if source_page_count is not None
+            else slide_count,
             total_duration_ms=total_duration_ms,
             continuous_narration_stored_object_id=continuous_narration_stored_object_id,
             caption_stored_object_id=caption_stored_object_id,
@@ -3489,6 +3580,11 @@ class LectureSlideDeck(Base):
             .options(
                 selectinload(LectureSlideDeck.pages).selectinload(
                     LectureSlidePage.image_stored_object
+                )
+            )
+            .options(
+                selectinload(LectureSlideDeck.pages).selectinload(
+                    LectureSlidePage.media_stored_object
                 )
             )
             .options(
@@ -3788,6 +3884,12 @@ class LectureSlidePage(Base):
     )
     lecture_slide_deck = relationship("LectureSlideDeck", back_populates="pages")
     position = Column(Integer, nullable=False)
+    content_kind: Mapped[schemas.LectureSlideContentKind] = mapped_column(
+        SQLEnum(schemas.LectureSlideContentKind),
+        nullable=False,
+        server_default=schemas.LectureSlideContentKind.SLIDE.name,
+    )
+    source_page_number = Column(Integer, nullable=True)
     image_stored_object_id = Column(
         Integer,
         ForeignKey("lecture_slide_image_stored_objects.id", ondelete="SET NULL"),
@@ -3798,6 +3900,15 @@ class LectureSlidePage(Base):
         "LectureSlideImageStoredObject",
         back_populates="pages",
         uselist=False,
+    )
+    media_stored_object_id = Column(
+        Integer,
+        ForeignKey("lecture_slide_media_stored_objects.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    media_stored_object = relationship(
+        "LectureSlideMediaStoredObject", back_populates="pages", uselist=False
     )
     title = Column(Text, nullable=True)
     extracted_text = Column(Text, nullable=True)
@@ -4238,6 +4349,9 @@ def _thread_lecture_slide_base_loaders() -> tuple[Load, ...]:
             selectinload(LectureSlideDeck.caption_stored_object),
             selectinload(LectureSlideDeck.pages).selectinload(
                 LectureSlidePage.image_stored_object
+            ),
+            selectinload(LectureSlideDeck.pages).selectinload(
+                LectureSlidePage.media_stored_object
             ),
             selectinload(LectureSlideDeck.questions).options(
                 *_lecture_slide_question_context_loaders()
@@ -5938,6 +6052,7 @@ class Assistant(Base):
         params.pop("lecture_video_manifest", None)
         params.pop("lecture_slide_deck_id", None)
         params.pop("lecture_slide_page_notes", None)
+        params.pop("lecture_slide_content_items", None)
         params.pop("lecture_slide_additional_context_file_ids", None)
         params.pop("lecture_slide_questions", None)
         params.pop("narration_prompt", None)
