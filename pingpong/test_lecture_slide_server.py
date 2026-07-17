@@ -173,43 +173,6 @@ async def test_visual_media_upload_has_openai_safe_size_cap(db, config, monkeypa
 
 
 @pytest.mark.asyncio
-async def test_media_store_cleanup_follows_transaction_outcome(db, config, monkeypatch):
-    store = FakeLectureSlideStore()
-    monkeypatch.setattr(config, "video_store", SimpleNamespace(store=store))
-
-    async with db.async_session() as session:
-        lecture_slide_service._queue_media_store_delete(
-            session,
-            lecture_slide_service._ROLLBACK_MEDIA_DELETE_KEYS,
-            "uploaded.mp4",
-        )
-        await lecture_slide_service.run_lecture_slide_transaction_cleanup(
-            session, committed=True
-        )
-        assert store.deleted_keys == []
-
-        lecture_slide_service._queue_media_store_delete(
-            session,
-            lecture_slide_service._POST_COMMIT_MEDIA_DELETE_KEYS,
-            "detached.mp4",
-        )
-        await lecture_slide_service.run_lecture_slide_transaction_cleanup(
-            session, committed=True
-        )
-        assert store.deleted_keys == ["detached.mp4"]
-
-        lecture_slide_service._queue_media_store_delete(
-            session,
-            lecture_slide_service._ROLLBACK_MEDIA_DELETE_KEYS,
-            "rolled-back.mp4",
-        )
-        await lecture_slide_service.run_lecture_slide_transaction_cleanup(
-            session, committed=False
-        )
-        assert store.deleted_keys == ["detached.mp4", "rolled-back.mp4"]
-
-
-@pytest.mark.asyncio
 @with_institution(11, "Test Institution")
 async def test_create_lecture_slide_deck_uploads_source_pdf_to_openai(
     db, config, monkeypatch, institution
@@ -1070,10 +1033,8 @@ async def test_apply_lecture_slide_page_notes_handles_unloaded_pages(db, institu
 @pytest.mark.asyncio
 @with_institution(11, "Test Institution")
 async def test_apply_lecture_slide_content_items_inserts_and_reorders_media(
-    db, institution, config, monkeypatch
+    db, institution
 ):
-    store = FakeLectureSlideStore()
-    monkeypatch.setattr(config, "video_store", SimpleNamespace(store=store))
     async with db.async_session() as session:
         class_ = models.Class(
             id=1,
@@ -1205,9 +1166,6 @@ async def test_apply_lecture_slide_content_items_inserts_and_reorders_media(
             uploader_id=123,
         )
         await session.commit()
-        await lecture_slide_service.run_lecture_slide_transaction_cleanup(
-            session, committed=True
-        )
         removed_image = await session.get(
             models.LectureSlideMediaStoredObject, image_id
         )
@@ -1218,7 +1176,6 @@ async def test_apply_lecture_slide_content_items_inserts_and_reorders_media(
     assert removal_result.structure_changed is True
     assert removed_image is None
     assert retained_video is not None
-    assert store.deleted_keys == ["insert.png"]
 
 
 @pytest.mark.asyncio

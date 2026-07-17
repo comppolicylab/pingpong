@@ -55,8 +55,6 @@ LECTURE_SLIDE_MEDIA_PROBE_RULES = {
     "video/mp4": (frozenset({"mp4"}), None),
     "video/webm": (frozenset({"webm"}), frozenset({"vp8", "vp9", "av1"})),
 }
-_POST_COMMIT_MEDIA_DELETE_KEYS = "lecture_slide_post_commit_media_delete_keys"
-_ROLLBACK_MEDIA_DELETE_KEYS = "lecture_slide_rollback_media_delete_keys"
 
 
 @dataclass(frozen=True)
@@ -83,43 +81,6 @@ class LectureSlideMediaProbe:
     has_audio: bool
     format_names: frozenset[str]
     video_codec: str | None
-
-
-def _queue_media_store_delete(session: AsyncSession, queue_name: str, key: str) -> None:
-    keys = session.info.setdefault(queue_name, [])
-    if key not in keys:
-        keys.append(key)
-
-
-def _discard_media_store_delete(
-    session: AsyncSession, queue_name: str, key: str
-) -> None:
-    keys = session.info.get(queue_name)
-    if keys and key in keys:
-        keys.remove(key)
-
-
-async def run_lecture_slide_transaction_cleanup(
-    session: AsyncSession, *, committed: bool
-) -> None:
-    queue_name = (
-        _POST_COMMIT_MEDIA_DELETE_KEYS if committed else _ROLLBACK_MEDIA_DELETE_KEYS
-    )
-    keys = list(session.info.pop(queue_name, []))
-    session.info.pop(
-        _ROLLBACK_MEDIA_DELETE_KEYS if committed else _POST_COMMIT_MEDIA_DELETE_KEYS,
-        None,
-    )
-    if not config.video_store:
-        return
-    for key in keys:
-        try:
-            await config.video_store.store.delete(key)
-        except Exception:
-            logger.exception(
-                "Failed to clean up lecture slide media after transaction. key=%s",
-                key,
-            )
 
 
 def generate_source_store_key() -> str:
@@ -258,44 +219,39 @@ async def create_lecture_slide_media_upload(
         )
     store_key = generate_media_store_key(content_type)
     original_filename = get_original_filename(upload, store_key)
-    try:
-        with tempfile.NamedTemporaryFile(suffix=suffix) as media_file:
-            await upload.seek(0)
-            await asyncio.to_thread(shutil.copyfileobj, upload.file, media_file)
-            media_file.flush()
-            probe = await asyncio.to_thread(_probe_media_file, media_file.name)
-            _validate_probed_media_type(content_type, probe)
-            if content_kind == schemas.LectureSlideContentKind.VIDEO:
-                if probe.duration_ms is None:
-                    raise HTTPException(
-                        status_code=400, detail="Could not determine video duration."
-                    )
-                if not probe.has_audio:
-                    raise HTTPException(
-                        status_code=400,
-                        detail="Inserted video clips must include an audio track.",
-                    )
-            media_file.seek(0)
-            await config.video_store.store.put(store_key, media_file, content_type)
-            _queue_media_store_delete(session, _ROLLBACK_MEDIA_DELETE_KEYS, store_key)
-        return await models.LectureSlideMediaStoredObject.create(
-            session,
-            class_id=class_id,
-            uploader_id=uploader_id,
-            key=store_key,
-            original_filename=original_filename,
-            content_type=content_type,
-            content_length=upload_size,
-            content_kind=content_kind,
-            duration_ms=probe.duration_ms,
-            width_px=probe.width_px,
-            height_px=probe.height_px,
-        )
-    except Exception:
-        with contextlib.suppress(Exception):
-            await config.video_store.store.delete(store_key)
-        _discard_media_store_delete(session, _ROLLBACK_MEDIA_DELETE_KEYS, store_key)
-        raise
+    with tempfile.NamedTemporaryFile(suffix=suffix) as media_file:
+        await upload.seek(0)
+        await asyncio.to_thread(shutil.copyfileobj, upload.file, media_file)
+        media_file.flush()
+        probe = await asyncio.to_thread(_probe_media_file, media_file.name)
+        _validate_probed_media_type(content_type, probe)
+        if content_kind == schemas.LectureSlideContentKind.VIDEO:
+            if probe.duration_ms is None:
+                raise HTTPException(
+                    status_code=400, detail="Could not determine video duration."
+                )
+            if not probe.has_audio:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Inserted video clips must include an audio track.",
+                )
+        media_file.seek(0)
+        await config.video_store.store.put(store_key, media_file, content_type)
+        # If the database transaction later fails, retain the blob for eventual
+        # orphan-media cleanup rather than adding object-store I/O to the request.
+    return await models.LectureSlideMediaStoredObject.create(
+        session,
+        class_id=class_id,
+        uploader_id=uploader_id,
+        key=store_key,
+        original_filename=original_filename,
+        content_type=content_type,
+        content_length=upload_size,
+        content_kind=content_kind,
+        duration_ms=probe.duration_ms,
+        width_px=probe.width_px,
+        height_px=probe.height_px,
+    )
 
 
 async def delete_unattached_lecture_slide_media(
@@ -327,7 +283,7 @@ async def delete_unattached_lecture_slide_media(
         )
     await session.delete(media)
     await session.flush()
-    _queue_media_store_delete(session, _POST_COMMIT_MEDIA_DELETE_KEYS, media.key)
+    # The backing blob is intentionally retained for eventual orphan-media cleanup.
 
 
 async def _read_source_pdf_bytes(key: str) -> bytes:
@@ -1124,7 +1080,7 @@ async def apply_lecture_slide_content_items(
     )
     for media in unused_media:
         await session.delete(media)
-        _queue_media_store_delete(session, _POST_COMMIT_MEDIA_DELETE_KEYS, media.key)
+    # Backing blobs are intentionally retained for eventual orphan-media cleanup.
     for position, page in enumerate(desired_pages):
         page.position = position
         session.add(page)
@@ -2121,6 +2077,7 @@ async def delete_lecture_slide_deck_if_unused(
     )
     for media in unused_media:
         await session.delete(media)
+    # Backing blobs are intentionally retained for eventual orphan-media cleanup.
     await session.execute(
         delete(models.LectureSlideDeck).where(models.LectureSlideDeck.id == deck_id)
     )
@@ -2130,6 +2087,4 @@ async def delete_lecture_slide_deck_if_unused(
     )
     await session.flush()
     await _delete_lecture_slide_audio_keys_quietly(audio_keys)
-    for media in unused_media:
-        _queue_media_store_delete(session, _POST_COMMIT_MEDIA_DELETE_KEYS, media.key)
     return additional_context_file_object_ids
