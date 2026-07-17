@@ -358,7 +358,7 @@
 									disabled={!link.active}
 									onclick={() => openGenericIFrameInstructionsModal(link.name, link.share_token)}
 								>
-									Embed in Other Site
+									Embed Assistant
 								</Button>
 								<Button
 									pill
@@ -367,7 +367,7 @@
 									disabled={!link.active}
 									onclick={() => openQualtricsCodeModal(link.name, link.share_token)}
 								>
-									Qualtrics Instructions
+									Embed in Qualtrics
 								</Button>
 								{#if link.active}
 									<Button
@@ -394,7 +394,7 @@
 		<Heading
 			tag="h2"
 			class="mr-5 mb-2 max-w-max shrink-0 font-serif text-3xl font-medium text-blue-dark-40"
-			color="blue">Qualtrics Instructions</Heading
+			color="blue">Embedding Assistant in Qualtrics Instructions</Heading
 		>
 	</slot>
 	<p class="mb-2 text-sm text-blue-dark-50">
@@ -479,7 +479,7 @@
 		<Heading
 			tag="h2"
 			class="mr-5 mb-2 max-w-max shrink-0 font-serif text-3xl font-medium text-blue-dark-40"
-			color="blue">Embedding in Other Site</Heading
+			color="blue">Embedding Assistant Instructions</Heading
 		>
 	</slot>
 	<p class="mb-2 text-sm text-blue-dark-50">
