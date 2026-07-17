@@ -601,6 +601,7 @@
 	let lectureSlideMediaInput: HTMLInputElement;
 	let lectureSlideMediaInsertIndex = 0;
 	let lectureSlideUploadedMediaIds = new SvelteSet<number>();
+	const lectureSlideMediaUploadTasks = new SvelteSet<Promise<void>>();
 	let lectureSlideQuestionDrafts: LectureSlideQuestionDraft[] = [];
 	let selectedLectureSlideQuestionClientId: string | null = null;
 	let hasSetLectureSlideQuestionDrafts = false;
@@ -3201,6 +3202,48 @@
 		);
 	};
 
+	const deleteLectureSlideMediaUploadById = async (mediaId: number) => {
+		const response = await api.deleteLectureSlideMedia(
+			fetch,
+			data.class.id,
+			mediaId,
+			data.isCreating ? null : data.assistantId
+		);
+		const expanded = api.expandResponse(response);
+		if (expanded.error) {
+			throw new Error(expanded.error.detail || 'Unknown error');
+		}
+		lectureSlideUploadedMediaIds.delete(mediaId);
+	};
+
+	const cleanupLectureSlideMediaUploads = async (
+		mediaIds = [...lectureSlideUploadedMediaIds.values()]
+	) => {
+		const results = await Promise.all(
+			mediaIds.map(async (mediaId) => {
+				try {
+					await deleteLectureSlideMediaUploadById(mediaId);
+					return true;
+				} catch (error) {
+					sadToast(
+						`Could not clean up lecture slide media ${mediaId}:\n${formatErrorMessage(
+							error,
+							'Unknown error'
+						)}`
+					);
+					return false;
+				}
+			})
+		);
+		return results.every(Boolean);
+	};
+
+	const waitForLectureSlideMediaUploads = async () => {
+		while (lectureSlideMediaUploadTasks.size > 0) {
+			await Promise.all([...lectureSlideMediaUploadTasks]);
+		}
+	};
+
 	const uploadLectureVideoDraft = async (file: File) => {
 		uploadingLectureVideo = true;
 		try {
@@ -3307,15 +3350,8 @@
 				return;
 			}
 			lectureSlideDraftIds.add(uploadedLectureSlides.id);
-			for (const mediaId of lectureSlideUploadedMediaIds) {
-				void api.deleteLectureSlideMedia(
-					fetch,
-					data.class.id,
-					mediaId,
-					data.isCreating ? null : data.assistantId
-				);
-			}
-			lectureSlideUploadedMediaIds.clear();
+			await waitForLectureSlideMediaUploads();
+			await cleanupLectureSlideMediaUploads();
 			selectedLectureSlideDeck = uploadedLectureSlides;
 			lectureSlidePageDrafts = Array.from(
 				{ length: uploadedLectureSlides.slide_count },
@@ -3408,45 +3444,48 @@
 		const files = Array.from(target.files || []);
 		target.value = '';
 		if (!files.length) return;
-		uploadingLectureSlideMedia = true;
-		try {
-			let insertIndex = lectureSlideMediaInsertIndex;
-			for (const file of files) {
-				const upload = api.uploadLectureSlideMedia(
-					fetch,
-					data.class.id,
-					file,
-					data.isCreating ? null : data.assistantId
-				);
-				const result = await upload.promise;
-				if ('error' in result) {
-					throw new Error(result.error.detail || 'Could not upload media.');
+		const uploadTask = (async () => {
+			uploadingLectureSlideMedia = true;
+			try {
+				let insertIndex = lectureSlideMediaInsertIndex;
+				for (const file of files) {
+					const upload = api.uploadLectureSlideMedia(
+						fetch,
+						data.class.id,
+						file,
+						data.isCreating ? null : data.assistantId
+					);
+					const result = await upload.promise;
+					if (api.isFileUploadFailure(result)) {
+						throw new Error(result.error.detail || 'Could not upload media.');
+					}
+					insertLectureSlideMediaDraft(result, URL.createObjectURL(file), insertIndex);
+					insertIndex += 1;
 				}
-				insertLectureSlideMediaDraft(result, URL.createObjectURL(file), insertIndex);
-				insertIndex += 1;
+				happyToast(files.length === 1 ? 'Media added' : `${files.length} media items added`);
+			} catch (error) {
+				sadToast(
+					`Could not add lecture slide media:\n${formatErrorMessage(error, 'Unknown error')}`
+				);
 			}
-			happyToast(files.length === 1 ? 'Media added' : `${files.length} media items added`);
-		} catch (error) {
-			sadToast(`Could not add lecture slide media:\n${formatErrorMessage(error, 'Unknown error')}`);
+		})();
+		lectureSlideMediaUploadTasks.add(uploadTask);
+		try {
+			await uploadTask;
 		} finally {
-			uploadingLectureSlideMedia = false;
+			lectureSlideMediaUploadTasks.delete(uploadTask);
+			uploadingLectureSlideMedia = lectureSlideMediaUploadTasks.size > 0;
 		}
 	};
 
-	const removeLectureSlideMedia = (position: number) => {
+	const removeLectureSlideMedia = async (position: number) => {
 		const page = lectureSlidePageDrafts.find((item) => item.position === position);
 		if (!page || page.content_kind === 'slide') return;
 		if (
 			page.media_stored_object_id != null &&
 			lectureSlideUploadedMediaIds.has(page.media_stored_object_id)
 		) {
-			lectureSlideUploadedMediaIds.delete(page.media_stored_object_id);
-			void api.deleteLectureSlideMedia(
-				fetch,
-				data.class.id,
-				page.media_stored_object_id,
-				data.isCreating ? null : data.assistantId
-			);
+			await cleanupLectureSlideMediaUploads([page.media_stored_object_id]);
 		}
 		lectureSlidePageDrafts = lectureSlidePageDrafts
 			.filter((item) => item.position !== position)
@@ -4234,6 +4273,22 @@
 				await cleanupLectureVideoDrafts();
 				$loading = false;
 				$loadingMessage = '';
+			}
+			if (lectureSlideMediaUploadTasks.size > 0) {
+				$loadingMessage = 'Waiting for lecture slide media uploads...';
+				$loading = true;
+				await waitForLectureSlideMediaUploads();
+			}
+			if (lectureSlideUploadedMediaIds.size > 0) {
+				$loadingMessage = 'Cleaning up lecture slide media...';
+				$loading = true;
+				const cleanupSucceeded = await cleanupLectureSlideMediaUploads();
+				$loading = false;
+				$loadingMessage = '';
+				if (!cleanupSucceeded) {
+					nav.cancel();
+					return;
+				}
 			}
 
 			// Now manually navigate to the intended destination

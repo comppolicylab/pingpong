@@ -1860,6 +1860,7 @@
 									{offsetMs}
 									startOffsetMs={visiblePage.start_offset_ms}
 									endOffsetMs={visiblePage.end_offset_ms}
+									{timelineMedia}
 									paused={playbackPaused}
 								/>
 							{:else if visiblePage.content_kind === 'gif' && visiblePage.media_url && visiblePage.start_offset_ms != null && visiblePage.end_offset_ms != null}

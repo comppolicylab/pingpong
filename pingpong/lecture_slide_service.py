@@ -35,6 +35,7 @@ LECTURE_SLIDE_DECK_ALREADY_ASSIGNED_DETAIL = (
     "Upload a new deck or copy the assistant instead."
 )
 OPENAI_INPUT_FILE_MAX_BYTES = 50 * 1024 * 1024
+LECTURE_SLIDE_VISUAL_MEDIA_MAX_BYTES = 20 * 1024 * 1024
 OPENAI_INPUT_FILE_MIME_TYPES = {
     file_type.mime_type.lower() for file_type in FILE_TYPES if file_type.input_file
 }
@@ -46,6 +47,16 @@ LECTURE_SLIDE_MEDIA_TYPES = {
     "video/mp4": (schemas.LectureSlideContentKind.VIDEO, ".mp4"),
     "video/webm": (schemas.LectureSlideContentKind.VIDEO, ".webm"),
 }
+LECTURE_SLIDE_MEDIA_PROBE_RULES = {
+    "image/png": (frozenset({"png_pipe"}), frozenset({"png"})),
+    "image/jpeg": (frozenset({"jpeg_pipe"}), frozenset({"mjpeg"})),
+    "image/webp": (frozenset({"webp_pipe"}), frozenset({"webp"})),
+    "image/gif": (frozenset({"gif"}), frozenset({"gif"})),
+    "video/mp4": (frozenset({"mp4"}), None),
+    "video/webm": (frozenset({"webm"}), frozenset({"vp8", "vp9", "av1"})),
+}
+_POST_COMMIT_MEDIA_DELETE_KEYS = "lecture_slide_post_commit_media_delete_keys"
+_ROLLBACK_MEDIA_DELETE_KEYS = "lecture_slide_rollback_media_delete_keys"
 
 
 @dataclass(frozen=True)
@@ -62,6 +73,53 @@ class LectureSlideQuestionUpdateResult:
     questions_changed: bool = False
     audio_changed: bool = False
     requires_question_generation: bool = False
+
+
+@dataclass(frozen=True)
+class LectureSlideMediaProbe:
+    width_px: int | None
+    height_px: int | None
+    duration_ms: int | None
+    has_audio: bool
+    format_names: frozenset[str]
+    video_codec: str | None
+
+
+def _queue_media_store_delete(session: AsyncSession, queue_name: str, key: str) -> None:
+    keys = session.info.setdefault(queue_name, [])
+    if key not in keys:
+        keys.append(key)
+
+
+def _discard_media_store_delete(
+    session: AsyncSession, queue_name: str, key: str
+) -> None:
+    keys = session.info.get(queue_name)
+    if keys and key in keys:
+        keys.remove(key)
+
+
+async def run_lecture_slide_transaction_cleanup(
+    session: AsyncSession, *, committed: bool
+) -> None:
+    queue_name = (
+        _POST_COMMIT_MEDIA_DELETE_KEYS if committed else _ROLLBACK_MEDIA_DELETE_KEYS
+    )
+    keys = list(session.info.pop(queue_name, []))
+    session.info.pop(
+        _ROLLBACK_MEDIA_DELETE_KEYS if committed else _POST_COMMIT_MEDIA_DELETE_KEYS,
+        None,
+    )
+    if not config.video_store:
+        return
+    for key in keys:
+        try:
+            await config.video_store.store.delete(key)
+        except Exception:
+            logger.exception(
+                "Failed to clean up lecture slide media after transaction. key=%s",
+                key,
+            )
 
 
 def generate_source_store_key() -> str:
@@ -89,15 +147,24 @@ def lecture_slide_media_summary_from_model(
 
 def _probe_media_file(
     media_path: str,
-) -> tuple[int | None, int | None, int | None, bool]:
+) -> LectureSlideMediaProbe:
+    ffprobe_path = shutil.which("ffprobe")
+    if not ffprobe_path:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Lecture slide media processing is unavailable because ffprobe "
+                "is not configured."
+            ),
+        )
     try:
         completed = subprocess.run(
             [
-                "ffprobe",
+                ffprobe_path,
                 "-v",
                 "error",
                 "-show_entries",
-                "stream=codec_type,width,height:format=duration",
+                "stream=codec_type,codec_name,width,height:format=duration,format_name",
                 "-of",
                 "json",
                 media_path,
@@ -107,10 +174,6 @@ def _probe_media_file(
             text=True,
             timeout=30,
         )
-    except FileNotFoundError as exc:
-        raise RuntimeError(
-            "ffprobe is required for lecture slide media uploads."
-        ) from exc
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
         raise HTTPException(
             status_code=400, detail="The uploaded media file is invalid."
@@ -133,12 +196,31 @@ def _probe_media_file(
         )
     except (TypeError, ValueError):
         duration_ms = None
-    return (
-        int(video_stream["width"]) if video_stream.get("width") else None,
-        int(video_stream["height"]) if video_stream.get("height") else None,
-        duration_ms,
-        any(stream.get("codec_type") == "audio" for stream in streams),
+    return LectureSlideMediaProbe(
+        width_px=(int(video_stream["width"]) if video_stream.get("width") else None),
+        height_px=(int(video_stream["height"]) if video_stream.get("height") else None),
+        duration_ms=duration_ms,
+        has_audio=any(stream.get("codec_type") == "audio" for stream in streams),
+        format_names=frozenset(
+            str((payload.get("format") or {}).get("format_name") or "").split(",")
+        ),
+        video_codec=(
+            str(video_stream["codec_name"]) if video_stream.get("codec_name") else None
+        ),
     )
+
+
+def _validate_probed_media_type(
+    content_type: str, probe: LectureSlideMediaProbe
+) -> None:
+    expected_formats, expected_codecs = LECTURE_SLIDE_MEDIA_PROBE_RULES[content_type]
+    format_matches = bool(probe.format_names & expected_formats)
+    codec_matches = expected_codecs is None or probe.video_codec in expected_codecs
+    if not format_matches or not codec_matches:
+        raise HTTPException(
+            status_code=400,
+            detail="The uploaded media contents do not match its declared file type.",
+        )
 
 
 async def create_lecture_slide_media_upload(
@@ -164,7 +246,10 @@ async def create_lecture_slide_media_upload(
     max_size = (
         config.upload.lecture_video_max_size
         if content_kind == schemas.LectureSlideContentKind.VIDEO
-        else config.upload.private_file_max_size
+        else min(
+            config.upload.private_file_max_size,
+            LECTURE_SLIDE_VISUAL_MEDIA_MAX_BYTES,
+        )
     )
     if upload_size > max_size:
         raise HTTPException(
@@ -178,21 +263,21 @@ async def create_lecture_slide_media_upload(
             await upload.seek(0)
             await asyncio.to_thread(shutil.copyfileobj, upload.file, media_file)
             media_file.flush()
-            width_px, height_px, duration_ms, has_audio = await asyncio.to_thread(
-                _probe_media_file, media_file.name
-            )
+            probe = await asyncio.to_thread(_probe_media_file, media_file.name)
+            _validate_probed_media_type(content_type, probe)
             if content_kind == schemas.LectureSlideContentKind.VIDEO:
-                if duration_ms is None:
+                if probe.duration_ms is None:
                     raise HTTPException(
                         status_code=400, detail="Could not determine video duration."
                     )
-                if not has_audio:
+                if not probe.has_audio:
                     raise HTTPException(
                         status_code=400,
                         detail="Inserted video clips must include an audio track.",
                     )
             media_file.seek(0)
             await config.video_store.store.put(store_key, media_file, content_type)
+            _queue_media_store_delete(session, _ROLLBACK_MEDIA_DELETE_KEYS, store_key)
         return await models.LectureSlideMediaStoredObject.create(
             session,
             class_id=class_id,
@@ -202,13 +287,14 @@ async def create_lecture_slide_media_upload(
             content_type=content_type,
             content_length=upload_size,
             content_kind=content_kind,
-            duration_ms=duration_ms,
-            width_px=width_px,
-            height_px=height_px,
+            duration_ms=probe.duration_ms,
+            width_px=probe.width_px,
+            height_px=probe.height_px,
         )
     except Exception:
         with contextlib.suppress(Exception):
             await config.video_store.store.delete(store_key)
+        _discard_media_store_delete(session, _ROLLBACK_MEDIA_DELETE_KEYS, store_key)
         raise
 
 
@@ -241,9 +327,7 @@ async def delete_unattached_lecture_slide_media(
         )
     await session.delete(media)
     await session.flush()
-    if config.video_store:
-        with contextlib.suppress(Exception):
-            await config.video_store.store.delete(media.key)
+    _queue_media_store_delete(session, _POST_COMMIT_MEDIA_DELETE_KEYS, media.key)
 
 
 async def _read_source_pdf_bytes(key: str) -> bytes:
@@ -1022,16 +1106,25 @@ async def apply_lecture_slide_content_items(
         desired_pages.append(page)
 
     desired_page_ids = {page.id for page in desired_pages if page.id is not None}
+    removed_media_ids: list[int] = []
     for page in existing_pages:
         if page.id not in desired_page_ids:
             structure_changed = True
             if page.narration_id is not None:
                 old_narration_ids.append(page.narration_id)
+            if page.media_stored_object_id is not None:
+                removed_media_ids.append(page.media_stored_object_id)
             await session.delete(page)
             notes_changed = True
             narration_changed = True
 
     await session.flush()
+    unused_media = await models.LectureSlideMediaStoredObject.get_unreferenced_by_ids(
+        session, removed_media_ids
+    )
+    for media in unused_media:
+        await session.delete(media)
+        _queue_media_store_delete(session, _POST_COMMIT_MEDIA_DELETE_KEYS, media.key)
     for position, page in enumerate(desired_pages):
         page.position = position
         session.add(page)
@@ -1041,7 +1134,6 @@ async def apply_lecture_slide_content_items(
         deck.continuous_narration_stored_object_id = None
         deck.caption_stored_object_id = None
         deck.total_duration_ms = None
-        session.add(deck)
     await session.flush()
     audio_keys = await _delete_lecture_slide_narrations_if_unused(
         session, old_narration_ids
@@ -1783,6 +1875,7 @@ async def clone_lecture_slide_deck_snapshot(
         error_message=deck.error_message,
         source_lecture_slide_deck_id_snapshot=deck.id,
         slide_count=deck.slide_count,
+        source_page_count=deck.source_page_count,
         total_duration_ms=deck.total_duration_ms,
         continuous_narration_stored_object_id=deck.continuous_narration_stored_object_id,
         caption_stored_object_id=deck.caption_stored_object_id,
@@ -2037,8 +2130,6 @@ async def delete_lecture_slide_deck_if_unused(
     )
     await session.flush()
     await _delete_lecture_slide_audio_keys_quietly(audio_keys)
-    if config.video_store:
-        for media in unused_media:
-            with contextlib.suppress(Exception):
-                await config.video_store.store.delete(media.key)
+    for media in unused_media:
+        _queue_media_store_delete(session, _POST_COMMIT_MEDIA_DELETE_KEYS, media.key)
     return additional_context_file_object_ids

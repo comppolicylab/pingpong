@@ -400,12 +400,12 @@ Do not generate additional unrequested questions after instructor-selected slide
 
     return f"""You are an expert educational content designer creating an interactive slide lesson from a PDF deck.
 
-You will be given the PDF, optional instructor-provided additional context files, slide timing source data, and word-level narration transcript source data.{duration_text}
+You will be given the source PDF, an ordered content map, optional instructor-provided additional context files, slide timing source data, and word-level narration transcript source data.{duration_text}
 {generation_window_text}
 {manual_question_guidance}
 {question_request_guidance}
 
-Use the PDF, additional context, slide timing source data, and transcript together. The PDF is the visual source of truth; the transcript is the spoken narration timeline. Additional context may clarify terminology, course emphasis, or background, but it is not slide-visible content unless also supported by the PDF or transcript.
+Use the ordered content map to distinguish PDF pages from inserted images, GIFs, and videos at each timeline position. For PDF slide entries, the mapped PDF page is the visual source of truth. For inserted media entries, use the supplied media visuals when present together with the transcript and media metadata. The transcript is the spoken narration timeline. Additional context may clarify terminology, course emphasis, or background, but it is not slide-visible content unless also supported by the mapped lesson content or transcript.
 
 GENERATION GUIDANCE SPECIFIC TO THIS LESSON:
 {content_section.strip() or DEFAULT_GENERATION_PROMPT_CONTENT}
@@ -544,10 +544,22 @@ def _slide_timing_source_text(page_ranges: list[SlidePageRange]) -> str:
     )
 
 
+def _slide_content_map_source_text(
+    content_map: Sequence[dict[str, object]],
+) -> str:
+    return (
+        "ORDERED SLIDE CONTENT MAP:\n"
+        "Each row maps a zero-based timeline slide_position to either a source "
+        "PDF page or an inserted media item. pdf_page_number is one-based.\n\n"
+        f"{json.dumps(content_map, indent=2)}"
+    )
+
+
 def _slide_generation_final_task_text() -> str:
     return (
-        "Based on the PDF, slide timing source data, and word-level transcript "
-        "source data above, generate the interactive slide lesson manifest now. "
+        "Based on the ordered content map, source PDF, inserted media, slide timing "
+        "source data, and word-level transcript above, generate the interactive "
+        "slide lesson manifest now. "
         "Follow the instructions and return only the schema-valid JSON object."
     )
 
@@ -3186,14 +3198,44 @@ async def _generate_slide_manifest(
         )
         manual_questions = _manual_slide_questions_from_context(deck.context_data)
         additional_context_file_ids = _additional_context_file_ids(deck)
+        ordered_pages = sorted(deck.pages, key=lambda item: item.position)
         page_ranges: list[SlidePageRange] = [
             {
                 "slide_position": page.position,
                 "start_offset_ms": page.start_offset_ms,
                 "end_offset_ms": page.end_offset_ms,
             }
-            for page in sorted(deck.pages, key=lambda item: item.position)
+            for page in ordered_pages
         ]
+        content_map = [
+            {
+                "slide_position": page.position,
+                "content_kind": page.content_kind.value,
+                "pdf_page_number": (
+                    page.source_page_number + 1
+                    if page.source_page_number is not None
+                    else None
+                ),
+                "filename": (
+                    page.media_stored_object.original_filename
+                    if page.media_stored_object is not None
+                    else None
+                ),
+                "duration_ms": (
+                    page.media_stored_object.duration_ms
+                    if page.media_stored_object is not None
+                    else None
+                ),
+            }
+            for page in ordered_pages
+        ]
+        visual_media = [
+            (page.position, page.media_stored_object)
+            for page in ordered_pages
+            if page.media_stored_object is not None
+            and page.content_kind != schemas.LectureSlideContentKind.VIDEO
+        ]
+    media_content = await _lecture_slide_media_input_images(visual_media)
     total_duration_ms = _slide_manifest_total_duration_ms(
         deck_total_duration_ms=total_duration_ms,
         page_ranges=page_ranges,
@@ -3214,6 +3256,8 @@ async def _generate_slide_manifest(
             manual_questions=manual_questions,
             question_requests=question_requests,
             additional_context_file_ids=additional_context_file_ids,
+            content_map=content_map,
+            media_content=media_content,
         ),
     )
 
@@ -3419,6 +3463,8 @@ async def _generate_slide_manifest_with_optional_chunks(
     manual_questions: list[GeneratedSlideQuestion] | None = None,
     question_requests: list[schemas.LectureSlideQuestionInput] | None = None,
     additional_context_file_ids: Sequence[str] = (),
+    content_map: Sequence[dict[str, object]] = (),
+    media_content: Sequence[dict[str, object]] = (),
 ) -> GeneratedSlideManifest:
     if total_duration_ms is None:
         return await _generate_slide_manifest_for_window(
@@ -3432,6 +3478,8 @@ async def _generate_slide_manifest_with_optional_chunks(
             manual_questions=manual_questions,
             question_requests=question_requests,
             additional_context_file_ids=additional_context_file_ids,
+            content_map=content_map,
+            media_content=media_content,
         )
     chunks = _plan_slide_manifest_generation_chunks(
         total_duration_ms,
@@ -3454,6 +3502,8 @@ async def _generate_slide_manifest_with_optional_chunks(
                 manual_questions=manual_questions,
                 question_requests=question_requests,
                 additional_context_file_ids=additional_context_file_ids,
+                content_map=content_map,
+                media_content=media_content,
             )
         except Exception as exc:
             if (
@@ -3490,6 +3540,8 @@ async def _generate_slide_manifest_with_optional_chunks(
                 manual_questions=manual_questions,
                 question_requests=question_requests,
                 additional_context_file_ids=additional_context_file_ids,
+                content_map=content_map,
+                media_content=media_content,
             )
         )
     return _merge_slide_chunk_manifests(chunk_manifests)
@@ -3508,6 +3560,8 @@ async def _generate_slide_manifest_chunks(
     manual_questions: list[GeneratedSlideQuestion] | None = None,
     question_requests: list[schemas.LectureSlideQuestionInput] | None = None,
     additional_context_file_ids: Sequence[str] = (),
+    content_map: Sequence[dict[str, object]] = (),
+    media_content: Sequence[dict[str, object]] = (),
 ) -> list[GeneratedSlideManifest]:
     try:
         manifest = await _generate_slide_manifest_for_window(
@@ -3522,6 +3576,8 @@ async def _generate_slide_manifest_chunks(
             manual_questions=manual_questions,
             question_requests=question_requests,
             additional_context_file_ids=additional_context_file_ids,
+            content_map=content_map,
+            media_content=media_content,
         )
         return [manifest]
     except Exception as exc:
@@ -3557,6 +3613,8 @@ async def _generate_slide_manifest_chunks(
                     manual_questions=manual_questions,
                     question_requests=question_requests,
                     additional_context_file_ids=additional_context_file_ids,
+                    content_map=content_map,
+                    media_content=media_content,
                 )
             )
         return manifests
@@ -3681,6 +3739,8 @@ async def _generate_slide_manifest_for_window(
     question_requests: list[schemas.LectureSlideQuestionInput] | None = None,
     chunk: SlideManifestGenerationChunk | None = None,
     additional_context_file_ids: Sequence[str] = (),
+    content_map: Sequence[dict[str, object]] = (),
+    media_content: Sequence[dict[str, object]] = (),
 ) -> GeneratedSlideManifest:
     chunk_transcript = transcript
     chunk_page_ranges = page_ranges
@@ -3724,6 +3784,17 @@ async def _generate_slide_manifest_for_window(
                     "role": "user",
                     "content": [
                         {"type": "input_file", "file_id": file_id},
+                        *(
+                            [
+                                {
+                                    "type": "input_text",
+                                    "text": _slide_content_map_source_text(content_map),
+                                }
+                            ]
+                            if content_map
+                            else []
+                        ),
+                        *media_content,
                         {
                             "type": "input_text",
                             "text": _slide_timing_source_text(chunk_page_ranges),

@@ -42,6 +42,7 @@
 	let thumbnails: Record<number, string> = {};
 	let renderInProgress: Promise<void> | null = null;
 	let draggedPosition: number | null = null;
+	let reorderAnnouncement = '';
 
 	const questionSequence = (clientId: string) => {
 		const sequence = Number(clientId.replace('lecture-slide-question-draft-', ''));
@@ -63,6 +64,17 @@
 
 	const questionNumber = (questionClientId: string) =>
 		orderedQuestions.findIndex((question) => question.client_id === questionClientId) + 1;
+
+	const reorderPageBy = (page: FilmstripPage, pageIndex: number, delta: -1 | 1) => {
+		const targetIndex = pageIndex + delta;
+		const target = pages[targetIndex];
+		if (!onReorder || !target) return;
+		onReorder(page.position, target.position);
+		reorderAnnouncement = '';
+		queueMicrotask(() => {
+			reorderAnnouncement = `Moved item ${pageIndex + 1} to position ${targetIndex + 1}.`;
+		});
+	};
 
 	const renderThumbnails = async (doc: PDFDocumentProxy) => {
 		const token = loadToken;
@@ -162,6 +174,8 @@
 	});
 </script>
 
+<div class="sr-only" aria-live="polite">{reorderAnnouncement}</div>
+
 <div class="flex items-stretch gap-1.5 overflow-x-auto px-1 pb-2 pt-2">
 	{#if onInsertMedia}
 		<LectureSlideAddMenu
@@ -186,9 +200,21 @@
 				draggedPosition = null;
 			}}
 			ondragend={() => (draggedPosition = null)}
+			onkeydown={(event) => {
+				if (!event.altKey || !onReorder) return;
+				if (event.key === 'ArrowLeft' && pageIndex > 0) {
+					event.preventDefault();
+					reorderPageBy(page, pageIndex, -1);
+				} else if (event.key === 'ArrowRight' && pageIndex < pages.length - 1) {
+					event.preventDefault();
+					reorderPageBy(page, pageIndex, 1);
+				}
+			}}
 			onclick={() => onSelectSlide(page.position)}
 			aria-label={`Slide ${pageIndex + 1}`}
 			aria-pressed={isSlideActive}
+			aria-keyshortcuts={onReorder ? 'Alt+ArrowLeft Alt+ArrowRight' : undefined}
+			title={onReorder ? 'Use Alt+Left or Alt+Right to reorder' : undefined}
 			class="group relative flex w-32 shrink-0 flex-col overflow-hidden rounded-xl border bg-white transition-all duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-900/15 {isSlideActive
 				? 'border-gray-900 shadow-md'
 				: 'border-gray-200 hover:border-gray-400 hover:shadow-sm'}"
@@ -204,7 +230,7 @@
 						class="h-full w-full object-contain"
 						draggable="false"
 					/>
-				{:else if thumbnails[thumbnailKey(page)]}
+				{:else if (page.content_kind || 'slide') === 'slide' && thumbnails[thumbnailKey(page)]}
 					<img
 						src={thumbnails[thumbnailKey(page)]}
 						alt={`Slide ${pageIndex + 1} thumbnail`}

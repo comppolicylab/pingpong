@@ -792,10 +792,20 @@ async def begin_db_session(request: StateRequest, call_next):
             status_code = getattr(result, "status_code", 0)
             if not status_code or status_code >= 400:
                 await db.rollback()
+                await lecture_slide_service.run_lecture_slide_transaction_cleanup(
+                    db, committed=False
+                )
             await db.commit()
+            if status_code and status_code < 400:
+                await lecture_slide_service.run_lecture_slide_transaction_cleanup(
+                    db, committed=True
+                )
             return result
         except Exception as e:
             await db.rollback()
+            await lecture_slide_service.run_lecture_slide_transaction_cleanup(
+                db, committed=False
+            )
             raise e
 
 

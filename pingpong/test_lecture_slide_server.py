@@ -2,6 +2,7 @@ import importlib
 import io
 from types import SimpleNamespace
 
+import humanize
 import pytest
 from fastapi import HTTPException, UploadFile
 from pypdf import PdfWriter
@@ -92,6 +93,120 @@ def test_additional_context_generation_payload_is_separate_user_message():
         {"type": "input_file", "file_id": "file-context-1"},
         {"type": "input_file", "file_id": "file-context-2"},
     ]
+
+
+@pytest.mark.parametrize(
+    ("content_type", "format_names", "video_codec"),
+    [
+        ("image/png", frozenset({"png_pipe"}), "png"),
+        ("image/jpeg", frozenset({"jpeg_pipe"}), "mjpeg"),
+        ("image/webp", frozenset({"webp_pipe"}), "webp"),
+        ("image/gif", frozenset({"gif"}), "gif"),
+        ("video/mp4", frozenset({"mov", "mp4"}), "h264"),
+        ("video/webm", frozenset({"matroska", "webm"}), "vp9"),
+    ],
+)
+def test_media_probe_accepts_expected_contents(content_type, format_names, video_codec):
+    probe = lecture_slide_service.LectureSlideMediaProbe(
+        width_px=1280,
+        height_px=720,
+        duration_ms=5000,
+        has_audio=content_type.startswith("video/"),
+        format_names=format_names,
+        video_codec=video_codec,
+    )
+
+    lecture_slide_service._validate_probed_media_type(content_type, probe)
+
+
+def test_media_probe_rejects_mime_type_that_does_not_match_contents():
+    mp4_probe = lecture_slide_service.LectureSlideMediaProbe(
+        width_px=1280,
+        height_px=720,
+        duration_ms=5000,
+        has_audio=True,
+        format_names=frozenset({"mov", "mp4"}),
+        video_codec="h264",
+    )
+
+    with pytest.raises(HTTPException, match="declared file type"):
+        lecture_slide_service._validate_probed_media_type("image/png", mp4_probe)
+
+
+def test_media_probe_reports_missing_ffprobe(monkeypatch):
+    monkeypatch.setattr(lecture_slide_service.shutil, "which", lambda _name: None)
+
+    with pytest.raises(HTTPException) as exc_info:
+        lecture_slide_service._probe_media_file("ignored.png")
+
+    assert exc_info.value.status_code == 503
+    assert "ffprobe is not configured" in str(exc_info.value.detail)
+
+
+@pytest.mark.asyncio
+async def test_visual_media_upload_has_openai_safe_size_cap(db, config, monkeypatch):
+    monkeypatch.setattr(
+        config,
+        "video_store",
+        SimpleNamespace(store=FakeLectureSlideStore()),
+    )
+    upload = UploadFile(
+        file=io.BytesIO(),
+        filename="too-large.png",
+        size=lecture_slide_service.LECTURE_SLIDE_VISUAL_MEDIA_MAX_BYTES + 1,
+        headers={"content-type": "image/png"},
+    )
+
+    async with db.async_session() as session:
+        with pytest.raises(HTTPException) as exc_info:
+            await lecture_slide_service.create_lecture_slide_media_upload(
+                session,
+                class_id=1,
+                uploader_id=123,
+                upload=upload,
+            )
+
+    assert exc_info.value.status_code == 413
+    assert humanize.naturalsize(
+        lecture_slide_service.LECTURE_SLIDE_VISUAL_MEDIA_MAX_BYTES
+    ) in str(exc_info.value.detail)
+
+
+@pytest.mark.asyncio
+async def test_media_store_cleanup_follows_transaction_outcome(db, config, monkeypatch):
+    store = FakeLectureSlideStore()
+    monkeypatch.setattr(config, "video_store", SimpleNamespace(store=store))
+
+    async with db.async_session() as session:
+        lecture_slide_service._queue_media_store_delete(
+            session,
+            lecture_slide_service._ROLLBACK_MEDIA_DELETE_KEYS,
+            "uploaded.mp4",
+        )
+        await lecture_slide_service.run_lecture_slide_transaction_cleanup(
+            session, committed=True
+        )
+        assert store.deleted_keys == []
+
+        lecture_slide_service._queue_media_store_delete(
+            session,
+            lecture_slide_service._POST_COMMIT_MEDIA_DELETE_KEYS,
+            "detached.mp4",
+        )
+        await lecture_slide_service.run_lecture_slide_transaction_cleanup(
+            session, committed=True
+        )
+        assert store.deleted_keys == ["detached.mp4"]
+
+        lecture_slide_service._queue_media_store_delete(
+            session,
+            lecture_slide_service._ROLLBACK_MEDIA_DELETE_KEYS,
+            "rolled-back.mp4",
+        )
+        await lecture_slide_service.run_lecture_slide_transaction_cleanup(
+            session, committed=False
+        )
+        assert store.deleted_keys == ["detached.mp4", "rolled-back.mp4"]
 
 
 @pytest.mark.asyncio
@@ -955,8 +1070,10 @@ async def test_apply_lecture_slide_page_notes_handles_unloaded_pages(db, institu
 @pytest.mark.asyncio
 @with_institution(11, "Test Institution")
 async def test_apply_lecture_slide_content_items_inserts_and_reorders_media(
-    db, institution
+    db, institution, config, monkeypatch
 ):
+    store = FakeLectureSlideStore()
+    monkeypatch.setattr(config, "video_store", SimpleNamespace(store=store))
     async with db.async_session() as session:
         class_ = models.Class(
             id=1,
@@ -1046,6 +1163,8 @@ async def test_apply_lecture_slide_content_items_inserts_and_reorders_media(
         )
         await session.commit()
         deck_id = deck.id
+        image_id = image.id
+        video_id = video.id
 
     assert result.structure_changed is True
     assert result.requires_narration_generation is True
@@ -1063,11 +1182,43 @@ async def test_apply_lecture_slide_content_items_inserts_and_reorders_media(
         ]
         assert [page.source_page_number for page in deck.pages] == [None, 0, None, 1]
         assert [page.media_stored_object_id for page in deck.pages] == [
-            image.id,
+            image_id,
             None,
-            video.id,
+            video_id,
             None,
         ]
+
+        removal_result = await lecture_slide_service.apply_lecture_slide_content_items(
+            session,
+            deck,
+            [
+                schemas.LectureSlideContentItemInput(
+                    content_kind="slide", source_page_number=0
+                ),
+                schemas.LectureSlideContentItemInput(
+                    content_kind="video", media_stored_object_id=video_id
+                ),
+                schemas.LectureSlideContentItemInput(
+                    content_kind="slide", source_page_number=1
+                ),
+            ],
+            uploader_id=123,
+        )
+        await session.commit()
+        await lecture_slide_service.run_lecture_slide_transaction_cleanup(
+            session, committed=True
+        )
+        removed_image = await session.get(
+            models.LectureSlideMediaStoredObject, image_id
+        )
+        retained_video = await session.get(
+            models.LectureSlideMediaStoredObject, video_id
+        )
+
+    assert removal_result.structure_changed is True
+    assert removed_image is None
+    assert retained_video is not None
+    assert store.deleted_keys == ["insert.png"]
 
 
 @pytest.mark.asyncio
@@ -1439,7 +1590,8 @@ async def test_clone_lecture_slide_deck_snapshot_returns_loaded_context_data(
             source_stored_object_id=source.id,
             uploader_id=123,
             display_name="lecture04.pdf",
-            slide_count=1,
+            slide_count=3,
+            source_page_count=1,
             voice_id="voice-test-id",
             context_data={"manual_questions": []},
         )
@@ -1455,6 +1607,8 @@ async def test_clone_lecture_slide_deck_snapshot_returns_loaded_context_data(
 
     assert "context_data" in cloned_deck.__dict__
     assert cloned_deck.context_data == {"manual_questions": []}
+    assert cloned_deck.slide_count == 3
+    assert cloned_deck.source_page_count == 1
 
 
 @pytest.mark.asyncio

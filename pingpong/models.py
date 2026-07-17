@@ -3256,16 +3256,16 @@ class LectureSlideMediaStoredObject(Base):
         normalized_ids = list(dict.fromkeys(int(id_) for id_ in ids))
         if not normalized_ids:
             return []
+        candidates = await cls.get_all_by_ids(session, normalized_ids, for_update=True)
+        candidate_ids = [media.id for media in candidates]
         referenced_ids = set(
             await session.scalars(
                 select(LectureSlidePage.media_stored_object_id).where(
-                    LectureSlidePage.media_stored_object_id.in_(normalized_ids)
+                    LectureSlidePage.media_stored_object_id.in_(candidate_ids)
                 )
             )
         )
-        return await cls.get_all_by_ids(
-            session, [id_ for id_ in normalized_ids if id_ not in referenced_ids]
-        )
+        return [media for media in candidates if media.id not in referenced_ids]
 
 
 class LectureSlideNarrationStoredObject(Base):

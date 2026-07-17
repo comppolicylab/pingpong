@@ -1149,15 +1149,47 @@ async def test_generated_narration_model_requires_each_requested_position_once()
 
 async def test_generate_slide_manifest_uses_pdf_and_transcript_not_extracted_text(
     db,
+    config,
+    monkeypatch,
 ):
     await _create_class_and_deck(db)
+
+    class Store:
+        async def stream_video(self, key: str):
+            assert key == "insert.png"
+            yield b"inserted-image"
+
+    monkeypatch.setattr(config, "video_store", SimpleNamespace(store=Store()))
     async with db.async_session() as session:
-        page = models.LectureSlidePage(
+        media = models.LectureSlideMediaStoredObject(
+            class_id=1,
+            uploader_id=123,
+            key="insert.png",
+            original_filename="insert.png",
+            content_type="image/png",
+            content_length=14,
+            content_kind=schemas.LectureSlideContentKind.IMAGE,
+            width_px=640,
+            height_px=480,
+        )
+        session.add(media)
+        await session.flush()
+        media_page = models.LectureSlidePage(
             lecture_slide_deck_id=1,
             position=0,
+            content_kind=schemas.LectureSlideContentKind.IMAGE,
+            media_stored_object_id=media.id,
             extracted_text="DO NOT SEND EXTRACTED TEXT",
             start_offset_ms=0,
             end_offset_ms=1000,
+        )
+        source_page = models.LectureSlidePage(
+            lecture_slide_deck_id=1,
+            position=1,
+            content_kind=schemas.LectureSlideContentKind.SLIDE,
+            source_page_number=0,
+            start_offset_ms=1000,
+            end_offset_ms=2000,
         )
         run = models.LectureSlideProcessingRun(
             lecture_slide_deck_id=1,
@@ -1168,7 +1200,7 @@ async def test_generate_slide_manifest_uses_pdf_and_transcript_not_extracted_tex
             status=schemas.LectureSlideProcessingRunStatus.RUNNING,
             lease_token="lease",
         )
-        session.add_all([page, run])
+        session.add_all([media_page, source_page, run])
         await session.commit()
         run_id = run.id
 
@@ -1249,6 +1281,17 @@ async def test_generate_slide_manifest_uses_pdf_and_transcript_not_extracted_tex
     assert "file-pdf" in payload
     assert "transcript-token" in payload
     assert "SLIDE TIMING SOURCE DATA:" in payload
+    assert "ORDERED SLIDE CONTENT MAP:" in payload
+    content = captured["input"][0]["content"]
+    content_map_text = next(
+        item["text"]
+        for item in content
+        if item.get("type") == "input_text"
+        and item["text"].startswith("ORDERED SLIDE CONTENT MAP:")
+    )
+    assert '"content_kind": "image"' in content_map_text
+    assert '"pdf_page_number": 1' in content_map_text
+    assert "data:image/png;base64,aW5zZXJ0ZWQtaW1hZ2U=" in payload
     assert "WORD-LEVEL TRANSCRIPT SOURCE DATA:" in payload
     assert "return only the schema-valid JSON object" in payload
     assert "Manifest prompt" not in payload
