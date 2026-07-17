@@ -123,7 +123,8 @@
 		onmanualplayrequest,
 		mediaKind = 'video',
 		durationMsOverride = null,
-		visual = undefined
+		visual = undefined,
+		fullscreenTarget = null
 	}: {
 		src: string;
 		captionsSrc?: string | null;
@@ -157,6 +158,7 @@
 		mediaKind?: 'video' | 'audio';
 		durationMsOverride?: number | null;
 		visual?: Snippet<[number]>;
+		fullscreenTarget?: HTMLElement | null;
 	} = $props();
 
 	let showControls = $state(false);
@@ -211,8 +213,8 @@
 	let isFullscreenSupported = $derived(
 		browser &&
 			document.fullscreenEnabled &&
-			playerContainerElement !== null &&
-			'requestFullscreen' in playerContainerElement
+			fullscreenTarget !== null &&
+			'requestFullscreen' in fullscreenTarget
 	);
 
 	// Non-reactive: tracks the last shown question without retriggering the effect.
@@ -482,16 +484,15 @@
 	}
 
 	function toggleFullscreen() {
-		if (!isFullscreenSupported || typeof document === 'undefined' || !playerContainerElement)
-			return;
+		if (!isFullscreenSupported || typeof document === 'undefined' || !fullscreenTarget) return;
 
 		// check this rather than `isFullscreen` because `document.fullscreenElement` is
 		// closer to the source of truth, whereas `isFullscreen` is used just to track
 		// this state for reactive rendering
-		if (document.fullscreenElement === playerContainerElement) {
+		if (document.fullscreenElement === fullscreenTarget) {
 			void document.exitFullscreen().catch(() => {});
 		} else {
-			void playerContainerElement.requestFullscreen().catch(() => {});
+			void fullscreenTarget.requestFullscreen().catch(() => {});
 		}
 	}
 
@@ -633,7 +634,7 @@
 	$effect(() => {
 		if (typeof document === 'undefined') return;
 		const onFullscreenChange = () => {
-			isFullscreen = document.fullscreenElement === playerContainerElement;
+			isFullscreen = document.fullscreenElement === fullscreenTarget;
 		};
 		document.addEventListener('fullscreenchange', onFullscreenChange);
 		return () => document.removeEventListener('fullscreenchange', onFullscreenChange);
@@ -1376,9 +1377,6 @@
 		} else if (event.key === 'ArrowLeft') {
 			event.preventDefault();
 			handleKeyboardSkip('skipBackward');
-		} else if (event.key === 'f' || event.key === 'F') {
-			event.preventDefault();
-			toggleFullscreen();
 		}
 	}
 
@@ -1396,13 +1394,9 @@
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div
 	bind:this={playerContainerElement}
-	class="relative overflow-hidden bg-black {isFullscreen
-		? ''
-		: 'rounded-3xl border border-slate-800/80'}"
-	class:aspect-video={measuredMediaAspectRatio == null && !isFullscreen}
-	style:aspect-ratio={!isFullscreen && measuredMediaAspectRatio
-		? String(measuredMediaAspectRatio)
-		: undefined}
+	class="relative overflow-hidden rounded-3xl border border-slate-800/80 bg-black"
+	class:aspect-video={measuredMediaAspectRatio == null}
+	style:aspect-ratio={measuredMediaAspectRatio ? String(measuredMediaAspectRatio) : undefined}
 	onkeydown={handleKeydown}
 	onmousemove={handleMouseMove}
 	onmouseenter={handleMouseEnter}
@@ -1966,7 +1960,7 @@
 						</div>
 						{#if isFullscreenSupported}
 							<LectureVideoControlButton
-								label={isFullscreen ? 'Exit fullscreen (f)' : 'Enter fullscreen (f)'}
+								label={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
 								onclick={toggleFullscreen}
 								class="ml-auto"
 							>

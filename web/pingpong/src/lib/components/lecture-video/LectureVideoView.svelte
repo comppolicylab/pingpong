@@ -150,6 +150,7 @@
 	let videoReadyForPlayback: boolean = $state(false);
 	let introNarrationPending: boolean = $state(false);
 	let postAnswerNarrationPending: boolean = $state(false);
+	let lectureContainerElement: HTMLDivElement | null = $state(null);
 
 	// --- UI state ---
 	let scrollToQuestionId: number | null = $state(null);
@@ -2139,13 +2140,16 @@
 		</div>
 	</div>
 {:else}
-	<div class="h-full w-full overflow-hidden">
+	<div
+		bind:this={lectureContainerElement}
+		class="h-full w-full overflow-hidden lecture-fullscreen-root"
+	>
 		<div
-			class={`mx-auto flex h-full w-full max-w-screen-2xl flex-col gap-6 px-4 py-4 lg:px-6 xl:grid xl:grid-cols-5 xl:items-stretch xl:justify-center xl:gap-8 xl:py-6 ${groupArchived || lessonUpdated ? 'xl:grid-rows-[auto_minmax(0,1fr)]' : ''}`}
+			class={`mx-auto flex h-full w-full max-w-screen-2xl flex-col gap-6 px-4 py-4 lg:px-6 xl:grid xl:grid-cols-5 xl:items-stretch xl:justify-center xl:gap-8 xl:py-6 lecture-layout ${groupArchived || lessonUpdated ? 'xl:grid-rows-[auto_minmax(0,1fr)]' : ''}`}
 		>
 			{#if groupArchived || lessonUpdated}
 				<div
-					class="flex flex-row justify-between items-center shrink-0 rounded-2xl border border-slate-200 bg-slate-50 p-4 text-slate-800 xl:col-span-5"
+					class="flex flex-row justify-between items-center shrink-0 rounded-2xl border border-slate-200 bg-slate-50 p-4 text-slate-800 xl:col-span-5 lecture-status-banner"
 				>
 					<div class="flex gap-3">
 						<div
@@ -2179,7 +2183,7 @@
 				</div>
 			{/if}
 			<div
-				class="col-span-3 flex max-h-[40%] min-h-0 min-w-0 shrink-0 flex-col gap-4 xl:h-full xl:max-h-none xl:shrink xl:[container-type:size]"
+				class="col-span-3 flex max-h-[40%] min-h-0 min-w-0 shrink-0 flex-col gap-4 xl:h-full xl:max-h-none xl:shrink xl:[container-type:size] lecture-media-col"
 			>
 				{#if !canParticipate && showParticipantNotice}
 					<div
@@ -2214,6 +2218,7 @@
 							<LectureVideoPlayer
 								src={lectureVideoSrc}
 								{captionsSrc}
+								fullscreenTarget={lectureContainerElement}
 								{mediaKind}
 								{durationMsOverride}
 								{visual}
@@ -2272,7 +2277,7 @@
 				{/if}
 			</div>
 			{#if isDesktopLayout}
-				<div class="col-span-2 h-full min-h-0 min-w-0">
+				<div class="col-span-2 h-full min-h-0 min-w-0 lecture-chat-col">
 					{@render chat?.(videoAtEnd)}
 				</div>
 			{:else}
@@ -2336,3 +2341,26 @@
 		</div>
 	</div>
 {/if}
+
+<style>
+	.lecture-fullscreen-root:fullscreen {
+		/* need to add this back in because it's set by the parent div, which does not
+		get full-screened */
+		background-color: white;
+
+		/* expands video area when full-screen */
+		.lecture-layout {
+			max-width: none;
+			grid-template-columns: minmax(0, 1fr) 24rem;
+		}
+
+		/* reset the grid because we got rid of the other cols after full-screen */
+		.lecture-media-col,
+		.lecture-chat-col {
+			grid-column: span 1 / span 1;
+		}
+		.lecture-status-banner {
+			grid-column: span 2 / span 2;
+		}
+	}
+</style>

@@ -130,7 +130,7 @@
 	data-base-src="${linkUrl}"
 	height="1000px"
 	width="100%"
-	allow="clipboard-write *; microphone *"
+	allow="clipboard-write *; microphone *; fullscreen *"
 ></iframe>`;
 
 		return {
