@@ -1,4 +1,5 @@
 import asyncio
+import base64
 import contextlib
 import io
 import json
@@ -23,10 +24,17 @@ import tiktoken
 from openai.types import Reasoning
 import uuid_utils as uuid
 from openai.types.responses.response_input_param import ResponseInputParam
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, create_model
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    create_model,
+    model_validator,
+)
 from pydub import AudioSegment
 from pypdf import PdfReader
-from sqlalchemy import and_, delete, func, or_, select, update
+from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -51,6 +59,7 @@ from pingpong.lecture_video_manifest_generation import (
     DEFAULT_LECTURE_INSTRUCTIONS,
     DEFAULT_GENERATION_PROMPT_CONTENT,
     _generation_transcript_source_text,
+    transcribe_video_words,
 )
 from pingpong.lecture_video_service import (
     TRANSCRIPT_DATA_VERSION,
@@ -160,14 +169,15 @@ DEFAULT_LECTURE_SLIDE_INSTRUCTIONS = DEFAULT_LECTURE_INSTRUCTIONS.safe_substitut
     }
 )
 
-DEFAULT_NARRATION_PROMPT = """You are the instructor giving a lecture from this PDF slide deck.
+DEFAULT_NARRATION_PROMPT = """You are the instructor giving a lecture from an ordered slide lesson that may include PDF slides, inserted images, GIFs, and video clips.
 
 Critical rules:
-- Use the PDF itself as the source of truth.
+- Use the visible content at each timeline position as the source of truth. PDF pages come from the deck; inserted images and GIFs are supplied separately.
+- When multiple labeled frames are provided for a GIF, treat them as chronological snapshots from one animated slide and write one narration item for that slide position.
 - Write narration as if you are speaking live to students while each slide is visible.
 - Teach the material on the slide; do not merely describe the slide's layout.
 - Stay grounded in what appears on the current slide and the necessary connective context from earlier slides.
-- Additional context files may clarify terminology, course emphasis, or background, but the PDF remains the source of truth for what students can see.
+- Additional context files may clarify terminology, course emphasis, or background, but the visible slide or inserted media remains the source of truth for what students can see.
 - Do not invent facts, examples, equations, citations, or course context that are not supported by the deck or instructor-provided additional context.
 - Do not mention the PDF, the prompt, the model, schemas, extraction, or any implementation details.
 
@@ -193,6 +203,11 @@ FFMPEG_CONCAT_TIMEOUT_SECONDS = 300
 MAX_RUN_CREATE_RETRIES = 3
 OPENAI_GENERATION_MAX_ATTEMPTS = 3
 OPENAI_GENERATION_RETRY_DELAY_SECONDS = 5.0
+GIF_NARRATION_SHORT_DURATION_MS = 1_500
+GIF_NARRATION_MEDIUM_DURATION_MS = 4_000
+GIF_NARRATION_UNKNOWN_DURATION_MS = 3_000
+GIF_NARRATION_SIGNATURE_SIZE = 32
+GIF_NARRATION_NEAR_DUPLICATE_MAD_THRESHOLD = 1.5
 GPT_5_4_CONTEXT_WINDOW_TOKENS = 1_000_000
 GPT_5_4_MAX_OUTPUT_TOKENS = 128_000
 SLIDE_MANIFEST_FIXED_INPUT_TOKEN_RESERVE = 100_000
@@ -225,17 +240,33 @@ class GeneratedSlideNarrationSet(BaseModel):
 
 
 def _generated_slide_narration_set_model(
-    slide_count: int,
+    slide_positions: Sequence[int],
 ) -> type[GeneratedSlideNarrationSet]:
+    expected_positions = tuple(slide_positions)
+    slide_count = len(expected_positions)
     if slide_count < 1:
         raise ValueError(
             "Lecture slide narration generation requires at least one slide."
         )
+
+    @model_validator(mode="after")
+    def validate_exact_positions(
+        narration_set: GeneratedSlideNarrationSet,
+    ) -> GeneratedSlideNarrationSet:
+        actual_positions = [slide.slide_position for slide in narration_set.slides]
+        if sorted(actual_positions) != sorted(expected_positions):
+            raise ValueError(
+                "Generated narration must include each requested slide position "
+                "exactly once."
+            )
+        return narration_set
+
     return cast(
         type[GeneratedSlideNarrationSet],
         create_model(
             f"GeneratedSlideNarrationSet{slide_count}Slides",
             __base__=GeneratedSlideNarrationSet,
+            __validators__={"validate_exact_positions": validate_exact_positions},
             slides=(
                 list[GeneratedSlideNarration],
                 Field(..., min_length=slide_count, max_length=slide_count),
@@ -1669,15 +1700,15 @@ async def _extract_and_store_slide_assets(
             ):
                 return
 
-            existing_user_notes = {
-                page.position: page.user_notes for page in deck.pages if page.user_notes
+            source_pages = {
+                (
+                    page.source_page_number
+                    if page.source_page_number is not None
+                    else page.position
+                ): page
+                for page in deck.pages
+                if page.content_kind == schemas.LectureSlideContentKind.SLIDE
             }
-            await session.execute(
-                delete(models.LectureSlidePage).where(
-                    models.LectureSlidePage.lecture_slide_deck_id == deck.id
-                )
-            )
-            await session.flush()
 
             for asset in assets:
                 image_bytes = Path(asset.image_path).read_bytes()
@@ -1698,16 +1729,23 @@ async def _extract_and_store_slide_assets(
                 )
                 session.add(image_stored_object)
                 await session.flush()
-                session.add(
-                    models.LectureSlidePage(
+                page = source_pages.get(asset.position)
+                if page is None:
+                    page = models.LectureSlidePage(
                         lecture_slide_deck_id=deck.id,
                         position=asset.position,
+                        content_kind=schemas.LectureSlideContentKind.SLIDE,
+                        source_page_number=asset.position,
                         image_stored_object_id=image_stored_object.id,
                         extracted_text=asset.extracted_text,
-                        user_notes=existing_user_notes.get(asset.position),
                     )
-                )
-            deck.slide_count = len(assets)
+                else:
+                    page.source_page_number = asset.position
+                    page.image_stored_object_id = image_stored_object.id
+                    page.extracted_text = asset.extracted_text
+                session.add(page)
+            deck.source_page_count = len(assets)
+            deck.slide_count = max(len(deck.pages), len(assets))
             await session.commit()
     finally:
         cleanup_extracted_slide_assets(assets)
@@ -1879,10 +1917,44 @@ async def _generate_narration_text(
         if deck is None:
             return None
         prompt = deck.narration_prompt or DEFAULT_NARRATION_PROMPT
-        slide_count = deck.slide_count
+        narratable_pages = [
+            page
+            for page in sorted(deck.pages, key=lambda item: item.position)
+            if page.content_kind != schemas.LectureSlideContentKind.VIDEO
+        ]
+        narratable_positions = [page.position for page in narratable_pages]
         author_comments_guidance = _slide_author_comments_guidance_text(deck.pages)
-        response_model = _generated_slide_narration_set_model(slide_count)
+        response_model = _generated_slide_narration_set_model(narratable_positions)
         additional_context_file_ids = _additional_context_file_ids(deck)
+        content_map = [
+            {
+                "slide_position": page.position,
+                "content_kind": page.content_kind.value,
+                "pdf_page_number": (
+                    page.source_page_number + 1
+                    if page.source_page_number is not None
+                    else None
+                ),
+                "filename": (
+                    page.media_stored_object.original_filename
+                    if page.media_stored_object is not None
+                    else None
+                ),
+                "duration_ms": (
+                    page.media_stored_object.duration_ms
+                    if page.media_stored_object is not None
+                    else None
+                ),
+            }
+            for page in sorted(deck.pages, key=lambda item: item.position)
+        ]
+        visual_media = [
+            (page.position, page.media_stored_object)
+            for page in narratable_pages
+            if page.media_stored_object is not None
+        ]
+
+    media_content = await _lecture_slide_media_input_images(visual_media)
 
     return await _await_with_run_lease_heartbeat(
         run_id,
@@ -1898,10 +1970,12 @@ async def _generate_narration_text(
                         "role": "user",
                         "content": [
                             {"type": "input_file", "file_id": file_id},
+                            *media_content,
                             {
                                 "type": "input_text",
                                 "text": _build_narration_generation_user_message(
-                                    slide_count,
+                                    narratable_positions,
+                                    content_map,
                                     author_comments_guidance,
                                 ),
                             },
@@ -1959,16 +2033,226 @@ def _additional_context_file_ids(deck: models.LectureSlideDeck) -> list[str]:
 
 
 def _build_narration_generation_user_message(
-    slide_count: int,
+    narratable_positions: list[int],
+    content_map: list[dict[str, object]],
     author_comments_guidance: str | None,
 ) -> str:
     message = (
-        f"Generate narration for exactly {slide_count} slides. Use zero-based "
-        "slide_position values."
+        f"Generate narration for exactly {len(narratable_positions)} slides, using "
+        "exactly the following zero-based slide_position values: "
+        f"{narratable_positions}. Inserted videos use their original audio, "
+        "so do not return narration items for video positions. The ordered content "
+        "map is:\n\n"
+        f"{json.dumps(content_map, indent=2)}"
     )
     if author_comments_guidance:
         message = f"{message}\n\n{author_comments_guidance}"
     return message
+
+
+async def _lecture_slide_media_input_images(
+    media_items: list[tuple[int, models.LectureSlideMediaStoredObject]],
+) -> list[dict[str, object]]:
+    if not media_items:
+        return []
+    if not config.video_store:
+        raise RuntimeError("Video store not configured or unavailable.")
+    content: list[dict[str, object]] = []
+    for position, media in media_items:
+        chunks = []
+        async for chunk in config.video_store.store.stream_video(media.key):
+            chunks.append(chunk)
+        media_bytes = b"".join(chunks)
+        content_type = media.content_type
+        if media.content_kind == schemas.LectureSlideContentKind.GIF:
+            gif_frames = await asyncio.to_thread(
+                _extract_gif_narration_frames, media_bytes, media.duration_ms
+            )
+            for frame_index, (timestamp_ms, frame_bytes) in enumerate(
+                gif_frames, start=1
+            ):
+                encoded = base64.b64encode(frame_bytes).decode("ascii")
+                content.extend(
+                    [
+                        {
+                            "type": "input_text",
+                            "text": (
+                                f"GIF at slide_position {position} — frame "
+                                f"{frame_index} of {len(gif_frames)}, "
+                                f"t={timestamp_ms / 1000:.2f}s:"
+                            ),
+                        },
+                        {
+                            "type": "input_image",
+                            "image_url": f"data:image/png;base64,{encoded}",
+                        },
+                    ]
+                )
+            continue
+        encoded = base64.b64encode(media_bytes).decode("ascii")
+        content.extend(
+            [
+                {
+                    "type": "input_text",
+                    "text": f"Inserted {media.content_kind.value} at slide_position {position}:",
+                },
+                {
+                    "type": "input_image",
+                    "image_url": f"data:{content_type};base64,{encoded}",
+                },
+            ]
+        )
+    return content
+
+
+def _gif_narration_frame_count(duration_ms: int | None) -> int:
+    if duration_ms is None:
+        return 4
+    if duration_ms <= GIF_NARRATION_SHORT_DURATION_MS:
+        return 3
+    if duration_ms <= GIF_NARRATION_MEDIUM_DURATION_MS:
+        return 5
+    return 8
+
+
+def _gif_narration_frame_timestamps_ms(duration_ms: int | None) -> list[int]:
+    effective_duration_ms = duration_ms or GIF_NARRATION_UNKNOWN_DURATION_MS
+    frame_count = _gif_narration_frame_count(duration_ms)
+    end_safety_margin_ms = min(100, max(1, effective_duration_ms // 10))
+    final_timestamp_ms = max(0, effective_duration_ms - end_safety_margin_ms)
+    if frame_count == 1 or final_timestamp_ms == 0:
+        return [0]
+    return list(
+        dict.fromkeys(
+            round(final_timestamp_ms * index / (frame_count - 1))
+            for index in range(frame_count)
+        )
+    )
+
+
+def _probe_gif_duration_ms(input_path: Path) -> int | None:
+    ffprobe_path = shutil.which("ffprobe")
+    if ffprobe_path is None:
+        return None
+    try:
+        completed = subprocess.run(
+            [
+                ffprobe_path,
+                "-v",
+                "error",
+                "-show_entries",
+                "format=duration",
+                "-of",
+                "default=noprint_wrappers=1:nokey=1",
+                str(input_path),
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        return max(1, round(float(completed.stdout.strip()) * 1000))
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, ValueError):
+        return None
+
+
+def _extract_gif_frame_signature(
+    ffmpeg_path: str,
+    input_path: Path,
+    timestamp_ms: int,
+) -> bytes | None:
+    try:
+        completed = subprocess.run(
+            [
+                ffmpeg_path,
+                "-v",
+                "error",
+                "-i",
+                str(input_path),
+                "-ss",
+                f"{timestamp_ms / 1000:.6f}",
+                "-frames:v",
+                "1",
+                "-vf",
+                (
+                    f"scale={GIF_NARRATION_SIGNATURE_SIZE}:"
+                    f"{GIF_NARRATION_SIGNATURE_SIZE}:flags=area,format=rgb24"
+                ),
+                "-f",
+                "rawvideo",
+                "pipe:1",
+            ],
+            check=True,
+            capture_output=True,
+            timeout=60,
+        )
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
+        return None
+    expected_size = GIF_NARRATION_SIGNATURE_SIZE**2 * 3
+    return completed.stdout if len(completed.stdout) == expected_size else None
+
+
+def _gif_frame_signatures_are_near_duplicates(left: bytes, right: bytes) -> bool:
+    if len(left) != len(right) or not left:
+        return False
+    mean_absolute_difference = sum(
+        abs(left_value - right_value)
+        for left_value, right_value in zip(left, right, strict=True)
+    ) / len(left)
+    return mean_absolute_difference <= GIF_NARRATION_NEAR_DUPLICATE_MAD_THRESHOLD
+
+
+def _extract_gif_narration_frames(
+    gif_bytes: bytes,
+    duration_ms: int | None,
+) -> list[tuple[int, bytes]]:
+    ffmpeg_path = shutil.which("ffmpeg")
+    if ffmpeg_path is None:
+        raise RuntimeError("ffmpeg is required for lecture slide GIF processing.")
+    with tempfile.TemporaryDirectory(prefix="pingpong_ls_gif_") as temp_dir:
+        input_path = Path(temp_dir) / "input.gif"
+        input_path.write_bytes(gif_bytes)
+        effective_duration_ms = duration_ms or _probe_gif_duration_ms(input_path)
+        timestamps_ms = _gif_narration_frame_timestamps_ms(effective_duration_ms)
+        kept_frames: list[tuple[int, bytes]] = []
+        kept_signatures: list[bytes] = []
+        for timestamp_ms in timestamps_ms:
+            signature = _extract_gif_frame_signature(
+                ffmpeg_path, input_path, timestamp_ms
+            )
+            if signature is None or any(
+                _gif_frame_signatures_are_near_duplicates(signature, existing)
+                for existing in kept_signatures
+            ):
+                continue
+            output_path = Path(temp_dir) / f"frame_{len(kept_frames):02d}.png"
+            completed = subprocess.run(
+                [
+                    ffmpeg_path,
+                    "-v",
+                    "error",
+                    "-i",
+                    str(input_path),
+                    "-ss",
+                    f"{timestamp_ms / 1000:.6f}",
+                    "-frames:v",
+                    "1",
+                    "-y",
+                    str(output_path),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+            if completed.returncode != 0 or not output_path.exists():
+                continue
+            kept_frames.append((timestamp_ms, output_path.read_bytes()))
+            kept_signatures.append(signature)
+        if not kept_frames:
+            raise RuntimeError(
+                "ffmpeg could not extract narration frames from the inserted GIF."
+            )
+        return kept_frames
 
 
 async def _persist_narration_text(
@@ -1991,6 +2275,8 @@ async def _persist_narration_text(
         ):
             return
         for page in deck.pages:
+            if page.content_kind == schemas.LectureSlideContentKind.VIDEO:
+                continue
             generated = narration_by_position.get(page.position)
             if generated is None:
                 raise ValueError(f"Missing narration for slide {page.position}.")
@@ -2017,31 +2303,72 @@ async def _synthesize_slide_audio(
         class_id = deck.class_id
         voice_id = deck.voice_id
         pages = [
-            (page.id, page.position, page.narration_text or "")
+            (
+                page.id,
+                page.position,
+                page.content_kind,
+                page.narration_text or "",
+                page.media_stored_object,
+            )
             for page in sorted(deck.pages, key=lambda item: item.position)
-            if page.narration_id is None and text_needs_audio(page.narration_text or "")
+            if page.narration_id is None
+            and (
+                page.content_kind == schemas.LectureSlideContentKind.VIDEO
+                or text_needs_audio(page.narration_text or "")
+            )
         ]
     if not pages:
         return []
-    if not voice_id:
+    needs_tts = any(
+        content_kind != schemas.LectureSlideContentKind.VIDEO
+        for _, _, content_kind, _, _ in pages
+    )
+    if needs_tts and not voice_id:
         raise RuntimeError("Lecture slide deck voice_id is required for narration.")
-    api_key = await _get_elevenlabs_api_key(class_id)
+    api_key = await _get_elevenlabs_api_key(class_id) if needs_tts else None
+    needs_video_transcription = any(
+        content_kind == schemas.LectureSlideContentKind.VIDEO
+        for _, _, content_kind, _, _ in pages
+    )
+    openai_client = None
+    if needs_video_transcription:
+        async with config.db.driver.async_session() as session:
+            openai_client = await get_openai_client_by_class_id(session, class_id)
     artifacts: list[SlideAudioArtifact] = []
-    for page_id, page_position, narration_text in pages:
-        synthesis_result = await _await_with_run_lease_heartbeat(
-            run_id,
-            lease_token,
-            synthesize_elevenlabs_speech_with_timings(
-                api_key, voice_id, narration_text
-            ),
-        )
-        if synthesis_result is None:
-            # Existing stored slide audio is retained on mid-run cancellation,
-            # matching lecture-video retry behavior.
-            return None
-        audio = synthesis_result.audio
-        content_type = LECTURE_SLIDE_AUDIO_CONTENT_TYPE
-        duration_ms = audio_duration_ms(audio, content_type)
+    for page_id, page_position, content_kind, narration_text, media in pages:
+        if content_kind == schemas.LectureSlideContentKind.VIDEO:
+            if media is None:
+                raise RuntimeError(
+                    f"Inserted video at position {page_position} is missing."
+                )
+            assert openai_client is not None
+            video_result = await _await_with_run_lease_heartbeat(
+                run_id,
+                lease_token,
+                _prepare_inserted_video_audio(media, openai_client),
+            )
+            if video_result is None:
+                return None
+            audio, duration_ms, word_timings, narration_text = video_result
+            content_type = LECTURE_SLIDE_CONTINUOUS_AUDIO_CONTENT_TYPE
+        else:
+            assert api_key is not None
+            assert voice_id is not None
+            synthesis_result = await _await_with_run_lease_heartbeat(
+                run_id,
+                lease_token,
+                synthesize_elevenlabs_speech_with_timings(
+                    api_key, voice_id, narration_text
+                ),
+            )
+            if synthesis_result is None:
+                # Existing stored slide audio is retained on mid-run cancellation,
+                # matching lecture-video retry behavior.
+                return None
+            audio = synthesis_result.audio
+            content_type = LECTURE_SLIDE_AUDIO_CONTENT_TYPE
+            duration_ms = audio_duration_ms(audio, content_type)
+            word_timings = synthesis_result.words
         store_key, content_length = await _store_audio(
             generate_slide_narration_store_key(),
             content_type,
@@ -2074,6 +2401,8 @@ async def _synthesize_slide_audio(
                 session.add(narration)
                 await session.flush()
                 page.narration_id = narration.id
+                if content_kind == schemas.LectureSlideContentKind.VIDEO:
+                    page.narration_text = narration_text
                 session.add(page)
                 await session.commit()
         except Exception:
@@ -2088,10 +2417,74 @@ async def _synthesize_slide_audio(
                 duration_ms=duration_ms,
                 store_key=store_key,
                 stored_object_id=stored_object.id,
-                word_timings=synthesis_result.words,
+                word_timings=word_timings,
             )
         )
     return artifacts
+
+
+async def _prepare_inserted_video_audio(
+    media: models.LectureSlideMediaStoredObject,
+    openai_client: openai.AsyncClient | openai.AsyncAzureOpenAI,
+) -> tuple[bytes, int, tuple[ElevenLabsSpeechWordTiming, ...], str]:
+    if not config.video_store:
+        raise RuntimeError("Video store not configured or unavailable.")
+    with tempfile.TemporaryDirectory(prefix="pingpong_ls_video_") as temp_dir:
+        suffix = Path(media.original_filename).suffix or (
+            ".mp4" if media.content_type == "video/mp4" else ".webm"
+        )
+        video_path = Path(temp_dir) / f"clip{suffix}"
+        with video_path.open("wb") as output:
+            async for chunk in config.video_store.store.stream_video(media.key):
+                output.write(chunk)
+        transcript = await transcribe_video_words(
+            str(video_path), openai_client, temp_dir=temp_dir
+        )
+        output_path = Path(temp_dir) / "audio.webm"
+        ffmpeg_path = shutil.which("ffmpeg")
+        if ffmpeg_path is None:
+            raise RuntimeError("ffmpeg is required for inserted lecture slide videos.")
+        command = [
+            ffmpeg_path,
+            "-v",
+            "error",
+            "-i",
+            str(video_path),
+            "-map",
+            "0:a:0",
+            "-c:a",
+            "libopus",
+            "-b:a",
+            "96k",
+        ]
+        if media.duration_ms is not None:
+            command.extend(["-af", "apad", "-t", f"{media.duration_ms / 1000:.3f}"])
+        command.append(str(output_path))
+        completed = await asyncio.to_thread(
+            subprocess.run,
+            command,
+            capture_output=True,
+            text=True,
+            timeout=FFMPEG_CONCAT_TIMEOUT_SECONDS,
+        )
+        if completed.returncode != 0 or not output_path.exists():
+            raise RuntimeError(
+                f"ffmpeg failed to extract inserted video audio: {completed.stderr.strip()}"
+            )
+        audio = output_path.read_bytes()
+    duration_ms = media.duration_ms or audio_duration_ms(
+        audio, LECTURE_SLIDE_CONTINUOUS_AUDIO_CONTENT_TYPE
+    )
+    word_timings = tuple(
+        ElevenLabsSpeechWordTiming(
+            word=word.word,
+            start_ms=word.start_offset_ms,
+            end_ms=word.end_offset_ms,
+        )
+        for word in transcript
+    )
+    narration_text = " ".join(word.word for word in transcript).strip()
+    return audio, duration_ms, word_timings, narration_text
 
 
 async def _get_elevenlabs_api_key(class_id: int) -> str:

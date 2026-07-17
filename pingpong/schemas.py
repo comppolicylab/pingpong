@@ -514,6 +514,13 @@ class LectureSlideNarrationStatus(StrEnum):
     FAILED = "failed"
 
 
+class LectureSlideContentKind(StrEnum):
+    SLIDE = "slide"
+    IMAGE = "image"
+    GIF = "gif"
+    VIDEO = "video"
+
+
 class LectureVideoProcessingStage(StrEnum):
     MANIFEST_GENERATION = "manifest_generation"
     NARRATION = "narration"
@@ -768,10 +775,19 @@ class InteractiveLessonInteractionResponse(BaseModel):
 class LectureSlidePageView(BaseModel):
     id: int
     position: int
+    content_kind: LectureSlideContentKind = LectureSlideContentKind.SLIDE
+    source_page_number: int | None = Field(None, ge=0)
     start_offset_ms: int | None = Field(None, ge=0)
     end_offset_ms: int | None = Field(None, ge=0)
     image_url: str | None = None
     image_stored_object_id: int | None = None
+    media_stored_object_id: int | None = None
+    media_url: str | None = None
+    media_content_type: str | None = None
+    media_filename: str | None = None
+    media_duration_ms: int | None = Field(None, ge=0)
+    media_width_px: int | None = Field(None, ge=1)
+    media_height_px: int | None = Field(None, ge=1)
     user_notes: str | None = None
     narration_text: str | None = None
 
@@ -1254,6 +1270,46 @@ class LectureSlidePageNotes(BaseModel):
     narration_text: str | None = Field(None, max_length=20000)
 
 
+class LectureSlideContentItemInput(BaseModel):
+    content_kind: LectureSlideContentKind
+    source_page_number: int | None = Field(None, ge=0)
+    media_stored_object_id: int | None = None
+    user_notes: str | None = Field(None, max_length=20000)
+    narration_text: str | None = Field(None, max_length=20000)
+
+    @model_validator(mode="after")
+    def validate_source(self):
+        if self.content_kind == LectureSlideContentKind.SLIDE:
+            if (
+                self.source_page_number is None
+                or self.media_stored_object_id is not None
+            ):
+                raise ValueError("PDF slide content requires source_page_number only.")
+        elif self.media_stored_object_id is None or self.source_page_number is not None:
+            raise ValueError(
+                "Inserted media content requires media_stored_object_id only."
+            )
+        if (
+            self.content_kind == LectureSlideContentKind.VIDEO
+            and (self.narration_text or "").strip()
+        ):
+            raise ValueError(
+                "Inserted videos use their original audio and cannot have generated narration."
+            )
+        return self
+
+
+class LectureSlideMediaUpload(BaseModel):
+    id: int
+    content_kind: LectureSlideContentKind
+    filename: str
+    content_type: str
+    size: int
+    duration_ms: int | None = Field(None, ge=0)
+    width_px: int | None = Field(None, ge=1)
+    height_px: int | None = Field(None, ge=1)
+
+
 LECTURE_SLIDE_MANUAL_QUESTIONS_CONTEXT_KEY = "manual_questions"
 
 
@@ -1653,6 +1709,7 @@ def lecture_video_validator_create_assistant(self):
             self.lecture_slide_deck_id is not None
             or self.lecture_slide_questions
             or self.lecture_slide_additional_context_file_ids
+            or self.lecture_slide_content_items
         ):
             raise ValueError(
                 "Lecture slide data cannot be set for assistants in Lecture Video mode."
@@ -1682,6 +1739,7 @@ def lecture_video_validator_create_assistant(self):
         or self.lecture_video_manifest is not None
         or self.lecture_slide_deck_id is not None
         or self.lecture_slide_page_notes
+        or self.lecture_slide_content_items
         or self.lecture_slide_additional_context_file_ids
         or self.lecture_slide_questions
         or self.voice_id is not None
@@ -1733,6 +1791,9 @@ def lecture_video_validator_update_assistant(self):
     lecture_slide_page_notes_present = (
         "lecture_slide_page_notes" in self.model_fields_set
     )
+    lecture_slide_content_items_present = (
+        "lecture_slide_content_items" in self.model_fields_set
+    )
     lecture_slide_additional_context_files_present = (
         "lecture_slide_additional_context_file_ids" in self.model_fields_set
     )
@@ -1758,6 +1819,7 @@ def lecture_video_validator_update_assistant(self):
         lecture_slide_deck_id_present
         or narration_prompt_present
         or lecture_slide_page_notes_present
+        or lecture_slide_content_items_present
         or lecture_slide_additional_context_files_present
         or lecture_slide_questions_present
         or regenerate_narration_requested_present
@@ -1939,6 +2001,9 @@ class CreateAssistant(BaseModel):
     lecture_video_manifest: LectureVideoManifest | None = None
     lecture_slide_deck_id: int | None = None
     lecture_slide_page_notes: list[LectureSlidePageNotes] = Field(default_factory=list)
+    lecture_slide_content_items: list[LectureSlideContentItemInput] = Field(
+        default_factory=list
+    )
     lecture_slide_additional_context_file_ids: list[int] = Field(default_factory=list)
     lecture_slide_questions: list[LectureSlideQuestionInput] = Field(
         default_factory=list
@@ -2032,6 +2097,7 @@ class UpdateAssistant(BaseModel):
     lecture_video_manifest: LectureVideoManifest | None = None
     lecture_slide_deck_id: int | None = None
     lecture_slide_page_notes: list[LectureSlidePageNotes] | None = None
+    lecture_slide_content_items: list[LectureSlideContentItemInput] | None = None
     lecture_slide_additional_context_file_ids: list[int] | None = None
     lecture_slide_questions: list[LectureSlideQuestionInput] | None = None
     voice_id: str | None = None

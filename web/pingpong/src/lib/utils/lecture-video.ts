@@ -15,3 +15,12 @@ export function mergeQuestionOptions(
 			option.post_answer_text ?? existingById.get(option.id)?.post_answer_text ?? null
 	}));
 }
+
+export function getKnowledgeCheckVisualOffsetMs(
+	currentTimeMs: number,
+	questionStopOffsetMs: number,
+	hasVisibleQuestionPrompt: boolean
+): number | null {
+	if (!hasVisibleQuestionPrompt || currentTimeMs < questionStopOffsetMs) return null;
+	return Math.max(0, questionStopOffsetMs - 1);
+}

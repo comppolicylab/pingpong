@@ -1,6 +1,11 @@
+import asyncio
 import contextlib
 import io
+import json
 import logging
+import shutil
+import subprocess
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
@@ -33,6 +38,14 @@ OPENAI_INPUT_FILE_MAX_BYTES = 50 * 1024 * 1024
 OPENAI_INPUT_FILE_MIME_TYPES = {
     file_type.mime_type.lower() for file_type in FILE_TYPES if file_type.input_file
 }
+LECTURE_SLIDE_MEDIA_TYPES = {
+    "image/png": (schemas.LectureSlideContentKind.IMAGE, ".png"),
+    "image/jpeg": (schemas.LectureSlideContentKind.IMAGE, ".jpg"),
+    "image/webp": (schemas.LectureSlideContentKind.IMAGE, ".webp"),
+    "image/gif": (schemas.LectureSlideContentKind.GIF, ".gif"),
+    "video/mp4": (schemas.LectureSlideContentKind.VIDEO, ".mp4"),
+    "video/webm": (schemas.LectureSlideContentKind.VIDEO, ".webm"),
+}
 
 
 @dataclass(frozen=True)
@@ -40,6 +53,8 @@ class LectureSlidePageUpdateResult:
     notes_changed: bool = False
     narration_changed: bool = False
     narration_changed_positions: frozenset[int] = frozenset()
+    structure_changed: bool = False
+    requires_narration_generation: bool = False
 
 
 @dataclass(frozen=True)
@@ -51,6 +66,184 @@ class LectureSlideQuestionUpdateResult:
 
 def generate_source_store_key() -> str:
     return f"ls_source_{uuid.uuid7()}.pdf"
+
+
+def generate_media_store_key(content_type: str) -> str:
+    return f"ls_media_{uuid.uuid7()}{LECTURE_SLIDE_MEDIA_TYPES[content_type][1]}"
+
+
+def lecture_slide_media_summary_from_model(
+    media: models.LectureSlideMediaStoredObject,
+) -> schemas.LectureSlideMediaUpload:
+    return schemas.LectureSlideMediaUpload(
+        id=media.id,
+        content_kind=media.content_kind,
+        filename=media.original_filename,
+        content_type=media.content_type,
+        size=media.content_length,
+        duration_ms=media.duration_ms,
+        width_px=media.width_px,
+        height_px=media.height_px,
+    )
+
+
+def _probe_media_file(
+    media_path: str,
+) -> tuple[int | None, int | None, int | None, bool]:
+    try:
+        completed = subprocess.run(
+            [
+                "ffprobe",
+                "-v",
+                "error",
+                "-show_entries",
+                "stream=codec_type,width,height:format=duration",
+                "-of",
+                "json",
+                media_path,
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except FileNotFoundError as exc:
+        raise RuntimeError(
+            "ffprobe is required for lecture slide media uploads."
+        ) from exc
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+        raise HTTPException(
+            status_code=400, detail="The uploaded media file is invalid."
+        ) from exc
+    payload = json.loads(completed.stdout)
+    streams = payload.get("streams") or []
+    video_stream = next(
+        (stream for stream in streams if stream.get("codec_type") == "video"), None
+    )
+    if video_stream is None:
+        raise HTTPException(
+            status_code=400, detail="The uploaded media has no visual stream."
+        )
+    raw_duration = (payload.get("format") or {}).get("duration")
+    try:
+        duration_ms = (
+            max(1, round(float(raw_duration) * 1000))
+            if raw_duration is not None
+            else None
+        )
+    except (TypeError, ValueError):
+        duration_ms = None
+    return (
+        int(video_stream["width"]) if video_stream.get("width") else None,
+        int(video_stream["height"]) if video_stream.get("height") else None,
+        duration_ms,
+        any(stream.get("codec_type") == "audio" for stream in streams),
+    )
+
+
+async def create_lecture_slide_media_upload(
+    session: AsyncSession,
+    *,
+    class_id: int,
+    uploader_id: int,
+    upload: UploadFile,
+) -> models.LectureSlideMediaStoredObject:
+    if not config.video_store:
+        raise HTTPException(
+            status_code=503, detail="Video store not configured or unavailable."
+        )
+    content_type = _normalize_content_type(upload.content_type)
+    media_type = LECTURE_SLIDE_MEDIA_TYPES.get(content_type)
+    if media_type is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Lecture slide media must be PNG, JPEG, WebP, GIF, MP4, or WebM.",
+        )
+    content_kind, suffix = media_type
+    upload_size = get_upload_size(upload)
+    max_size = (
+        config.upload.lecture_video_max_size
+        if content_kind == schemas.LectureSlideContentKind.VIDEO
+        else config.upload.private_file_max_size
+    )
+    if upload_size > max_size:
+        raise HTTPException(
+            status_code=413,
+            detail=f"File too large. Max size is {humanize.naturalsize(max_size)}.",
+        )
+    store_key = generate_media_store_key(content_type)
+    original_filename = get_original_filename(upload, store_key)
+    try:
+        with tempfile.NamedTemporaryFile(suffix=suffix) as media_file:
+            await upload.seek(0)
+            await asyncio.to_thread(shutil.copyfileobj, upload.file, media_file)
+            media_file.flush()
+            width_px, height_px, duration_ms, has_audio = await asyncio.to_thread(
+                _probe_media_file, media_file.name
+            )
+            if content_kind == schemas.LectureSlideContentKind.VIDEO:
+                if duration_ms is None:
+                    raise HTTPException(
+                        status_code=400, detail="Could not determine video duration."
+                    )
+                if not has_audio:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Inserted video clips must include an audio track.",
+                    )
+            media_file.seek(0)
+            await config.video_store.store.put(store_key, media_file, content_type)
+        return await models.LectureSlideMediaStoredObject.create(
+            session,
+            class_id=class_id,
+            uploader_id=uploader_id,
+            key=store_key,
+            original_filename=original_filename,
+            content_type=content_type,
+            content_length=upload_size,
+            content_kind=content_kind,
+            duration_ms=duration_ms,
+            width_px=width_px,
+            height_px=height_px,
+        )
+    except Exception:
+        with contextlib.suppress(Exception):
+            await config.video_store.store.delete(store_key)
+        raise
+
+
+async def delete_unattached_lecture_slide_media(
+    session: AsyncSession,
+    *,
+    media_id: int,
+    class_id: int,
+    uploader_id: int,
+) -> None:
+    media_rows = await models.LectureSlideMediaStoredObject.get_all_by_ids(
+        session, [media_id], for_update=True
+    )
+    media = media_rows[0] if media_rows else None
+    if media is None or media.class_id != class_id:
+        raise HTTPException(status_code=404, detail="Lecture slide media not found.")
+    if media.uploader_id != uploader_id:
+        raise HTTPException(
+            status_code=403, detail="Only the uploader can delete lecture slide media."
+        )
+    referenced_page_id = await session.scalar(
+        select(models.LectureSlidePage.id)
+        .where(models.LectureSlidePage.media_stored_object_id == media.id)
+        .limit(1)
+    )
+    if referenced_page_id is not None:
+        raise HTTPException(
+            status_code=409,
+            detail="Lecture slide media cannot be deleted while it is in a deck.",
+        )
+    await session.delete(media)
+    await session.flush()
+    if config.video_store:
+        with contextlib.suppress(Exception):
+            await config.video_store.store.delete(media.key)
 
 
 async def _read_source_pdf_bytes(key: str) -> bytes:
@@ -281,6 +474,7 @@ async def lecture_slide_summary_from_model(
         status=schemas.LectureSlideDeckStatus(deck.status),
         error_message=deck.error_message,
         slide_count=deck.slide_count,
+        source_page_count=deck.source_page_count,
         additional_context_files=[
             lecture_slide_context_file_summary_from_model(context_file)
             for context_file in sorted(
@@ -370,6 +564,7 @@ async def create_lecture_slide_deck(
             uploader_id=uploader_id,
             display_name=original_filename,
             slide_count=slide_count,
+            source_page_count=slide_count,
         )
         deck.source_stored_object = stored_object
         await upload_lecture_slide_source_to_openai(
@@ -621,8 +816,13 @@ async def apply_lecture_slide_page_notes(
                 detail=f"Slide note position {note.position} is outside this deck.",
             )
         user_notes = (note.user_notes or "").strip() or None
-        narration_text = (note.narration_text or "").strip() or None
         page = pages_by_position.get(note.position)
+        narration_text = (
+            page.narration_text
+            if page is not None
+            and page.content_kind == schemas.LectureSlideContentKind.VIDEO
+            else (note.narration_text or "").strip() or None
+        )
         if page is None:
             if user_notes is None and narration_text is None:
                 continue
@@ -663,6 +863,209 @@ async def apply_lecture_slide_page_notes(
         narration_changed=narration_changed,
         narration_changed_positions=frozenset(narration_changed_positions),
     )
+
+
+async def apply_lecture_slide_content_items(
+    session: AsyncSession,
+    deck: models.LectureSlideDeck,
+    items: Iterable[schemas.LectureSlideContentItemInput],
+    *,
+    uploader_id: int,
+) -> LectureSlidePageUpdateResult:
+    requested_items = list(items)
+    source_page_count = deck.source_page_count or deck.slide_count
+    requested_source_pages: list[int] = []
+    for item in requested_items:
+        if item.content_kind != schemas.LectureSlideContentKind.SLIDE:
+            continue
+        # LectureSlideContentItemInput validates this invariant, but spelling it
+        # out here also narrows the optional schema field for static type checking.
+        assert item.source_page_number is not None
+        requested_source_pages.append(item.source_page_number)
+    if sorted(requested_source_pages) != list(range(source_page_count)):
+        raise HTTPException(
+            status_code=400,
+            detail="Lecture slide content must include every PDF page exactly once.",
+        )
+
+    requested_media_ids = [
+        item.media_stored_object_id
+        for item in requested_items
+        if item.media_stored_object_id is not None
+    ]
+    if len(requested_media_ids) != len(set(requested_media_ids)):
+        raise HTTPException(
+            status_code=400,
+            detail="The same lecture slide media item cannot be inserted more than once.",
+        )
+    media_rows = await models.LectureSlideMediaStoredObject.get_all_by_ids(
+        session, requested_media_ids, for_update=True
+    )
+    media_by_id = {media.id: media for media in media_rows}
+    missing_media_ids = [id_ for id_ in requested_media_ids if id_ not in media_by_id]
+    if missing_media_ids:
+        raise HTTPException(
+            status_code=404, detail="Could not find inserted lecture slide media."
+        )
+
+    existing_pages = list(
+        await session.scalars(
+            select(models.LectureSlidePage)
+            .where(models.LectureSlidePage.lecture_slide_deck_id == deck.id)
+            .options(selectinload(models.LectureSlidePage.media_stored_object))
+            .options(selectinload(models.LectureSlidePage.narration))
+            .order_by(models.LectureSlidePage.position)
+            .with_for_update()
+        )
+    )
+    allowed_existing_media_ids = {
+        page.media_stored_object_id
+        for page in existing_pages
+        if page.media_stored_object_id is not None
+    }
+    for media in media_rows:
+        if media.class_id != deck.class_id:
+            raise HTTPException(
+                status_code=403,
+                detail="Inserted media must belong to the same class as the lecture slides.",
+            )
+        if (
+            media.uploader_id != uploader_id
+            and media.id not in allowed_existing_media_ids
+        ):
+            raise HTTPException(
+                status_code=403,
+                detail="Only the uploader can attach new lecture slide media.",
+            )
+
+    slide_pages = {
+        (
+            page.source_page_number
+            if page.source_page_number is not None
+            else page.position
+        ): page
+        for page in existing_pages
+        if page.content_kind == schemas.LectureSlideContentKind.SLIDE
+    }
+    media_pages = {
+        page.media_stored_object_id: page
+        for page in existing_pages
+        if page.media_stored_object_id is not None
+    }
+    desired_pages: list[models.LectureSlidePage] = []
+    notes_changed = False
+    narration_changed = False
+    narration_changed_positions: set[int] = set()
+    old_narration_ids: list[int] = []
+    structure_changed = False
+    requires_narration_generation = False
+
+    for position, item in enumerate(requested_items):
+        if item.content_kind == schemas.LectureSlideContentKind.SLIDE:
+            assert item.source_page_number is not None
+            page = slide_pages.get(item.source_page_number)
+            if page is None:
+                structure_changed = True
+                page = models.LectureSlidePage(
+                    lecture_slide_deck_id=deck.id,
+                    position=-(position + 1),
+                    content_kind=schemas.LectureSlideContentKind.SLIDE,
+                    source_page_number=item.source_page_number,
+                )
+                session.add(page)
+        else:
+            assert item.media_stored_object_id is not None
+            media = media_by_id[item.media_stored_object_id]
+            if media.content_kind != item.content_kind:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Inserted media type does not match the uploaded file.",
+                )
+            page = media_pages.get(media.id)
+            if page is None:
+                structure_changed = True
+                if media.content_kind in {
+                    schemas.LectureSlideContentKind.IMAGE,
+                    schemas.LectureSlideContentKind.GIF,
+                }:
+                    requires_narration_generation = True
+                page = models.LectureSlidePage(
+                    lecture_slide_deck_id=deck.id,
+                    position=-(position + 1),
+                    content_kind=media.content_kind,
+                    media_stored_object_id=media.id,
+                )
+                session.add(page)
+            page.media_stored_object = media
+
+        user_notes = (item.user_notes or "").strip() or None
+        narration_text = (
+            page.narration_text
+            if item.content_kind == schemas.LectureSlideContentKind.VIDEO
+            else (item.narration_text or "").strip() or None
+        )
+        if page.user_notes != user_notes:
+            page.user_notes = user_notes
+            notes_changed = True
+        if page.narration_text != narration_text:
+            if page.narration_id is not None:
+                old_narration_ids.append(page.narration_id)
+            page.narration_text = narration_text
+            page.narration_id = None
+            page.start_offset_ms = None
+            page.end_offset_ms = None
+            narration_changed = True
+            narration_changed_positions.add(position)
+        if page.position != position:
+            structure_changed = True
+        page.position = -(position + 1)
+        desired_pages.append(page)
+
+    desired_page_ids = {page.id for page in desired_pages if page.id is not None}
+    for page in existing_pages:
+        if page.id not in desired_page_ids:
+            structure_changed = True
+            if page.narration_id is not None:
+                old_narration_ids.append(page.narration_id)
+            await session.delete(page)
+            notes_changed = True
+            narration_changed = True
+
+    await session.flush()
+    for position, page in enumerate(desired_pages):
+        page.position = position
+        session.add(page)
+    deck.slide_count = len(desired_pages)
+    if notes_changed or narration_changed or structure_changed:
+        deck.continuous_narration_fingerprint = None
+        deck.continuous_narration_stored_object_id = None
+        deck.caption_stored_object_id = None
+        deck.total_duration_ms = None
+        session.add(deck)
+    await session.flush()
+    audio_keys = await _delete_lecture_slide_narrations_if_unused(
+        session, old_narration_ids
+    )
+    await _delete_lecture_slide_audio_keys_quietly(audio_keys)
+    return LectureSlidePageUpdateResult(
+        notes_changed=notes_changed,
+        narration_changed=narration_changed,
+        narration_changed_positions=frozenset(narration_changed_positions),
+        structure_changed=structure_changed,
+        requires_narration_generation=requires_narration_generation,
+    )
+
+
+def default_lecture_slide_content_items(
+    deck: models.LectureSlideDeck,
+) -> list[schemas.LectureSlideContentItemInput]:
+    return [
+        schemas.LectureSlideContentItemInput(
+            content_kind=schemas.LectureSlideContentKind.SLIDE,
+            source_page_number=source_page_number,
+        )
+        for source_page_number in range(deck.source_page_count or deck.slide_count)
+    ]
 
 
 def _text_needs_audio(text: str | None) -> bool:
@@ -1409,7 +1812,10 @@ async def clone_lecture_slide_deck_snapshot(
             models.LectureSlidePage(
                 lecture_slide_deck_id=cloned_deck.id,
                 position=page.position,
+                content_kind=page.content_kind,
+                source_page_number=page.source_page_number,
                 image_stored_object_id=page.image_stored_object_id,
+                media_stored_object_id=page.media_stored_object_id,
                 title=page.title,
                 extracted_text=page.extracted_text,
                 user_notes=page.user_notes,
@@ -1546,6 +1952,16 @@ async def delete_lecture_slide_deck_if_unused(
             )
         ).all()
     )
+    page_media_ids = list(
+        (
+            await session.scalars(
+                select(models.LectureSlidePage.media_stored_object_id).where(
+                    models.LectureSlidePage.lecture_slide_deck_id == deck_id,
+                    models.LectureSlidePage.media_stored_object_id.is_not(None),
+                )
+            )
+        ).all()
+    )
     question_narration_ids = list(
         (
             await session.scalars(
@@ -1606,6 +2022,12 @@ async def delete_lecture_slide_deck_if_unused(
             models.LectureSlidePage.lecture_slide_deck_id == deck_id
         )
     )
+    await session.flush()
+    unused_media = await models.LectureSlideMediaStoredObject.get_unreferenced_by_ids(
+        session, page_media_ids
+    )
+    for media in unused_media:
+        await session.delete(media)
     await session.execute(
         delete(models.LectureSlideDeck).where(models.LectureSlideDeck.id == deck_id)
     )
@@ -1615,4 +2037,8 @@ async def delete_lecture_slide_deck_if_unused(
     )
     await session.flush()
     await _delete_lecture_slide_audio_keys_quietly(audio_keys)
+    if config.video_store:
+        for media in unused_media:
+            with contextlib.suppress(Exception):
+                await config.video_store.store.delete(media.key)
     return additional_context_file_object_ids

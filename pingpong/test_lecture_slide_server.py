@@ -1,3 +1,4 @@
+import importlib
 import io
 from types import SimpleNamespace
 
@@ -135,6 +136,7 @@ async def test_create_lecture_slide_deck_uploads_source_pdf_to_openai(
             uploader_id=user.id,
             upload=upload,
         )
+        assert deck.source_page_count == 1
         await session.commit()
         source_id = deck.source_stored_object_id
 
@@ -948,6 +950,289 @@ async def test_apply_lecture_slide_page_notes_handles_unloaded_pages(db, institu
     assert page is not None
     assert page.user_notes == "New notes"
     assert page.narration_text == "Narrate this."
+
+
+@pytest.mark.asyncio
+@with_institution(11, "Test Institution")
+async def test_apply_lecture_slide_content_items_inserts_and_reorders_media(
+    db, institution
+):
+    async with db.async_session() as session:
+        class_ = models.Class(
+            id=1,
+            name="Test Class",
+            institution_id=institution.id,
+            api_key="test-key",
+        )
+        session.add(class_)
+        await session.flush()
+        source = await models.LectureSlideSourceStoredObject.create(
+            session,
+            key="mixed.pdf",
+            original_filename="mixed.pdf",
+            content_type="application/pdf",
+            content_length=128,
+        )
+        deck = await models.LectureSlideDeck.create(
+            session,
+            class_id=class_.id,
+            source_stored_object_id=source.id,
+            uploader_id=123,
+            display_name="mixed.pdf",
+            slide_count=2,
+            source_page_count=2,
+            voice_id="voice-test-id",
+        )
+        session.add_all(
+            [
+                models.LectureSlidePage(
+                    lecture_slide_deck_id=deck.id,
+                    position=0,
+                    source_page_number=0,
+                ),
+                models.LectureSlidePage(
+                    lecture_slide_deck_id=deck.id,
+                    position=1,
+                    source_page_number=1,
+                ),
+            ]
+        )
+        image = await models.LectureSlideMediaStoredObject.create(
+            session,
+            class_id=class_.id,
+            uploader_id=123,
+            key="insert.png",
+            original_filename="insert.png",
+            content_type="image/png",
+            content_length=100,
+            content_kind=schemas.LectureSlideContentKind.IMAGE,
+            duration_ms=None,
+            width_px=640,
+            height_px=480,
+        )
+        video = await models.LectureSlideMediaStoredObject.create(
+            session,
+            class_id=class_.id,
+            uploader_id=123,
+            key="insert.mp4",
+            original_filename="insert.mp4",
+            content_type="video/mp4",
+            content_length=1000,
+            content_kind=schemas.LectureSlideContentKind.VIDEO,
+            duration_ms=5000,
+            width_px=1280,
+            height_px=720,
+        )
+        await session.commit()
+
+        result = await lecture_slide_service.apply_lecture_slide_content_items(
+            session,
+            deck,
+            [
+                schemas.LectureSlideContentItemInput(
+                    content_kind="image", media_stored_object_id=image.id
+                ),
+                schemas.LectureSlideContentItemInput(
+                    content_kind="slide", source_page_number=0
+                ),
+                schemas.LectureSlideContentItemInput(
+                    content_kind="video", media_stored_object_id=video.id
+                ),
+                schemas.LectureSlideContentItemInput(
+                    content_kind="slide", source_page_number=1
+                ),
+            ],
+            uploader_id=123,
+        )
+        await session.commit()
+        deck_id = deck.id
+
+    assert result.structure_changed is True
+    assert result.requires_narration_generation is True
+    async with db.async_session() as session:
+        deck = await models.LectureSlideDeck.get_by_id_with_processing_context(
+            session, deck_id
+        )
+        assert deck is not None
+        assert deck.slide_count == 4
+        assert [page.content_kind.value for page in deck.pages] == [
+            "image",
+            "slide",
+            "video",
+            "slide",
+        ]
+        assert [page.source_page_number for page in deck.pages] == [None, 0, None, 1]
+        assert [page.media_stored_object_id for page in deck.pages] == [
+            image.id,
+            None,
+            video.id,
+            None,
+        ]
+
+
+@pytest.mark.asyncio
+@with_institution(11, "Test Institution")
+async def test_video_transcript_and_audio_survive_editor_payloads(db, institution):
+    async with db.async_session() as session:
+        class_ = models.Class(
+            id=1,
+            name="Test Class",
+            institution_id=institution.id,
+            api_key="test-key",
+        )
+        session.add(class_)
+        await session.flush()
+        source = await models.LectureSlideSourceStoredObject.create(
+            session,
+            key="mixed.pdf",
+            original_filename="mixed.pdf",
+            content_type="application/pdf",
+            content_length=128,
+        )
+        deck = await models.LectureSlideDeck.create(
+            session,
+            class_id=class_.id,
+            source_stored_object_id=source.id,
+            uploader_id=123,
+            display_name="mixed.pdf",
+            slide_count=2,
+            source_page_count=1,
+            voice_id="voice-test-id",
+        )
+        media = await models.LectureSlideMediaStoredObject.create(
+            session,
+            class_id=class_.id,
+            uploader_id=123,
+            key="insert.mp4",
+            original_filename="insert.mp4",
+            content_type="video/mp4",
+            content_length=1000,
+            content_kind=schemas.LectureSlideContentKind.VIDEO,
+            duration_ms=5000,
+            width_px=1280,
+            height_px=720,
+        )
+        stored_object = models.LectureSlideNarrationStoredObject(
+            key="insert.webm",
+            content_type="audio/webm",
+            content_length=500,
+            duration_ms=5000,
+        )
+        session.add(stored_object)
+        await session.flush()
+        narration = models.LectureSlideNarration(
+            stored_object_id=stored_object.id,
+            status=schemas.LectureSlideNarrationStatus.READY,
+        )
+        session.add(narration)
+        await session.flush()
+        session.add_all(
+            [
+                models.LectureSlidePage(
+                    lecture_slide_deck_id=deck.id,
+                    position=0,
+                    content_kind=schemas.LectureSlideContentKind.SLIDE,
+                    source_page_number=0,
+                ),
+                models.LectureSlidePage(
+                    lecture_slide_deck_id=deck.id,
+                    position=1,
+                    content_kind=schemas.LectureSlideContentKind.VIDEO,
+                    media_stored_object_id=media.id,
+                    narration_text="Original clip transcript.",
+                    narration_id=narration.id,
+                    start_offset_ms=1000,
+                    end_offset_ms=6000,
+                ),
+            ]
+        )
+        await session.commit()
+
+        content_result = await lecture_slide_service.apply_lecture_slide_content_items(
+            session,
+            deck,
+            [
+                schemas.LectureSlideContentItemInput(
+                    content_kind="slide", source_page_number=0
+                ),
+                schemas.LectureSlideContentItemInput(
+                    content_kind="video", media_stored_object_id=media.id
+                ),
+            ],
+            uploader_id=123,
+        )
+        notes_result = await lecture_slide_service.apply_lecture_slide_page_notes(
+            session,
+            deck,
+            [schemas.LectureSlidePageNotes(position=1, narration_text=None)],
+        )
+        await session.commit()
+        video_page = await session.scalar(
+            select(models.LectureSlidePage).where(
+                models.LectureSlidePage.lecture_slide_deck_id == deck.id,
+                models.LectureSlidePage.position == 1,
+            )
+        )
+
+    assert content_result.narration_changed is False
+    assert notes_result.narration_changed is False
+    assert video_page is not None
+    assert video_page.narration_text == "Original clip transcript."
+    assert video_page.narration_id == narration.id
+    assert video_page.start_offset_ms == 1000
+    assert video_page.end_offset_ms == 6000
+
+
+def test_ready_lecture_slide_media_update_starts_at_narration_text():
+    server_module = importlib.import_module("pingpong.server")
+    stage = server_module._lecture_slide_update_processing_stage(
+        needs_full_processing=False,
+        needs_narration_text=True,
+        needs_audio=True,
+        needs_questions=True,
+    )
+
+    assert stage == schemas.LectureSlideProcessingStage.NARRATION_TEXT
+
+
+@pytest.mark.asyncio
+async def test_lecture_slide_media_stream_supports_byte_ranges(config, monkeypatch):
+    requested_ranges: list[tuple[int | None, int | None]] = []
+
+    class Store:
+        async def stream_video_range(self, *, key, start=None, end=None):
+            assert key == "clip.mp4"
+            requested_ranges.append((start, end))
+            content = b"0123456789"
+            yield content[start : end + 1]
+
+    monkeypatch.setattr(config, "video_store", SimpleNamespace(store=Store()))
+    server_module = importlib.import_module("pingpong.server")
+
+    response = await server_module._stream_video_store_response(
+        key="clip.mp4",
+        content_length=10,
+        content_type="video/mp4",
+        range_header="bytes=2-5",
+        retrieval_error_detail="Could not stream clip.",
+    )
+    body = b"".join([chunk async for chunk in response.body_iterator])
+
+    assert requested_ranges == [(2, 5)]
+    assert response.status_code == 206
+    assert response.headers["accept-ranges"] == "bytes"
+    assert response.headers["content-range"] == "bytes 2-5/10"
+    assert response.headers["content-length"] == "4"
+    assert body == b"2345"
+
+
+def test_lecture_slide_video_content_rejects_generated_narration():
+    with pytest.raises(ValueError, match="original audio"):
+        schemas.LectureSlideContentItemInput(
+            content_kind="video",
+            media_stored_object_id=7,
+            narration_text="Generated voice-over",
+        )
 
 
 @pytest.mark.asyncio

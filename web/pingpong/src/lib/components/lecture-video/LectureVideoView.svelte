@@ -28,7 +28,7 @@
 		LectureVideoInteractionHistoryItem
 	} from '$lib/api';
 	import { hasVisiblePostAnswerFeedback } from '$lib/lectureVideoFeedback';
-	import { mergeQuestionOptions } from '$lib/utils/lecture-video';
+	import { getKnowledgeCheckVisualOffsetMs, mergeQuestionOptions } from '$lib/utils/lecture-video';
 	import { ArchiveOutline, InfoCircleOutline } from 'flowbite-svelte-icons';
 	import { LECTURE_NARRATION_VOLUME_SCALE } from './audio-levels';
 	import LectureVideoPlayer from './LectureVideoPlayer.svelte';
@@ -107,7 +107,7 @@
 		mediaKind?: 'video' | 'audio';
 		durationMsOverride?: number | null;
 		mediaAspectRatio?: number | null;
-		visual?: Snippet<[number]>;
+		visual?: Snippet<[number, boolean, HTMLMediaElement | null]>;
 	} = $props();
 	const dispatch = createEventDispatcher<{
 		sessionchange: LessonSession;
@@ -310,6 +310,12 @@
 			furthestOffsetMs >= durationMsOverride - COMPLETED_SEEK_TOLERANCE_MS
 	);
 	let visibleCurrentQuestion = $derived(hasQuestionPrompt ? currentQuestion : null);
+	let visualOffsetMsOverride = $derived.by(() => {
+		const question = currentQuestion;
+		return lessonMode === 'lecture_slides' && question
+			? getKnowledgeCheckVisualOffsetMs(currentTimeMs, question.stop_offset_ms, hasQuestionPrompt)
+			: null;
+	});
 	let questionReviewPlaybackAllowed = $derived(
 		hasQuestionPrompt && questionPlaybackLocked && currentQuestion != null && !playerDisabled
 	);
@@ -2236,6 +2242,7 @@
 								fullscreenTarget={lectureContainerElement}
 								{mediaKind}
 								{durationMsOverride}
+								{visualOffsetMsOverride}
 								{visual}
 								bind:mediaAspectRatio={playerMediaAspectRatio}
 								displayTitle={sessionState === 'awaiting_answer'

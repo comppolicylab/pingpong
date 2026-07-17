@@ -61,6 +61,63 @@ def _openai_not_found_error(file_id: str) -> openai.NotFoundError:
     )
 
 
+async def test_gif_narration_frame_timestamps_scale_with_duration():
+    short = lecture_slide_processing._gif_narration_frame_timestamps_ms(1_000)
+    medium = lecture_slide_processing._gif_narration_frame_timestamps_ms(3_000)
+    long = lecture_slide_processing._gif_narration_frame_timestamps_ms(5_000)
+    unknown = lecture_slide_processing._gif_narration_frame_timestamps_ms(None)
+
+    assert len(short) == 3
+    assert short[0] == 0
+    assert short[-1] == 900
+    assert len(medium) == 5
+    assert medium[0] == 0
+    assert medium[-1] == 2_900
+    assert len(long) == 8
+    assert long[0] == 0
+    assert long[-1] == 4_900
+    assert unknown == [0, 967, 1_933, 2_900]
+
+
+async def test_gif_media_inputs_include_ordered_frame_labels(config, monkeypatch):
+    class Store:
+        async def stream_video(self, key: str):
+            assert key == "animated.gif"
+            yield b"gif-bytes"
+
+    monkeypatch.setattr(config, "video_store", SimpleNamespace(store=Store()))
+
+    def extract_frames(gif_bytes: bytes, duration_ms: int | None):
+        assert gif_bytes == b"gif-bytes"
+        assert duration_ms == 5_000
+        return [(0, b"first"), (2_500, b"middle"), (4_999, b"last")]
+
+    monkeypatch.setattr(
+        lecture_slide_processing, "_extract_gif_narration_frames", extract_frames
+    )
+    media = SimpleNamespace(
+        key="animated.gif",
+        content_type="image/gif",
+        content_kind=schemas.LectureSlideContentKind.GIF,
+        duration_ms=5_000,
+    )
+
+    content = await lecture_slide_processing._lecture_slide_media_input_images(
+        [(7, media)]
+    )
+
+    assert [item["text"] for item in content[::2]] == [
+        "GIF at slide_position 7 — frame 1 of 3, t=0.00s:",
+        "GIF at slide_position 7 — frame 2 of 3, t=2.50s:",
+        "GIF at slide_position 7 — frame 3 of 3, t=5.00s:",
+    ]
+    assert [item["image_url"] for item in content[1::2]] == [
+        "data:image/png;base64,Zmlyc3Q=",
+        "data:image/png;base64,bWlkZGxl",
+        "data:image/png;base64,bGFzdA==",
+    ]
+
+
 def _deck(
     *,
     class_id: int = 1,
@@ -1074,6 +1131,20 @@ async def test_generate_narration_text_requires_exact_slide_count(
     assert "Emphasize the setup before introducing the result." in payload
     assert "Mention this is a common exam misconception." in payload
     assert "Narration prompt" not in payload
+
+
+async def test_generated_narration_model_requires_each_requested_position_once():
+    response_model = lecture_slide_processing._generated_slide_narration_set_model(
+        [0, 2]
+    )
+
+    with pytest.raises(ValueError, match="each requested slide position"):
+        response_model(
+            slides=[
+                {"slide_position": 0, "narration_text": "First."},
+                {"slide_position": 0, "narration_text": "Duplicate."},
+            ]
+        )
 
 
 async def test_generate_slide_manifest_uses_pdf_and_transcript_not_extracted_text(

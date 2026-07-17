@@ -1867,12 +1867,42 @@ export type InteractiveLessonInteractionRequest =
 export type LectureSlidePage = {
 	id: number;
 	position: number;
+	content_kind: LectureSlideContentKind;
+	source_page_number?: number | null;
 	start_offset_ms?: number | null;
 	end_offset_ms?: number | null;
 	image_url?: string | null;
 	image_stored_object_id?: number | null;
+	media_stored_object_id?: number | null;
+	media_url?: string | null;
+	media_content_type?: string | null;
+	media_filename?: string | null;
+	media_duration_ms?: number | null;
+	media_width_px?: number | null;
+	media_height_px?: number | null;
 	user_notes?: string | null;
 	narration_text?: string | null;
+};
+
+export type LectureSlideContentKind = 'slide' | 'image' | 'gif' | 'video';
+
+export type LectureSlideContentItemInput = {
+	content_kind: LectureSlideContentKind;
+	source_page_number?: number | null;
+	media_stored_object_id?: number | null;
+	user_notes?: string | null;
+	narration_text?: string | null;
+};
+
+export type LectureSlideMediaUpload = {
+	id: number;
+	content_kind: LectureSlideContentKind;
+	filename: string;
+	content_type: string;
+	size: number;
+	duration_ms?: number | null;
+	width_px?: number | null;
+	height_px?: number | null;
 };
 
 export type LectureSlideStatus = 'uploaded' | 'processing' | 'ready' | 'failed';
@@ -2254,6 +2284,33 @@ export const uploadAssistantLectureSlides = (
 ) => {
 	const url = fullPath(`class/${classId}/assistant/${assistantId}/lecture-slides/upload`);
 	return _doUpload<LectureSlideSummary>(url, file, opts);
+};
+
+export const uploadLectureSlideMedia = (
+	_f: Fetcher,
+	classId: number,
+	file: File,
+	assistantId?: number | null,
+	opts?: UploadOptions
+) => {
+	const url = fullPath(
+		assistantId
+			? `class/${classId}/assistant/${assistantId}/lecture-slides/media/upload`
+			: `class/${classId}/lecture-slides/media`
+	);
+	return _doUpload<LectureSlideMediaUpload>(url, file, opts);
+};
+
+export const deleteLectureSlideMedia = async (
+	f: Fetcher,
+	classId: number,
+	mediaId: number,
+	assistantId?: number | null
+) => {
+	const url = assistantId
+		? `class/${classId}/assistant/${assistantId}/lecture-slides/media/${mediaId}`
+		: `class/${classId}/lecture-slides/media/${mediaId}`;
+	return await DELETE<never, GenericStatus>(f, url);
 };
 
 /**
@@ -3010,6 +3067,7 @@ export type CreateAssistantRequest = {
 	lecture_video_manifest?: LectureVideoManifest | null;
 	lecture_slide_deck_id?: number | null;
 	lecture_slide_page_notes?: LectureSlidePageNotes[];
+	lecture_slide_content_items?: LectureSlideContentItemInput[];
 	lecture_slide_additional_context_file_ids?: number[];
 	lecture_slide_questions?: LectureSlideQuestionInput[];
 	voice_id?: string | null;
@@ -3081,6 +3139,7 @@ export type UpdateAssistantRequest = {
 	lecture_video_manifest?: LectureVideoManifest | null;
 	lecture_slide_deck_id?: number | null;
 	lecture_slide_page_notes?: LectureSlidePageNotes[] | null;
+	lecture_slide_content_items?: LectureSlideContentItemInput[] | null;
 	lecture_slide_additional_context_file_ids?: number[] | null;
 	lecture_slide_questions?: LectureSlideQuestionInput[] | null;
 	voice_id?: string | null;
@@ -3319,6 +3378,14 @@ export interface FileUploadFailure {
 		detail: string;
 	};
 }
+
+export const isFileUploadFailure = (value: unknown): value is FileUploadFailure => {
+	if (!value || typeof value !== 'object' || !('error' in value)) return false;
+	const error = value.error;
+	return (
+		!!error && typeof error === 'object' && 'detail' in error && typeof error.detail === 'string'
+	);
+};
 
 /**
  * Result of a file upload.
