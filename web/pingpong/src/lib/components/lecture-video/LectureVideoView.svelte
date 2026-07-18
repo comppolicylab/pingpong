@@ -28,7 +28,7 @@
 		LectureVideoInteractionHistoryItem
 	} from '$lib/api';
 	import { hasVisiblePostAnswerFeedback } from '$lib/lectureVideoFeedback';
-	import { getKnowledgeCheckVisualOffsetMs, mergeQuestionOptions } from '$lib/utils/lecture-video';
+	import { mergeQuestionOptions } from '$lib/utils/lecture-video';
 	import { ArchiveOutline, InfoCircleOutline } from 'flowbite-svelte-icons';
 	import { LECTURE_NARRATION_VOLUME_SCALE } from './audio-levels';
 	import LectureVideoPlayer from './LectureVideoPlayer.svelte';
@@ -107,7 +107,7 @@
 		mediaKind?: 'video' | 'audio';
 		durationMsOverride?: number | null;
 		mediaAspectRatio?: number | null;
-		visual?: Snippet<[number, boolean, HTMLMediaElement | null]>;
+		visual?: Snippet<[number, boolean, HTMLMediaElement | null, number | null]>;
 	} = $props();
 	const dispatch = createEventDispatcher<{
 		sessionchange: LessonSession;
@@ -208,6 +208,7 @@
 	let pendingNarrationChatAbort: (() => void) | null = null;
 	let currentNarrationAudio: HTMLAudioElement | null = null;
 	let narrationPlaybackGeneration = 0;
+	let questionBoundaryTimer: ReturnType<typeof setTimeout> | null = null;
 	let pendingVideoRetryCleanup: (() => void) | null = null;
 	let manualPlaybackTarget: 'video' | 'narration' | null = $state(null);
 	let answerSubmissionInFlight = $state(false);
@@ -310,10 +311,10 @@
 			furthestOffsetMs >= durationMsOverride - COMPLETED_SEEK_TOLERANCE_MS
 	);
 	let visibleCurrentQuestion = $derived(hasQuestionPrompt ? currentQuestion : null);
-	let visualOffsetMsOverride = $derived.by(() => {
-		const question = currentQuestion;
-		return lessonMode === 'lecture_slides' && question
-			? getKnowledgeCheckVisualOffsetMs(currentTimeMs, question.stop_offset_ms, hasQuestionPrompt)
+	let visualQuestionBoundaryMs = $derived.by(() => {
+		const question: LessonQuestionPrompt | null = currentQuestion;
+		return lessonMode === 'lecture_slides' && questionPlaybackLocked && question
+			? question.stop_offset_ms
 			: null;
 	});
 	let questionReviewPlaybackAllowed = $derived(
@@ -465,6 +466,11 @@
 		if (currentNarrationAudio) {
 			currentNarrationAudio.playbackRate = playbackRate;
 		}
+	});
+
+	$effect(() => {
+		scheduleQuestionBoundary();
+		return clearQuestionBoundaryTimer;
 	});
 
 	$effect(() => {
@@ -1510,6 +1516,112 @@
 		videoElement.currentTime = offsetMs / 1000;
 	}
 
+	function clearQuestionBoundaryTimer() {
+		if (questionBoundaryTimer == null) return;
+		clearTimeout(questionBoundaryTimer);
+		questionBoundaryTimer = null;
+	}
+
+	function stopQuestionReviewAtBoundary() {
+		if (!currentQuestion || !videoElement || !questionReviewPlaybackAllowed) return;
+
+		clearQuestionBoundaryTimer();
+		if (!videoElement.paused) {
+			questionPresentationVersion += 1;
+			suppressPauseInteraction = true;
+			videoElement.pause();
+		}
+		setVideoPosition(currentQuestion.stop_offset_ms);
+	}
+
+	function reachQuestionBoundary() {
+		if (questionReviewPlaybackAllowed) {
+			stopQuestionReviewAtBoundary();
+			return;
+		}
+		presentCurrentQuestion();
+	}
+
+	function presentCurrentQuestion() {
+		const question = currentQuestion;
+		if (
+			!question ||
+			!videoElement ||
+			sessionState !== 'playing' ||
+			playerDisabled ||
+			seekInteractionsInFlight > 0 ||
+			answeredQuestions.has(question.id) ||
+			questionPresentedForId === question.id
+		) {
+			return;
+		}
+
+		const rollbackState: QuestionPresentationRollbackState = {
+			questionId: question.id,
+			sessionState,
+			subtitleText,
+			offsetMs: question.stop_offset_ms,
+			shouldResumePlayback: !videoElement.paused
+		};
+
+		clearQuestionBoundaryTimer();
+		questionPlaybackLocked = true;
+		questionPresentationVersion += 1;
+		if (!videoElement.paused) {
+			suppressPauseInteraction = true;
+			videoElement.pause();
+		}
+		setVideoPosition(question.stop_offset_ms);
+		questionPresentedForId = question.id;
+		void beginIntroFlow(rollbackState);
+	}
+
+	function scheduleQuestionBoundary() {
+		clearQuestionBoundaryTimer();
+		const question = currentQuestion;
+		const presentingQuestion = sessionState === 'playing' && !questionPlaybackLocked;
+		if (
+			!question ||
+			!videoElement ||
+			paused ||
+			videoElement.paused ||
+			(!presentingQuestion && !questionReviewPlaybackAllowed) ||
+			playerDisabled ||
+			seekInteractionsInFlight > 0 ||
+			(presentingQuestion && answeredQuestions.has(question.id)) ||
+			(presentingQuestion && questionPresentedForId === question.id)
+		) {
+			return;
+		}
+
+		const remainingMediaMs = question.stop_offset_ms - videoElement.currentTime * 1000;
+		if (remainingMediaMs <= 0) {
+			reachQuestionBoundary();
+			return;
+		}
+
+		// `timeupdate` may arrive hundreds of milliseconds after the playhead crosses
+		// a checkpoint, so schedule against media time and retain `handleTimeUpdate`
+		// only as the fallback for delayed or throttled timers.
+		const rate = playbackRate > 0 ? playbackRate : 1;
+		questionBoundaryTimer = setTimeout(
+			() => {
+				questionBoundaryTimer = null;
+				const activeQuestion = currentQuestion;
+				if (!activeQuestion || !videoElement) return;
+
+				currentTimeMs = videoElement.currentTime * 1000;
+				const remainingMs = activeQuestion.stop_offset_ms - currentTimeMs;
+				if (remainingMs > 0) {
+					scheduleQuestionBoundary();
+					return;
+				}
+				reachQuestionBoundary();
+			},
+			Math.max(0, remainingMediaMs / rate)
+		);
+	}
+
 	async function rollbackQuestionPresentedFailure(
 		rollbackState: QuestionPresentationRollbackState
 	) {
@@ -1549,12 +1661,7 @@
 		if (seekInteractionsInFlight > 0) return;
 		if (questionReviewPlaybackAllowed && currentQuestion) {
 			if (currentTimeMs >= currentQuestion.stop_offset_ms) {
-				if (!videoElement?.paused) {
-					questionPresentationVersion += 1;
-				}
-				suppressPauseInteraction = true;
-				setVideoPosition(currentQuestion.stop_offset_ms);
-				videoElement?.pause();
+				stopQuestionReviewAtBoundary();
 			}
 			return;
 		}
@@ -1562,26 +1669,8 @@
 		if (sessionState !== 'playing' || !currentQuestion || playerDisabled) return;
 		if (answeredQuestions.has(currentQuestion.id)) return;
 
-		if (
-			currentTimeMs >= currentQuestion.stop_offset_ms &&
-			questionPresentedForId !== currentQuestion.id
-		) {
-			const rollbackState: QuestionPresentationRollbackState = {
-				questionId: currentQuestion.id,
-				sessionState,
-				subtitleText,
-				offsetMs: currentQuestion.stop_offset_ms,
-				shouldResumePlayback: !videoElement?.paused
-			};
-
-			// Auto-pause at question timestamp (suppress the pause interaction)
-			questionPlaybackLocked = true;
-			questionPresentationVersion += 1;
-			suppressPauseInteraction = true;
-			setVideoPosition(currentQuestion.stop_offset_ms);
-			videoElement?.pause();
-			questionPresentedForId = currentQuestion.id;
-			void beginIntroFlow(rollbackState);
+		if (currentTimeMs >= currentQuestion.stop_offset_ms) {
+			presentCurrentQuestion();
 		}
 	}
 
@@ -1609,9 +1698,7 @@
 		if (!videoElement) return;
 		if (questionReviewPlaybackAllowed) {
 			if (currentQuestion && currentTimeMs >= currentQuestion.stop_offset_ms) {
-				questionPresentationVersion += 1;
-				suppressPauseInteraction = true;
-				videoElement.pause();
+				stopQuestionReviewAtBoundary();
 			}
 			return;
 		}
@@ -2242,7 +2329,7 @@
 								fullscreenTarget={lectureContainerElement}
 								{mediaKind}
 								{durationMsOverride}
-								{visualOffsetMsOverride}
+								{visualQuestionBoundaryMs}
 								{visual}
 								bind:mediaAspectRatio={playerMediaAspectRatio}
 								displayTitle={sessionState === 'awaiting_answer'

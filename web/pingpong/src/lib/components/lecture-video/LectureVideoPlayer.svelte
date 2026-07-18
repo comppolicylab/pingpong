@@ -135,7 +135,7 @@
 		onmanualplayrequest,
 		mediaKind = 'video',
 		durationMsOverride = null,
-		visualOffsetMsOverride = null,
+		visualQuestionBoundaryMs = null,
 		visual = undefined,
 		fullscreenTarget = null
 	}: {
@@ -174,8 +174,8 @@
 		onmanualplayrequest?: () => void;
 		mediaKind?: 'video' | 'audio';
 		durationMsOverride?: number | null;
-		visualOffsetMsOverride?: number | null;
-		visual?: Snippet<[number, boolean, HTMLMediaElement | null]>;
+		visualQuestionBoundaryMs?: number | null;
+		visual?: Snippet<[number, boolean, HTMLMediaElement | null, number | null]>;
 		fullscreenTarget?: HTMLElement | null;
 	} = $props();
 
@@ -1623,7 +1623,7 @@
 			onkeydown={handleAudioSurfaceKeydown}
 		>
 			{#if visual}
-				{@render visual(visualOffsetMsOverride ?? currentTimeMs, paused, videoElement)}
+				{@render visual(currentTimeMs, paused, videoElement, visualQuestionBoundaryMs)}
 			{/if}
 		</div>
 		<audio
@@ -1931,7 +1931,7 @@
 							>
 								<div class="relative aspect-video overflow-hidden bg-slate-900">
 									{#if mediaKind === 'audio' && visual}
-										{@render visual(previewDisplayOffsetMs, true, null)}
+										{@render visual(previewDisplayOffsetMs, true, null, visualQuestionBoundaryMs)}
 									{:else}
 										<canvas
 											bind:this={snapshotCanvasElement}

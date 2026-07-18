@@ -81,6 +81,7 @@
 	import LectureVideoView, {
 		type LectureVideoViewHandle
 	} from '$lib/components/lecture-video/LectureVideoView.svelte';
+	import { getLectureSlidePageIndexAtOffset } from '$lib/utils/lecture-video';
 	import LectureSlideTimedGif from '$lib/components/lecture-video/LectureSlideTimedGif.svelte';
 	import LectureSlideTimedVideo from '$lib/components/lecture-video/LectureSlideTimedVideo.svelte';
 	import { LECTURE_CHAT_TTS_VOLUME_SCALE } from '$lib/components/lecture-video/audio-levels';
@@ -195,20 +196,18 @@
 		);
 		return lastEnd > 0 ? lastEnd : lectureSlidePages.length * 60_000;
 	})();
-	function lectureSlidePageAtOffset(offsetMs: number): api.LectureSlidePage | null {
+	function lectureSlidePageAtOffset(
+		offsetMs: number,
+		questionBoundaryMs: number | null = null
+	): api.LectureSlidePage | null {
 		if (lectureSlidePages.length === 0) return null;
-		const current = Math.max(0, Math.min(offsetMs, lectureSlideDurationMs));
-		return (
-			lectureSlidePages.find((page: api.LectureSlidePage, index: number) => {
-				const start =
-					page.start_offset_ms ??
-					Math.floor((index * lectureSlideDurationMs) / lectureSlidePages.length);
-				const end =
-					page.end_offset_ms ??
-					Math.floor(((index + 1) * lectureSlideDurationMs) / lectureSlidePages.length);
-				return current >= start && current < end;
-			}) ?? lectureSlidePages[lectureSlidePages.length - 1]
+		const pageIndex = getLectureSlidePageIndexAtOffset(
+			lectureSlidePages,
+			lectureSlideDurationMs,
+			offsetMs,
+			questionBoundaryMs
 		);
+		return lectureSlidePages[pageIndex] ?? null;
 	}
 	function lectureSlidePageImageUrl(page: api.LectureSlidePage): string | null {
 		return (
@@ -1848,8 +1847,8 @@
 						</button>
 					{/if}
 				{/snippet}
-				{#snippet visual(offsetMs, playbackPaused, timelineMedia)}
-					{@const visiblePage = lectureSlidePageAtOffset(offsetMs)}
+				{#snippet visual(offsetMs, playbackPaused, timelineMedia, questionBoundaryMs)}
+					{@const visiblePage = lectureSlidePageAtOffset(offsetMs, questionBoundaryMs)}
 					{@const visiblePageIndex = visiblePage ? lectureSlidePageIndex(visiblePage) : -1}
 					{@const slideImageUrl = visiblePage ? lectureSlidePageImageUrl(visiblePage) : null}
 					<div class="flex h-full w-full items-center justify-center bg-black">
