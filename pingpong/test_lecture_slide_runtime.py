@@ -11,7 +11,7 @@ import pingpong.lecture_slide_runtime as lecture_slide_runtime
 import pingpong.models as models
 import pingpong.schemas as schemas
 from pingpong.config import config
-from pingpong.testutil import with_institution
+from pingpong.testutil import with_authz, with_institution, with_user
 
 pytestmark = pytest.mark.asyncio
 server_module = importlib.import_module("pingpong.server")
@@ -425,6 +425,94 @@ async def test_process_lecture_slide_question_answer_and_resume(db, institution)
         schemas.InteractiveLessonInteractionEventType.ANSWER_SUBMITTED,
         schemas.InteractiveLessonInteractionEventType.LESSON_RESUMED,
     ]
+
+
+@with_user(123)
+@with_institution(11, "Test Institution")
+@with_authz(grants=[("user:123", "can_view", "thread:1")])
+async def test_lesson_history_endpoint_returns_lecture_slide_answers(
+    api, db, institution, valid_user_token
+):
+    async with db.async_session() as session:
+        class_, _, _, thread, questions = await _create_slide_runtime_fixture(
+            session, institution
+        )
+        thread.interaction_mode = schemas.InteractionMode.LECTURE_SLIDES
+        (
+            controller_session_id,
+            slide_session,
+        ) = await lecture_slide_runtime.acquire_control(
+            session,
+            thread.id,
+            actor_user_id=123,
+        )
+        question = questions[0]
+        correct_option = question.options[0]
+        option = models.LectureSlideQuestionOption(
+            question=question,
+            position=2,
+            option_text="A different example",
+            post_answer_text="Review the example and try again.",
+            continue_slide_position=1,
+            continue_slide_offset_ms=1_500,
+            continue_offset_ms=1_500,
+        )
+        session.add(option)
+        await session.flush()
+        slide_session = await lecture_slide_runtime.process_interaction(
+            session,
+            thread.id,
+            actor_user_id=123,
+            request=schemas.InteractiveLessonQuestionPresentedRequest(
+                type="question_presented",
+                controller_session_id=controller_session_id,
+                expected_state_version=slide_session.state_version,
+                idempotency_key="history-present",
+                question_id=question.id,
+                offset_ms=question.stop_offset_ms,
+            ),
+        )
+        await lecture_slide_runtime.process_interaction(
+            session,
+            thread.id,
+            actor_user_id=123,
+            request=schemas.InteractiveLessonAnswerSubmittedRequest(
+                type="answer_submitted",
+                controller_session_id=controller_session_id,
+                expected_state_version=slide_session.state_version,
+                idempotency_key="history-answer",
+                question_id=question.id,
+                option_id=option.id,
+            ),
+        )
+        await session.commit()
+        class_id = class_.id
+        thread_id = thread.id
+        question_id = question.id
+        option_id = option.id
+        correct_option_id = correct_option.id
+
+    response = api.get(
+        f"/api/v1/class/{class_id}/thread/{thread_id}/lesson/history",
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+
+    assert response.status_code == 200
+    history = response.json()["interactions"]
+    assert [item["event_type"] for item in history] == [
+        "question_presented",
+        "answer_submitted",
+    ]
+    assert history[0]["actor_name"] == "Me"
+    assert history[0]["question_id"] == question_id
+    assert history[0]["correct_option_id"] == correct_option_id
+    assert history[0]["question_options"][0]["post_answer_text"] is None
+    assert history[1]["option_id"] == option_id
+    assert history[1]["correct_option_id"] == correct_option_id
+    selected_option = next(
+        item for item in history[1]["question_options"] if item["id"] == option_id
+    )
+    assert selected_option["post_answer_text"] == "Review the example and try again."
 
 
 @with_institution(11, "Test Institution")

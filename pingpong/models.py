@@ -4265,6 +4265,33 @@ class LectureSlideInteraction(Base):
         return await session.scalar(stmt)
 
     @classmethod
+    async def list_question_history_by_thread_id(
+        cls, session: AsyncSession, thread_id: int
+    ) -> list["LectureSlideInteraction"]:
+        stmt = (
+            select(LectureSlideInteraction)
+            .where(
+                LectureSlideInteraction.thread_id == thread_id,
+                LectureSlideInteraction.event_type.in_(
+                    [
+                        schemas.InteractiveLessonInteractionEventType.QUESTION_PRESENTED,
+                        schemas.InteractiveLessonInteractionEventType.ANSWER_SUBMITTED,
+                    ]
+                ),
+            )
+            .options(
+                selectinload(LectureSlideInteraction.question).options(
+                    selectinload(LectureSlideQuestion.options),
+                    selectinload(LectureSlideQuestion.correct_option),
+                ),
+                selectinload(LectureSlideInteraction.option),
+                selectinload(LectureSlideInteraction.actor),
+            )
+            .order_by(asc(LectureSlideInteraction.event_index))
+        )
+        return list((await session.scalars(stmt)).all())
+
+    @classmethod
     async def get_next_event_index(cls, session: AsyncSession, thread_id: int) -> int:
         return (
             await session.scalar(
@@ -9428,6 +9455,20 @@ class Thread(Base):
                 Thread.class_id == int(class_id),
             )
             .options(*_thread_lecture_video_context_loaders())
+        )
+        return await session.scalar(stmt)
+
+    @classmethod
+    async def get_by_id_for_class_with_lecture_slide_context(
+        cls, session: AsyncSession, class_id: int, id_: int
+    ) -> "Thread | None":
+        stmt = (
+            select(Thread)
+            .where(
+                Thread.id == int(id_),
+                Thread.class_id == int(class_id),
+            )
+            .options(*_thread_lecture_slide_context_loaders())
         )
         return await session.scalar(stmt)
 

@@ -2123,9 +2123,9 @@ export type LectureVideoInteractionEventType =
 	| 'video_ended'
 	| 'session_completed';
 
-export type LectureVideoInteractionHistoryItem = {
+export type LessonInteractionHistoryItem = {
 	event_index: number;
-	event_type: LectureVideoInteractionEventType;
+	event_type: 'question_presented' | 'answer_submitted';
 	actor_name: string | null;
 	question_id: number | null;
 	question_text: string | null;
@@ -2139,8 +2139,8 @@ export type LectureVideoInteractionHistoryItem = {
 	created: string;
 };
 
-export type LectureVideoInteractionHistory = {
-	interactions: LectureVideoInteractionHistoryItem[];
+export type LessonInteractionHistory = {
+	interactions: LessonInteractionHistoryItem[];
 };
 
 export type DefaultAPIKey = {
@@ -2483,11 +2483,11 @@ export const postLectureVideoInteraction = async (
 };
 
 /**
- * Get the interaction history for a lecture video session.
+ * Get question and answer history for a video or slide lesson.
  */
-export const getLectureVideoHistory = async (f: Fetcher, classId: number, threadId: number) => {
-	const url = `class/${classId}/thread/${threadId}/lecture-video/history`;
-	return await GET<never, LectureVideoInteractionHistory>(f, url);
+export const getLessonHistory = async (f: Fetcher, classId: number, threadId: number) => {
+	const url = `class/${classId}/thread/${threadId}/lesson/history`;
+	return await GET<never, LessonInteractionHistory>(f, url);
 };
 
 /**

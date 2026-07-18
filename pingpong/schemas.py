@@ -1583,13 +1583,19 @@ class LectureVideoInteractionResponse(BaseModel):
     lecture_video_session: LectureVideoSession
 
 
-class LectureVideoInteractionHistoryItem(BaseModel):
+class LessonInteractionHistoryOption(BaseModel):
+    id: int
+    option_text: str
+    post_answer_text: str | None = None
+
+
+class LessonInteractionHistoryItem(BaseModel):
     event_index: int
-    event_type: LectureVideoInteractionEventType
+    event_type: Literal["question_presented", "answer_submitted"]
     actor_name: str | None = None
     question_id: int | None = None
     question_text: str | None = None
-    question_options: list[LectureVideoOptionPrompt] | None = None
+    question_options: list[LessonInteractionHistoryOption] | None = None
     correct_option_id: int | None = None
     option_id: int | None = None
     option_text: str | None = None
@@ -1599,8 +1605,8 @@ class LectureVideoInteractionHistoryItem(BaseModel):
     created: datetime
 
 
-class LectureVideoInteractionHistory(BaseModel):
-    interactions: list[LectureVideoInteractionHistoryItem]
+class LessonInteractionHistory(BaseModel):
+    interactions: list[LessonInteractionHistoryItem]
 
 
 class Assistant(BaseModel):

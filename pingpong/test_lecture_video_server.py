@@ -2669,7 +2669,7 @@ async def test_lecture_video_interactions_derive_continuation_and_history(
     assert stale_version.json()["detail"] == MSG_REFRESH_AND_RETRY
 
     history_response = api.get(
-        f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/history",
+        f"/api/v1/class/{class_.id}/thread/{thread_id}/lesson/history",
         headers={"Authorization": f"Bearer {valid_user_token}"},
     )
     assert history_response.status_code == 200
@@ -3062,7 +3062,7 @@ async def test_lecture_video_interactions_allow_participant_rewatch_after_comple
     assert message_texts.count(VISIBLE_ASSISTANT_REPLY_TEXT) == 2
 
     history_response = api.get(
-        f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/history",
+        f"/api/v1/class/{class_.id}/thread/{thread_id}/lesson/history",
         headers={"Authorization": f"Bearer {valid_user_token}"},
     )
     assert history_response.status_code == 200
@@ -3161,7 +3161,7 @@ async def test_lecture_video_interactions_record_seek_and_end_events(
     assert ended_session["state"] == "playing"
 
     history_response = api.get(
-        f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/history",
+        f"/api/v1/class/{class_.id}/thread/{thread_id}/lesson/history",
         headers={"Authorization": f"Bearer {valid_user_token}"},
     )
     assert history_response.status_code == 200
@@ -4255,7 +4255,7 @@ async def test_lecture_video_history_uses_pseudonyms_for_other_participants(
     assert other_answer.status_code == 200
 
     history_response = api.get(
-        f"/api/v1/class/{class_.id}/thread/{thread_id}/lecture-video/history",
+        f"/api/v1/class/{class_.id}/thread/{thread_id}/lesson/history",
         headers={"Authorization": f"Bearer {valid_user_token}"},
     )
     assert history_response.status_code == 200
