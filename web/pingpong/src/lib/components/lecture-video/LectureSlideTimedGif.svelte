@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
 	import { decompressFrames, parseGIF, type ParsedFrame } from 'gifuct-js';
-	import { gifFrameIndexAtTime, loopedGifTimeMs } from '$lib/utils/lecture-slide-gif';
+	import { clampedGifTimeMs, gifFrameIndexAtTime } from '$lib/utils/lecture-slide-gif';
 
 	type DecodedGif = {
 		frames: ParsedFrame[];
@@ -36,7 +36,6 @@
 	let patchCanvas: HTMLCanvasElement | null = null;
 	let patchContext: CanvasRenderingContext2D | null = null;
 	let renderedFrameIndex = -1;
-	let renderedLoopIndex = -1;
 	let restoreImageData: ImageData | null = null;
 
 	function resetRenderer(gif: DecodedGif) {
@@ -47,7 +46,6 @@
 		patchCanvas = document.createElement('canvas');
 		patchContext = patchCanvas.getContext('2d');
 		renderedFrameIndex = -1;
-		renderedLoopIndex = -1;
 		restoreImageData = null;
 
 		if (canvas) {
@@ -111,20 +109,13 @@
 
 	function renderAtOffset(gif: DecodedGif, displayOffsetMs: number) {
 		if (!canvas || !compositionCanvas || !compositionContext) return;
-		const elapsedMs = Math.max(0, displayOffsetMs - startOffsetMs);
-		const loopIndex = Math.floor(elapsedMs / gif.durationMs);
-		const gifTimeMs = loopedGifTimeMs(displayOffsetMs, startOffsetMs, gif.durationMs);
+		const gifTimeMs = clampedGifTimeMs(displayOffsetMs, startOffsetMs, gif.durationMs);
 		const targetFrameIndex = gifFrameIndexAtTime(gif.frameEndTimesMs, gifTimeMs);
 		if (targetFrameIndex < 0) return;
-		if (renderedLoopIndex === loopIndex && renderedFrameIndex === targetFrameIndex) return;
+		if (renderedFrameIndex === targetFrameIndex) return;
 
-		if (
-			renderedLoopIndex !== loopIndex ||
-			renderedFrameIndex < 0 ||
-			targetFrameIndex < renderedFrameIndex
-		) {
+		if (renderedFrameIndex < 0 || targetFrameIndex < renderedFrameIndex) {
 			resetComposition();
-			renderedLoopIndex = loopIndex;
 		}
 		for (let frameIndex = renderedFrameIndex + 1; frameIndex <= targetFrameIndex; frameIndex += 1) {
 			drawNextFrame(gif, frameIndex);
@@ -146,7 +137,6 @@
 		patchCanvas = null;
 		patchContext = null;
 		renderedFrameIndex = -1;
-		renderedLoopIndex = -1;
 		canvas?.getContext('2d')?.clearRect(0, 0, canvas.width, canvas.height);
 
 		void (async () => {

@@ -1,16 +1,20 @@
 import { describe, expect, it } from 'vitest';
 
-import { gifFrameIndexAtTime, loopedGifTimeMs } from './lecture-slide-gif';
+import { clampedGifTimeMs, gifFrameIndexAtTime } from './lecture-slide-gif';
 
-describe('loopedGifTimeMs', () => {
-	it('maps the same lecture offset to the same point in the GIF loop', () => {
-		expect(loopedGifTimeMs(65_000, 52_650, 4_940)).toBe(2_470);
-		expect(loopedGifTimeMs(65_000, 52_650, 4_940)).toBe(2_470);
+describe('clampedGifTimeMs', () => {
+	it('maps lecture offsets within the GIF to their elapsed time', () => {
+		expect(clampedGifTimeMs(55_120, 52_650, 4_940)).toBe(2_470);
 	});
 
 	it('starts at the first frame before and at the GIF start', () => {
-		expect(loopedGifTimeMs(52_649, 52_650, 4_940)).toBe(0);
-		expect(loopedGifTimeMs(52_650, 52_650, 4_940)).toBe(0);
+		expect(clampedGifTimeMs(52_649, 52_650, 4_940)).toBe(0);
+		expect(clampedGifTimeMs(52_650, 52_650, 4_940)).toBe(0);
+	});
+
+	it('holds at the end after the GIF has played once', () => {
+		expect(clampedGifTimeMs(57_590, 52_650, 4_940)).toBe(4_940);
+		expect(clampedGifTimeMs(65_000, 52_650, 4_940)).toBe(4_940);
 	});
 });
 

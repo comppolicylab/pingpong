@@ -1,11 +1,11 @@
-export function loopedGifTimeMs(
+export function clampedGifTimeMs(
 	offsetMs: number,
 	startOffsetMs: number,
 	durationMs: number
 ): number {
 	if (durationMs <= 0) return 0;
 	const elapsedMs = Math.max(0, offsetMs - startOffsetMs);
-	return elapsedMs % durationMs;
+	return Math.min(elapsedMs, durationMs);
 }
 
 export function gifFrameIndexAtTime(frameEndTimesMs: number[], timeMs: number): number {
