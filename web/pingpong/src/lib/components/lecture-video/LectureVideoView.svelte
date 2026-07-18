@@ -48,6 +48,7 @@
 	const CONTROL_RECOVERY_GRACE_MS = 1_000;
 	const ACTIVE_PAGE_RECOVERY_DEBOUNCE_MS = 150;
 	const COMPLETED_SEEK_TOLERANCE_MS = 2_000;
+	const QUESTION_BOUNDARY_STALL_RETRY_MS = 16;
 	const DEFAULT_MEDIA_ASPECT_RATIO = 16 / 9;
 	const PLAYER_FRAME_CHROME_WIDTH = '1.625rem';
 	type InitErrorAction = 'refresh' | null;
@@ -1604,6 +1605,10 @@
 		// a checkpoint, so schedule against media time and retain `handleTimeUpdate`
 		// only as the fallback for delayed or throttled timers.
 		const rate = playbackRate > 0 ? playbackRate : 1;
+		const minimumDelayMs =
+			videoElement.readyState < HTMLMediaElement.HAVE_FUTURE_DATA
+				? QUESTION_BOUNDARY_STALL_RETRY_MS
+				: 0;
 		questionBoundaryTimer = setTimeout(
 			() => {
 				questionBoundaryTimer = null;
@@ -1618,7 +1623,7 @@
 				}
 				reachQuestionBoundary();
 			},
-			Math.max(0, remainingMediaMs / rate)
+			Math.max(minimumDelayMs, remainingMediaMs / rate)
 		);
 	}
 
@@ -1653,6 +1658,7 @@
 	function handleCanPlay() {
 		applyPendingResumeOffset();
 		videoReadyForPlayback = true;
+		scheduleQuestionBoundary();
 	}
 
 	function handleTimeUpdate() {

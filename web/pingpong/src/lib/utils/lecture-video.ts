@@ -46,3 +46,18 @@ export function getLectureSlidePageIndexAtOffset(
 	const pageIndex = pageBounds.findIndex(({ start, end }) => current >= start && current < end);
 	return pageIndex >= 0 ? pageIndex : pages.length - 1;
 }
+
+export function getLectureSlideDisplayOffsetMs(
+	page: LectureSlideTimelinePage,
+	offsetMs: number,
+	questionBoundaryMs: number | null
+): number {
+	if (
+		questionBoundaryMs == null ||
+		offsetMs < questionBoundaryMs ||
+		page.end_offset_ms !== questionBoundaryMs
+	) {
+		return offsetMs;
+	}
+	return Math.max(page.start_offset_ms ?? 0, questionBoundaryMs - 1);
+}

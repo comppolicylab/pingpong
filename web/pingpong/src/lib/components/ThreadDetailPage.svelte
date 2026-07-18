@@ -81,7 +81,10 @@
 	import LectureVideoView, {
 		type LectureVideoViewHandle
 	} from '$lib/components/lecture-video/LectureVideoView.svelte';
-	import { getLectureSlidePageIndexAtOffset } from '$lib/utils/lecture-video';
+	import {
+		getLectureSlideDisplayOffsetMs,
+		getLectureSlidePageIndexAtOffset
+	} from '$lib/utils/lecture-video';
 	import LectureSlideTimedGif from '$lib/components/lecture-video/LectureSlideTimedGif.svelte';
 	import LectureSlideTimedVideo from '$lib/components/lecture-video/LectureSlideTimedVideo.svelte';
 	import { LECTURE_CHAT_TTS_VOLUME_SCALE } from '$lib/components/lecture-video/audio-levels';
@@ -1851,12 +1854,15 @@
 					{@const visiblePage = lectureSlidePageAtOffset(offsetMs, questionBoundaryMs)}
 					{@const visiblePageIndex = visiblePage ? lectureSlidePageIndex(visiblePage) : -1}
 					{@const slideImageUrl = visiblePage ? lectureSlidePageImageUrl(visiblePage) : null}
+					{@const displayOffsetMs = visiblePage
+						? getLectureSlideDisplayOffsetMs(visiblePage, offsetMs, questionBoundaryMs)
+						: offsetMs}
 					<div class="flex h-full w-full items-center justify-center bg-black">
 						{#if visiblePage}
 							{#if visiblePage.content_kind === 'video' && visiblePage.media_url && visiblePage.start_offset_ms != null && visiblePage.end_offset_ms != null}
 								<LectureSlideTimedVideo
 									src={api.withMediaAuthQuery(visiblePage.media_url)}
-									{offsetMs}
+									offsetMs={displayOffsetMs}
 									startOffsetMs={visiblePage.start_offset_ms}
 									endOffsetMs={visiblePage.end_offset_ms}
 									{timelineMedia}
@@ -1865,7 +1871,7 @@
 							{:else if visiblePage.content_kind === 'gif' && visiblePage.media_url && visiblePage.start_offset_ms != null && visiblePage.end_offset_ms != null}
 								<LectureSlideTimedGif
 									src={api.withMediaAuthQuery(visiblePage.media_url)}
-									{offsetMs}
+									offsetMs={displayOffsetMs}
 									startOffsetMs={visiblePage.start_offset_ms}
 									endOffsetMs={visiblePage.end_offset_ms}
 									{timelineMedia}

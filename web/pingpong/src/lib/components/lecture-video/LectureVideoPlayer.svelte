@@ -1931,7 +1931,7 @@
 							>
 								<div class="relative aspect-video overflow-hidden bg-slate-900">
 									{#if mediaKind === 'audio' && visual}
-										{@render visual(previewDisplayOffsetMs, true, null, visualQuestionBoundaryMs)}
+										{@render visual(previewDisplayOffsetMs, true, null, null)}
 									{:else}
 										<canvas
 											bind:this={snapshotCanvasElement}
