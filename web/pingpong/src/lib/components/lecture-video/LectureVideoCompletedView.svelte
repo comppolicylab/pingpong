@@ -1,7 +1,7 @@
 <script lang="ts">
-	import { getLectureVideoHistory, expandResponse } from '$lib/api';
+	import { getLessonHistory, expandResponse } from '$lib/api';
 	import { loading as globalLoading } from '$lib/stores/general';
-	import type { LectureVideoInteractionHistoryItem } from '$lib/api';
+	import type { LessonInteractionHistoryItem } from '$lib/api';
 	import { mergeQuestionOptions } from '$lib/utils/lecture-video';
 	import { Spinner } from 'flowbite-svelte';
 	import { ClipboardListOutline } from 'flowbite-svelte-icons';
@@ -25,14 +25,14 @@
 	}: {
 		classId: number;
 		threadId: number;
-		initialInteractions?: LectureVideoInteractionHistoryItem[] | null;
+		initialInteractions?: LessonInteractionHistoryItem[] | null;
 	} = $props();
 
 	let loading: boolean = $state(true);
-	let interactions: LectureVideoInteractionHistoryItem[] = $state([]);
+	let interactions: LessonInteractionHistoryItem[] = $state([]);
 	let errorMsg: string | null = $state(null);
 
-	function buildReviewQuestions(items: LectureVideoInteractionHistoryItem[]): ReviewQuestion[] {
+	function buildReviewQuestions(items: LessonInteractionHistoryItem[]): ReviewQuestion[] {
 		const questionMap = new SvelteMap<number, Omit<ReviewQuestion, 'position'>>();
 
 		for (const item of items) {
@@ -99,7 +99,7 @@
 			errorMsg = null;
 
 			try {
-				const response = await getLectureVideoHistory(fetch, classId, threadId);
+				const response = await getLessonHistory(fetch, classId, threadId);
 				const expanded = expandResponse(response);
 
 				if (cancelled) return;

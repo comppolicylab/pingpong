@@ -25,7 +25,7 @@
 		LectureVideoQuestionPrompt,
 		LectureVideoQuestionMarker,
 		LectureVideoContinuation,
-		LectureVideoInteractionHistoryItem
+		LessonInteractionHistoryItem
 	} from '$lib/api';
 	import { hasVisiblePostAnswerFeedback } from '$lib/lectureVideoFeedback';
 	import { getKnowledgeCheckVisualOffsetMs, mergeQuestionOptions } from '$lib/utils/lecture-video';
@@ -162,7 +162,7 @@
 	let isDesktopLayout: boolean = $state(false);
 	let activeMobilePanel: 'checks' | 'chat' | null = $state('checks');
 	let historyLoaded: boolean = $state(false);
-	let historyInteractions: LectureVideoInteractionHistoryItem[] = $state([]);
+	let historyInteractions: LessonInteractionHistoryItem[] = $state([]);
 	let initError = $state<InitErrorState | null>(null);
 	let sessionCleanupInFlight = false;
 	let inputMediaAspectRatio = $derived(
@@ -1299,14 +1299,11 @@
 	}
 
 	async function reconstructFromHistory(
-		prefetchedInteractions: LectureVideoInteractionHistoryItem[] | null = null
-	): Promise<LectureVideoInteractionHistoryItem[]> {
-		if (lessonMode === 'lecture_slides') {
-			return [];
-		}
+		prefetchedInteractions: LessonInteractionHistoryItem[] | null = null
+	): Promise<LessonInteractionHistoryItem[]> {
 		let interactions = prefetchedInteractions;
 		if (interactions == null) {
-			const historyResponse = await api.getLectureVideoHistory(fetch, classId, threadId);
+			const historyResponse = await api.getLessonHistory(fetch, classId, threadId);
 			const historyExpanded = api.expandResponse(historyResponse);
 			if (historyExpanded.error) {
 				setInitError(

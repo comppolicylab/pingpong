@@ -6101,39 +6101,44 @@ async def post_lecture_slide_interaction(
     return {"interactive_lesson_session": interactive_lesson_session}
 
 
-@v1.get(
-    "/class/{class_id}/thread/{thread_id}/lecture-video/history",
-    dependencies=[Depends(Authz("can_view", "thread:{thread_id}"))],
-    response_model=schemas.LectureVideoInteractionHistory,
-)
-async def get_lecture_video_history(
+async def _get_lesson_history(
     class_id: str,
     thread_id: str,
     request: StateRequest,
-):
-    thread = await models.Thread.get_by_id_for_class_with_lecture_video_context(
+) -> schemas.LessonInteractionHistory:
+    thread_summary = await models.Thread.get_by_id_for_class_with_interaction_mode(
         request.state["db"], int(class_id), int(thread_id)
     )
+    if thread_summary is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
+    if thread_summary.interaction_mode == schemas.InteractionMode.LECTURE_VIDEO:
+        thread = await models.Thread.get_by_id_for_class_with_lecture_video_context(
+            request.state["db"], int(class_id), int(thread_id)
+        )
+        interaction_model = models.LectureVideoInteraction
+        lesson_state = thread.lecture_video_state if thread is not None else None
+    elif thread_summary.interaction_mode == schemas.InteractionMode.LECTURE_SLIDES:
+        thread = await models.Thread.get_by_id_for_class_with_lecture_slide_context(
+            request.state["db"], int(class_id), int(thread_id)
+        )
+        interaction_model = models.LectureSlideInteraction
+        lesson_state = thread.lecture_slide_state if thread is not None else None
+    else:
+        raise HTTPException(status_code=404, detail="Lesson thread not found.")
+
     if thread is None:
         raise HTTPException(status_code=404, detail="Thread not found")
-    if thread.interaction_mode != schemas.InteractionMode.LECTURE_VIDEO:
-        raise HTTPException(status_code=404, detail="Lecture video thread not found.")
 
-    interactions = (
-        await models.LectureVideoInteraction.list_question_history_by_thread_id(
-            request.state["db"], thread.id
-        )
+    interactions = await interaction_model.list_question_history_by_thread_id(
+        request.state["db"], thread.id
     )
     reveal_all_correct_options = (
-        thread.lecture_video_state is not None
-        and thread.lecture_video_state.state
-        == schemas.LectureVideoSessionState.COMPLETED
+        lesson_state is not None and lesson_state.state.value == "completed"
     )
     answered_question_ids = {
         interaction.question_id
         for interaction in interactions
-        if interaction.event_type
-        == schemas.LectureVideoInteractionEventType.ANSWER_SUBMITTED
+        if interaction.event_type.value == "answer_submitted"
         and interaction.question_id is not None
     }
     user_id = request.state["session"].user.id
@@ -6147,11 +6152,11 @@ async def get_lecture_video_history(
     )[0]
     users = {user.id: user for user in thread.users}
 
-    return {
-        "interactions": [
-            schemas.LectureVideoInteractionHistoryItem(
+    return schemas.LessonInteractionHistory(
+        interactions=[
+            schemas.LessonInteractionHistoryItem(
                 event_index=interaction.event_index,
-                event_type=interaction.event_type,
+                event_type=interaction.event_type.value,
                 actor_name=display_name_for_thread_user(
                     thread,
                     interaction.actor_user_id,
@@ -6165,7 +6170,7 @@ async def get_lecture_video_history(
                 else None,
                 question_options=(
                     [
-                        schemas.LectureVideoOptionPrompt(
+                        schemas.LessonInteractionHistoryOption(
                             id=option.id,
                             option_text=option.option_text,
                             post_answer_text=(
@@ -6202,7 +6207,20 @@ async def get_lecture_video_history(
             )
             for interaction in interactions
         ]
-    }
+    )
+
+
+@v1.get(
+    "/class/{class_id}/thread/{thread_id}/lesson/history",
+    dependencies=[Depends(Authz("can_view", "thread:{thread_id}"))],
+    response_model=schemas.LessonInteractionHistory,
+)
+async def get_lesson_history(
+    class_id: str,
+    thread_id: str,
+    request: StateRequest,
+):
+    return await _get_lesson_history(class_id, thread_id, request)
 
 
 @v1.get(
