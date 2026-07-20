@@ -32,7 +32,7 @@ ENV BODY_SIZE_LIMIT=512000000
 RUN pnpm build -d
 
 ########## Final Nginx image ##########
-FROM nginx:1.31.2
+FROM nginx:1.31.3
 
 RUN apt-get update && apt-get install ca-certificates -y && update-ca-certificates
 
