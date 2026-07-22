@@ -1460,7 +1460,11 @@ async def _process_claimed_slide_run(run_id: int, lease_token: str) -> None:
                 if manifest is None:
                     return
                 await _persist_slide_manifest(
-                    run_id, lease_token, deck_id, manifest, transcript
+                    run_id,
+                    lease_token,
+                    deck_id,
+                    manifest,
+                    transcript,
                 )
                 if not await _ensure_run_can_continue(run_id, lease_token):
                     return
@@ -3242,6 +3246,55 @@ async def _generate_slide_manifest(
         transcript=transcript,
     )
 
+    async def _persist_partial_questions(
+        partial_manifest: GeneratedSlideManifest,
+    ) -> None:
+        async with config.db.driver.async_session() as partial_session:
+            run = await models.LectureSlideProcessingRun.get_by_id(
+                partial_session, run_id
+            )
+            partial_deck = (
+                await models.LectureSlideDeck.get_by_id_with_processing_context(
+                    partial_session, deck_id
+                )
+            )
+            if (
+                run is None
+                or partial_deck is None
+                or run.status != schemas.LectureSlideProcessingRunStatus.RUNNING
+                or run.lease_token != lease_token
+            ):
+                return
+
+            # Get instructor's edited questions that happened during slide generation
+            partial_manual_questions = _manual_slide_questions_from_context(
+                partial_deck.context_data
+            )
+            partial_manual_question_context_payload = (
+                partial_deck.context_data.get(
+                    schemas.LECTURE_SLIDE_MANUAL_QUESTIONS_CONTEXT_KEY
+                )
+                if partial_deck.context_data
+                else None
+            )
+
+            await _apply_manifest_questions(
+                partial_session,
+                partial_deck,
+                partial_manifest,
+                partial_manual_questions,
+            )
+
+            if partial_manual_question_context_payload is not None:
+                context_data = dict(partial_deck.context_data or {})
+                context_data[schemas.LECTURE_SLIDE_MANUAL_QUESTIONS_CONTEXT_KEY] = (
+                    partial_manual_question_context_payload
+                )
+                # The re-assignment triggers a SQLAlchemy change
+                partial_deck.context_data = context_data
+                partial_session.add(partial_deck)
+            await partial_session.commit()
+
     return await _await_with_run_lease_heartbeat(
         run_id,
         lease_token,
@@ -3258,6 +3311,7 @@ async def _generate_slide_manifest(
             additional_context_file_ids=additional_context_file_ids,
             content_map=content_map,
             media_content=media_content,
+            persist_partial_questions_callback=_persist_partial_questions,
         ),
     )
 
@@ -3465,6 +3519,9 @@ async def _generate_slide_manifest_with_optional_chunks(
     additional_context_file_ids: Sequence[str] = (),
     content_map: Sequence[dict[str, object]] = (),
     media_content: Sequence[dict[str, object]] = (),
+    persist_partial_questions_callback: (
+        Callable[[GeneratedSlideManifest], Coroutine[Any, Any, None]] | None
+    ) = None,
 ) -> GeneratedSlideManifest:
     if total_duration_ms is None:
         return await _generate_slide_manifest_for_window(
@@ -3544,6 +3601,11 @@ async def _generate_slide_manifest_with_optional_chunks(
                 media_content=media_content,
             )
         )
+        # Persist questions in chunk as soon as they're done
+        if persist_partial_questions_callback is not None:
+            await persist_partial_questions_callback(
+                _merge_slide_chunk_manifests(chunk_manifests)
+            )
     return _merge_slide_chunk_manifests(chunk_manifests)
 
 
@@ -3959,6 +4021,39 @@ def _generated_slide_question_to_input(
     )
 
 
+async def _apply_manifest_questions(
+    session: AsyncSession,
+    deck: models.LectureSlideDeck,
+    manifest: GeneratedSlideManifest,
+    manual_questions_snapshot: list[GeneratedSlideQuestion],
+) -> lecture_slide_service.LectureSlideQuestionUpdateResult:
+    """Merge manual and generated questions and store them for the deck. Overwrites
+    already generated questions because
+    ``lecture_slide_service.apply_lecture_slide_question_drafts`` expects an entire
+    list of questions every time.
+    """
+    manual_question_positions = {
+        question.slide_position for question in manual_questions_snapshot
+    }
+
+    manifest_questions = manual_questions_snapshot[:]
+    manifest_questions.extend(
+        question
+        for question in manifest.questions
+        if question.slide_position not in manual_question_positions
+    )
+    manifest_questions.sort(key=lambda item: item.slide_position)
+    question_inputs = [
+        _generated_slide_question_to_input(question) for question in manifest_questions
+    ]
+
+    return await lecture_slide_service.apply_lecture_slide_question_drafts(
+        session,
+        deck,
+        question_inputs,
+    )
+
+
 async def _persist_slide_manifest(
     run_id: int,
     lease_token: str,
@@ -3979,28 +4074,7 @@ async def _persist_slide_manifest(
         ):
             return
         manual_questions = _manual_slide_questions_from_context(deck.context_data)
-        manual_question_positions = {
-            question.slide_position for question in manual_questions
-        }
-        manifest_questions = [
-            *manual_questions,
-            *[
-                question
-                for question in manifest.questions
-                if question.slide_position not in manual_question_positions
-            ],
-        ]
-
-        await lecture_slide_service.apply_lecture_slide_question_drafts(
-            session,
-            deck,
-            [
-                _generated_slide_question_to_input(question)
-                for question in sorted(
-                    manifest_questions, key=lambda item: item.slide_position
-                )
-            ],
-        )
+        await _apply_manifest_questions(session, deck, manifest, manual_questions)
 
         try:
             context_v5 = _validated_slide_context_v5(manifest)

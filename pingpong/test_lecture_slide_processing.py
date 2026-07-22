@@ -1,9 +1,11 @@
 import asyncio
 import json
 import logging
+from collections.abc import Callable, Coroutine
 from datetime import timedelta
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import httpx
 import openai
@@ -3911,3 +3913,300 @@ async def test_persist_slide_manifest_defers_untimed_manual_question_rows(db):
         # ...and remains untimed (NULL offsets) for the re-timer to fill.
         assert deck.questions[0].slide_offset_ms is None
         assert deck.questions[0].stop_offset_ms is None
+
+
+async def _setup_deck_for_chunked_manifest(
+    db,
+) -> tuple[int, list[schemas.LectureVideoManifestWordV3]]:
+    await _create_class_and_deck(db, slide_count=2)
+    async with db.async_session() as session:
+        run = models.LectureSlideProcessingRun(
+            lecture_slide_deck_id=1,
+            lecture_slide_deck_id_snapshot=1,
+            class_id=1,
+            stage=schemas.LectureSlideProcessingStage.MANIFEST_GENERATION,
+            attempt_number=1,
+            status=schemas.LectureSlideProcessingRunStatus.RUNNING,
+            lease_token="lease",
+        )
+        session.add_all(
+            [
+                models.LectureSlidePage(
+                    lecture_slide_deck_id=1,
+                    position=0,
+                    start_offset_ms=0,
+                    end_offset_ms=500,
+                ),
+                models.LectureSlidePage(
+                    lecture_slide_deck_id=1,
+                    position=1,
+                    start_offset_ms=500,
+                    end_offset_ms=1200,
+                ),
+                run,
+            ]
+        )
+        await session.flush()
+        run_id = run.id
+        await session.commit()
+    transcript = [
+        schemas.LectureVideoManifestWordV3(
+            id="w0", word="hello", start_offset_ms=0, end_offset_ms=100
+        )
+    ]
+    return run_id, transcript
+
+
+def _chunk_manifest(idx: int) -> lecture_slide_processing.GeneratedSlideManifest:
+    return lecture_slide_processing.GeneratedSlideManifest(
+        **_generated_slide_context_kwargs(),
+        questions=[
+            lecture_slide_processing.GeneratedSlideQuestion(
+                slide_position=idx,
+                question_text=f"Question {idx}?",
+                options=[
+                    lecture_slide_processing.GeneratedSlideChoice(
+                        option_text="Correct", correct=True
+                    ),
+                    lecture_slide_processing.GeneratedSlideChoice(
+                        option_text="Incorrect", correct=False
+                    ),
+                ],
+            )
+        ],
+    )
+
+
+def _patch_chunked_generation(
+    monkeypatch,
+    *,
+    on_chunk: Callable[[int], Coroutine[Any, Any, None]] | None = None,
+) -> None:
+    """Patch manifest generation into two chunks, awaiting ``on_chunk(idx)`` (if
+    given) just before each chunk's questions are returned."""
+    state = {"count": 0}
+
+    async def fake_generate_chunks(**kwargs) -> list:
+        idx = state["count"]
+        state["count"] += 1
+        if on_chunk is not None:
+            await on_chunk(idx)
+        return [_chunk_manifest(idx)]
+
+    monkeypatch.setattr(
+        lecture_slide_processing,
+        "_slide_manifest_total_duration_ms",
+        lambda *args, **kwargs: 1200,
+    )
+    monkeypatch.setattr(
+        lecture_slide_processing,
+        "_plan_slide_manifest_generation_chunks",
+        lambda *args, **kwargs: [SimpleNamespace(), SimpleNamespace()],
+    )
+    monkeypatch.setattr(
+        lecture_slide_processing,
+        "_generate_slide_manifest_chunks",
+        fake_generate_chunks,
+    )
+
+
+async def _run_generate_slide_manifest(
+    run_id: int, transcript: list[schemas.LectureVideoManifestWordV3]
+) -> lecture_slide_processing.GeneratedSlideManifest | None:
+    return await lecture_slide_processing._generate_slide_manifest(
+        run_id, "lease", 1, "file-x", transcript, "model", SimpleNamespace()
+    )
+
+
+async def test_generate_slide_manifest_persists_questions_per_chunk(db, monkeypatch):
+    run_id, transcript = await _setup_deck_for_chunked_manifest(db)
+    observed = {}
+
+    async def on_chunk(idx: int) -> None:
+        if idx != 1:
+            return
+        async with db.async_session() as session:
+            deck = await models.LectureSlideDeck.get_by_id_with_processing_context(
+                session, 1
+            )
+            assert deck is not None
+            observed["mid_count"] = len(deck.questions)
+
+    _patch_chunked_generation(monkeypatch, on_chunk=on_chunk)
+
+    manifest = await _run_generate_slide_manifest(run_id, transcript)
+
+    assert manifest is not None
+    assert [question.slide_position for question in manifest.questions] == [0, 1]
+    # Chunk 0's question was committed before chunk 1 finished generating.
+    assert observed["mid_count"] == 1
+    async with db.async_session() as session:
+        deck = await models.LectureSlideDeck.get_by_id_with_processing_context(
+            session, 1
+        )
+        assert deck is not None
+        # Both chunks' questions are persisted; the earlier one was not deleted.
+        assert sorted(question.question_text for question in deck.questions) == [
+            "Question 0?",
+            "Question 1?",
+        ]
+        assert all(question.id is not None for question in deck.questions)
+
+
+async def test_generate_slide_manifest_preserves_manual_question_across_chunks(
+    db, monkeypatch
+):
+    run_id, transcript = await _setup_deck_for_chunked_manifest(db)
+    manual_question = {
+        "slide_position": 0,
+        "question_text": "Instructor question?",
+        "intro_text": "Answer this instructor question.",
+        "options": [
+            {
+                "option_text": "Instructor correct",
+                "post_answer_text": "",
+                "correct": True,
+            },
+            {
+                "option_text": "Instructor incorrect",
+                "post_answer_text": "",
+                "correct": False,
+            },
+        ],
+    }
+    async with db.async_session() as session:
+        deck = await models.LectureSlideDeck.get_by_id_with_processing_context(
+            session, 1
+        )
+        assert deck is not None
+        deck.context_data = {
+            schemas.LECTURE_SLIDE_MANUAL_QUESTIONS_CONTEXT_KEY: [manual_question]
+        }
+        session.add(deck)
+        await session.commit()
+
+    _patch_chunked_generation(monkeypatch)
+
+    manifest = await _run_generate_slide_manifest(run_id, transcript)
+    assert manifest is not None
+
+    async with db.async_session() as session:
+        deck = await models.LectureSlideDeck.get_by_id_with_processing_context(
+            session, 1
+        )
+        assert deck is not None
+        questions_by_slide = {
+            question.slide_position: question for question in deck.questions
+        }
+        assert questions_by_slide[0].question_text == "Instructor question?"
+        assert questions_by_slide[1].question_text == "Question 1?"
+
+
+async def test_generate_slide_manifest_honors_manual_question_edited_mid_run(
+    db, monkeypatch
+):
+    run_id, transcript = await _setup_deck_for_chunked_manifest(db)
+
+    def _manual(text: str) -> dict:
+        return {
+            "slide_position": 0,
+            "question_text": text,
+            "intro_text": "Answer this.",
+            "options": [
+                {"option_text": "Correct", "post_answer_text": "", "correct": True},
+                {"option_text": "Wrong", "post_answer_text": "", "correct": False},
+            ],
+        }
+
+    async def _set_manual(text: str) -> None:
+        async with db.async_session() as session:
+            deck = await models.LectureSlideDeck.get_by_id_with_processing_context(
+                session, 1
+            )
+            assert deck is not None
+            deck.context_data = {
+                schemas.LECTURE_SLIDE_MANUAL_QUESTIONS_CONTEXT_KEY: [_manual(text)]
+            }
+            session.add(deck)
+            await session.commit()
+
+    await _set_manual("Instructor question?")
+
+    async def on_chunk(idx: int) -> None:
+        # instructor makes edits
+        if idx == 1:
+            await _set_manual("Edited instructor question?")
+
+    _patch_chunked_generation(monkeypatch, on_chunk=on_chunk)
+
+    assert await _run_generate_slide_manifest(run_id, transcript) is not None
+
+    async with db.async_session() as session:
+        deck = await models.LectureSlideDeck.get_by_id_with_processing_context(
+            session, 1
+        )
+        assert deck is not None
+        questions_by_slide = {
+            question.slide_position: question for question in deck.questions
+        }
+        assert questions_by_slide[0].question_text == "Edited instructor question?"
+        assert questions_by_slide[1].question_text == "Question 1?"
+
+
+async def test_generate_slide_manifest_single_window_does_not_persist(db, monkeypatch):
+    run_id, transcript = await _setup_deck_for_chunked_manifest(db)
+
+    async def fake_for_window(**kwargs):
+        return _chunk_manifest(0)
+
+    monkeypatch.setattr(
+        lecture_slide_processing,
+        "_slide_manifest_total_duration_ms",
+        lambda *args, **kwargs: None,
+    )
+    monkeypatch.setattr(
+        lecture_slide_processing, "_generate_slide_manifest_for_window", fake_for_window
+    )
+
+    manifest = await _run_generate_slide_manifest(run_id, transcript)
+
+    assert manifest is not None
+    assert len(manifest.questions) == 1
+    async with db.async_session() as session:
+        deck = await models.LectureSlideDeck.get_by_id_with_processing_context(
+            session, 1
+        )
+        assert deck is not None
+        # Short decks generate in a single window: nothing is persisted until the
+        # final _persist_slide_manifest runs.
+        assert deck.questions == []
+
+
+async def test_generate_slide_manifest_partial_persist_stops_when_run_cancelled(
+    db, monkeypatch
+):
+    run_id, transcript = await _setup_deck_for_chunked_manifest(db)
+
+    async def on_chunk(idx: int) -> None:
+        if idx != 1:
+            return
+        # Simulate the run being cancelled/superseded mid-generation.
+        async with db.async_session() as session:
+            run = await models.LectureSlideProcessingRun.get_by_id(session, run_id)
+            assert run is not None
+            run.status = schemas.LectureSlideProcessingRunStatus.CANCELLED
+            await session.commit()
+
+    _patch_chunked_generation(monkeypatch, on_chunk=on_chunk)
+
+    await _run_generate_slide_manifest(run_id, transcript)
+
+    async with db.async_session() as session:
+        deck = await models.LectureSlideDeck.get_by_id_with_processing_context(
+            session, 1
+        )
+        assert deck is not None
+        # Chunk 0 committed while RUNNING; chunk 1's guard blocked its commit.
+        assert [question.question_text for question in deck.questions] == [
+            "Question 0?"
+        ]
