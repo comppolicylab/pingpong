@@ -2216,7 +2216,7 @@
 												</button>
 												<input
 													type="range"
-													class="h-1.5 min-w-0 grow cursor-pointer appearance-none rounded-full bg-white/25 [&::-moz-range-thumb]:size-3 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:bg-white [&::-moz-range-thumb]:transition-transform [&::-moz-range-thumb]:duration-150 [&::-moz-range-thumb:hover]:scale-110 [&::-moz-range-thumb:active]:scale-125 [&::-webkit-slider-thumb]:size-3 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:transition-transform [&::-webkit-slider-thumb]:duration-150 [&::-webkit-slider-thumb:hover]:scale-110 [&::-webkit-slider-thumb:active]:scale-125"
+													class="h-1.5 min-w-0 grow cursor-pointer appearance-none rounded-full bg-white/25 [&::-moz-range-thumb]:size-3 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:bg-white [&::-moz-range-thumb]:transition-transform [&::-moz-range-thumb]:duration-150 [&::-moz-range-thumb:active]:scale-125 [&::-moz-range-thumb:hover]:scale-110 [&::-webkit-slider-thumb]:size-3 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:transition-transform [&::-webkit-slider-thumb]:duration-150 [&::-webkit-slider-thumb:active]:scale-125 [&::-webkit-slider-thumb:hover]:scale-110"
 													min={playbackRatePolicy.min}
 													max={playbackRatePolicy.max}
 													step={playbackRatePolicy.step}

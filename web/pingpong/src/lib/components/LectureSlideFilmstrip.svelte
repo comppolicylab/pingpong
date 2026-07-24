@@ -176,7 +176,7 @@
 
 <div class="sr-only" aria-live="polite">{reorderAnnouncement}</div>
 
-<div class="flex items-stretch gap-1.5 overflow-x-auto px-1 pb-2 pt-2">
+<div class="flex items-stretch gap-1.5 overflow-x-auto px-1 pt-2 pb-2">
 	{#if onInsertMedia}
 		<LectureSlideAddMenu
 			insertIndex={0}
@@ -249,7 +249,7 @@
 					</div>
 				{/if}
 				<span
-					class="absolute left-1.5 top-1.5 rounded-md bg-gray-900/85 px-1.5 py-0.5 text-[10px] font-semibold leading-none text-white backdrop-blur-sm"
+					class="absolute top-1.5 left-1.5 rounded-md bg-gray-900/85 px-1.5 py-0.5 text-[10px] leading-none font-semibold text-white backdrop-blur-sm"
 				>
 					{pageIndex + 1}
 				</span>
@@ -281,7 +281,7 @@
 					: 'border-gray-300 bg-gray-50 text-gray-700 hover:border-gray-600 hover:bg-white hover:shadow-sm'}"
 			>
 				<QuestionCircleOutline class="h-5 w-5" />
-				<span class="text-[10px] font-semibold leading-none">Q{number}</span>
+				<span class="text-[10px] leading-none font-semibold">Q{number}</span>
 			</button>
 		{/each}
 
