@@ -4483,7 +4483,7 @@
 									type="button"
 									color="red"
 									size="xs"
-									class="absolute right-3 top-3"
+									class="absolute top-3 right-3"
 									onclick={() => removeLectureSlideMedia(selectedLectureSlidePage?.position ?? 0)}
 								>
 									Remove media
@@ -4542,7 +4542,7 @@
 						<div class="min-h-0 flex-1 overflow-y-auto">
 							<div class="space-y-5 px-5 py-5">
 								<div class="space-y-2.5">
-									<div class="text-[11px] font-semibold uppercase tracking-wide text-gray-500">
+									<div class="text-[11px] font-semibold tracking-wide text-gray-500 uppercase">
 										How should this question be handled?
 									</div>
 									<div class="grid gap-2 sm:grid-cols-3">
@@ -4579,7 +4579,7 @@
 												</span>
 												{#if isActive}
 													<span
-														class="absolute right-2 top-2 flex h-4 w-4 items-center justify-center rounded-full bg-gray-900 text-white"
+														class="absolute top-2 right-2 flex h-4 w-4 items-center justify-center rounded-full bg-gray-900 text-white"
 													>
 														<CheckOutline class="h-2.5 w-2.5" />
 													</span>
@@ -4611,7 +4611,7 @@
 									<div class="space-y-1.5">
 										<Label
 											for="slide_question_text"
-											class="text-xs font-semibold uppercase text-gray-500"
+											class="text-xs font-semibold text-gray-500 uppercase"
 										>
 											Question prompt{selectedLectureSlideQuestion.mode === 'partial'
 												? ' hint'
@@ -4637,7 +4637,7 @@
 									<div class="space-y-1.5">
 										<Label
 											for="slide_question_intro_text"
-											class="text-xs font-semibold uppercase text-gray-500"
+											class="text-xs font-semibold text-gray-500 uppercase"
 										>
 											Spoken intro{selectedLectureSlideQuestion.mode === 'partial' ? ' hint' : ''}
 										</Label>
@@ -4664,7 +4664,7 @@
 									<div class="space-y-2.5">
 										<div class="flex items-end justify-between">
 											<div>
-												<div class="text-xs font-semibold uppercase text-gray-500">
+												<div class="text-xs font-semibold text-gray-500 uppercase">
 													Answers{selectedLectureSlideQuestion.mode === 'partial' ? ' / hints' : ''}
 												</div>
 												<div class="text-xs text-gray-400">
@@ -4696,7 +4696,7 @@
 													>
 														{#if option.correct}
 															<span
-																class="absolute -top-2 left-9 rounded bg-gray-900 px-2 py-0.5 text-[10px] font-semibold leading-none text-white"
+																class="absolute -top-2 left-9 rounded bg-gray-900 px-2 py-0.5 text-[10px] leading-none font-semibold text-white"
 															>
 																Correct
 															</span>
@@ -4725,7 +4725,7 @@
 																	value={option.option_text}
 																	placeholder={`Answer option ${optionIndex + 1}`}
 																	disabled={preventEdits}
-																	class="w-full border-0 border-b border-transparent bg-transparent p-0 pb-1 text-sm font-medium text-gray-900 placeholder:font-normal placeholder:text-gray-400 focus:border-gray-700 focus:outline-none focus:ring-0 disabled:cursor-not-allowed"
+																	class="w-full border-0 border-b border-transparent bg-transparent p-0 pb-1 text-sm font-medium text-gray-900 placeholder:font-normal placeholder:text-gray-400 focus:border-gray-700 focus:ring-0 focus:outline-none disabled:cursor-not-allowed"
 																	oninput={(event) =>
 																		updateLectureSlideQuestionOptionDraft(
 																			selectedLectureSlideQuestion.client_id,
@@ -4740,7 +4740,7 @@
 																	value={option.post_answer_text}
 																	placeholder="Spoken feedback when this answer is chosen (optional)"
 																	disabled={preventEdits}
-																	class="w-full resize-none rounded-lg bg-gray-50 px-2.5 py-1.5 text-xs text-gray-600 placeholder:text-gray-400 focus:bg-white focus:outline-none focus:ring-1 focus:ring-gray-700 disabled:cursor-not-allowed"
+																	class="w-full resize-none rounded-lg bg-gray-50 px-2.5 py-1.5 text-xs text-gray-600 placeholder:text-gray-400 focus:bg-white focus:ring-1 focus:ring-gray-700 focus:outline-none disabled:cursor-not-allowed"
 																	oninput={(event) =>
 																		updateLectureSlideQuestionOptionDraft(
 																			selectedLectureSlideQuestion.client_id,
@@ -4751,7 +4751,7 @@
 															</div>
 															<button
 																type="button"
-																class="mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-gray-400 opacity-0 transition hover:bg-gray-100 hover:text-red-600 focus:opacity-100 group-hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-0"
+																class="mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-gray-400 opacity-0 transition group-hover:opacity-100 hover:bg-gray-100 hover:text-red-600 focus:opacity-100 disabled:cursor-not-allowed disabled:opacity-0"
 																disabled={preventEdits ||
 																	selectedLectureSlideQuestion.options.length <= 2}
 																aria-label={`Remove option ${optionIndex + 1}`}
@@ -4815,7 +4815,7 @@
 							<div class="space-y-1.5">
 								<Label
 									for="slide_author_notes"
-									class="text-xs font-semibold uppercase text-gray-500"
+									class="text-xs font-semibold text-gray-500 uppercase"
 								>
 									Author notes
 								</Label>
@@ -4837,7 +4837,7 @@
 							<div class="space-y-1.5">
 								<Label
 									for="slide_narration_text"
-									class="text-xs font-semibold uppercase text-gray-500"
+									class="text-xs font-semibold text-gray-500 uppercase"
 								>
 									Narration
 								</Label>
@@ -4877,7 +4877,7 @@
 							</div>
 							<div class="space-y-3 border-t border-gray-200 pt-4">
 								<div class="flex items-center justify-between">
-									<div class="text-[11px] font-semibold uppercase tracking-wide text-gray-500">
+									<div class="text-[11px] font-semibold tracking-wide text-gray-500 uppercase">
 										Questions after this slide
 									</div>
 									{#if selectedLectureSlideQuestions.length > 0}
@@ -4926,7 +4926,7 @@
 									</div>
 								{/if}
 								<div class="space-y-2">
-									<div class="text-[11px] font-semibold uppercase tracking-wide text-gray-400">
+									<div class="text-[11px] font-semibold tracking-wide text-gray-400 uppercase">
 										{selectedLectureSlideQuestions.length > 0 ? 'Add another' : 'Add a question'}
 									</div>
 									<div class="grid gap-2 sm:grid-cols-3">
@@ -4957,7 +4957,7 @@
 													>
 												</span>
 												<PlusOutline
-													class="absolute right-2.5 top-2.5 h-3.5 w-3.5 text-gray-300 transition-colors group-hover:text-gray-600"
+													class="absolute top-2.5 right-2.5 h-3.5 w-3.5 text-gray-300 transition-colors group-hover:text-gray-600"
 												/>
 											</button>
 										{/each}
@@ -4973,9 +4973,9 @@
 				</div>
 			</div>
 			{#if lectureSlidePages.length > 0}
-				<div class="border-b border-gray-200 bg-white px-4 pb-2 pt-3">
+				<div class="border-b border-gray-200 bg-white px-4 pt-3 pb-2">
 					<div class="flex items-center justify-between px-1 pb-1.5">
-						<span class="text-xs font-semibold uppercase text-gray-500">Slides</span>
+						<span class="text-xs font-semibold text-gray-500 uppercase">Slides</span>
 						<span class="text-xs text-gray-400">
 							{lectureSlidePages.length}
 							{lectureSlidePages.length === 1 ? 'slide' : 'slides'}

@@ -2253,14 +2253,14 @@
 {:else}
 	<div
 		bind:this={lectureContainerElement}
-		class="h-full w-full overflow-hidden lecture-fullscreen-root"
+		class="lecture-fullscreen-root h-full w-full overflow-hidden"
 	>
 		<div
-			class={`mx-auto flex h-full w-full max-w-screen-2xl flex-col gap-6 px-4 py-4 lg:px-6 xl:grid xl:grid-cols-5 xl:items-stretch xl:justify-center xl:gap-8 xl:py-6 lecture-layout ${groupArchived || lessonUpdated ? 'xl:grid-rows-[auto_minmax(0,1fr)]' : ''}`}
+			class={`lecture-layout mx-auto flex h-full w-full max-w-screen-2xl flex-col gap-6 px-4 py-4 lg:px-6 xl:grid xl:grid-cols-5 xl:items-stretch xl:justify-center xl:gap-8 xl:py-6 ${groupArchived || lessonUpdated ? 'xl:grid-rows-[auto_minmax(0,1fr)]' : ''}`}
 		>
 			{#if groupArchived || lessonUpdated}
 				<div
-					class="flex flex-row justify-between items-center shrink-0 rounded-2xl border border-slate-200 bg-slate-50 p-4 text-slate-800 xl:col-span-5 lecture-status-banner"
+					class="lecture-status-banner flex shrink-0 flex-row items-center justify-between rounded-2xl border border-slate-200 bg-slate-50 p-4 text-slate-800 xl:col-span-5"
 				>
 					<div class="flex gap-3">
 						<div
@@ -2294,7 +2294,7 @@
 				</div>
 			{/if}
 			<div
-				class="col-span-3 flex max-h-[40%] min-h-0 min-w-0 shrink-0 flex-col gap-4 xl:h-full xl:max-h-none xl:shrink xl:[container-type:size] lecture-media-col"
+				class="lecture-media-col col-span-3 flex max-h-[40%] min-h-0 min-w-0 shrink-0 flex-col gap-4 xl:[container-type:size] xl:h-full xl:max-h-none xl:shrink"
 			>
 				{#if !canParticipate && showParticipantNotice}
 					<div
@@ -2393,7 +2393,7 @@
 				{/if}
 			</div>
 			{#if isDesktopLayout}
-				<div class="col-span-2 h-full min-h-0 min-w-0 lecture-chat-col">
+				<div class="lecture-chat-col col-span-2 h-full min-h-0 min-w-0">
 					{@render chat?.(videoAtEnd)}
 				</div>
 			{:else}
