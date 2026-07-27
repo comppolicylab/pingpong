@@ -85,6 +85,7 @@
 		getLectureSlideDisplayOffsetMs,
 		getLectureSlidePageIndexAtOffset
 	} from '$lib/utils/lecture-video';
+	import { preloadLectureSlideGif } from '$lib/utils/lecture-slide-gif';
 	import LectureSlideTimedGif from '$lib/components/lecture-video/LectureSlideTimedGif.svelte';
 	import LectureSlideTimedVideo from '$lib/components/lecture-video/LectureSlideTimedVideo.svelte';
 	import { LECTURE_CHAT_TTS_VOLUME_SCALE } from '$lib/components/lecture-video/audio-levels';
@@ -210,7 +211,14 @@
 			offsetMs,
 			questionBoundaryMs
 		);
-		return lectureSlidePages[pageIndex] ?? null;
+		const visiblePage = lectureSlidePages[pageIndex] ?? null;
+		const upcomingPage = lectureSlidePages[pageIndex + 1] ?? null;
+		for (const page of [visiblePage, upcomingPage]) {
+			if (page?.content_kind === 'gif' && page.media_url) {
+				preloadLectureSlideGif(api.withMediaAuthQuery(page.media_url));
+			}
+		}
+		return visiblePage;
 	}
 	function lectureSlidePageImageUrl(page: api.LectureSlidePage): string | null {
 		return (
