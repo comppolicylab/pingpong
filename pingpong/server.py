@@ -10777,7 +10777,7 @@ async def get_assistant_lecture_slide_config(
         request.state["db"], deck.id
     )
     pages = [
-        schemas.LectureSlidePageView(
+        schemas.LectureSlideEditorPageView(
             id=page.id,
             position=page.position,
             content_kind=page.content_kind,

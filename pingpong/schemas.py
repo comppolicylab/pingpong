@@ -777,9 +777,6 @@ class LectureSlidePageView(BaseModel):
     position: int
     content_kind: LectureSlideContentKind = LectureSlideContentKind.SLIDE
     source_page_number: int | None = Field(None, ge=0)
-    title: str | None = None
-    extracted_text: str | None = None
-    image_description: str | None = None
     start_offset_ms: int | None = Field(None, ge=0)
     end_offset_ms: int | None = Field(None, ge=0)
     image_url: str | None = None
@@ -793,6 +790,12 @@ class LectureSlidePageView(BaseModel):
     media_height_px: int | None = Field(None, ge=1)
     user_notes: str | None = None
     narration_text: str | None = None
+
+
+class LectureSlideEditorPageView(LectureSlidePageView):
+    title: str | None = None
+    extracted_text: str | None = None
+    image_description: str | None = None
 
 
 class LectureSlideQuestionOptionView(BaseModel):
@@ -1384,7 +1387,7 @@ class LectureSlideConfigResponse(BaseModel):
     voice_id: str
     generation_prompt: str | None = None
     narration_prompt: str | None = None
-    pages: list["LectureSlidePageView"] = Field(default_factory=list)
+    pages: list["LectureSlideEditorPageView"] = Field(default_factory=list)
     questions: list["LectureSlideQuestionView"] = Field(default_factory=list)
     question_drafts: list["LectureSlideQuestionInput"] = Field(default_factory=list)
     processing_status: LectureVideoProcessingRunSummary | None = None
