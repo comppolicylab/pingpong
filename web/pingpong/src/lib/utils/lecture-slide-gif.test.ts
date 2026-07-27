@@ -48,4 +48,45 @@ describe('loadLectureSlideGif', () => {
 		expect(firstGif.frames).toHaveLength(1);
 		fetchMock.mockRestore();
 	});
+
+	it('does not let an evicted rejection delete a newer request for the same source', async () => {
+		const gifBytes = Uint8Array.from(
+			atob('R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw=='),
+			(character) => character.charCodeAt(0)
+		);
+		let rejectFirstRequest!: (reason: Error) => void;
+		let resolveReplacementRequest!: (response: Response) => void;
+		const firstRequest = new Promise<Response>((_, reject) => {
+			rejectFirstRequest = reject;
+		});
+		const replacementRequest = new Promise<Response>((resolve) => {
+			resolveReplacementRequest = resolve;
+		});
+		let sourceRequestCount = 0;
+		const source = '/lecture-slide-eviction-race.gif';
+		const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
+			if (input === source) {
+				sourceRequestCount += 1;
+				return sourceRequestCount === 1 ? firstRequest : replacementRequest;
+			}
+			return Promise.resolve(new Response(gifBytes, { status: 200 }));
+		});
+
+		const rejectedLoad = loadLectureSlideGif(source);
+		await Promise.all([
+			loadLectureSlideGif('/lecture-slide-eviction-race-b.gif'),
+			loadLectureSlideGif('/lecture-slide-eviction-race-c.gif'),
+			loadLectureSlideGif('/lecture-slide-eviction-race-d.gif')
+		]);
+		const replacementLoad = loadLectureSlideGif(source);
+
+		rejectFirstRequest(new Error('old request failed'));
+		await expect(rejectedLoad).rejects.toThrow('old request failed');
+		expect(loadLectureSlideGif(source)).toBe(replacementLoad);
+		expect(sourceRequestCount).toBe(2);
+
+		resolveReplacementRequest(new Response(gifBytes, { status: 200 }));
+		await replacementLoad;
+		fetchMock.mockRestore();
+	});
 });

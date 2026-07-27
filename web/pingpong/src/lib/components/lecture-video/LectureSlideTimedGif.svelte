@@ -9,6 +9,7 @@
 
 	let {
 		src,
+		fallbackSrc = null,
 		offsetMs,
 		startOffsetMs,
 		endOffsetMs,
@@ -16,6 +17,7 @@
 		paused
 	}: {
 		src: string;
+		fallbackSrc?: string | null;
 		offsetMs: number;
 		startOffsetMs: number;
 		endOffsetMs: number;
@@ -195,12 +197,14 @@
 	</div>
 {:else}
 	<div class="relative h-full w-full">
-		<img
-			{src}
-			alt=""
-			aria-hidden="true"
-			class={`absolute inset-0 h-full w-full object-contain ${hasRenderedFrame ? 'invisible' : ''}`}
-		/>
+		{#if fallbackSrc && !hasRenderedFrame}
+			<img
+				src={fallbackSrc}
+				alt=""
+				aria-hidden="true"
+				class="absolute inset-0 h-full w-full object-contain"
+			/>
+		{/if}
 		<canvas
 			bind:this={canvas}
 			class={`absolute inset-0 h-full w-full object-contain ${hasRenderedFrame ? '' : 'invisible'}`}

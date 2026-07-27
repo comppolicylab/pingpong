@@ -48,11 +48,13 @@ export function loadLectureSlideGif(src: string): Promise<DecodedLectureSlideGif
 		return cached;
 	}
 
-	const pending = decodeLectureSlideGif(src).catch((error) => {
-		decodedGifPromises.delete(src);
-		throw error;
-	});
+	const pending = decodeLectureSlideGif(src);
 	decodedGifPromises.set(src, pending);
+	void pending.catch(() => {
+		if (decodedGifPromises.get(src) === pending) {
+			decodedGifPromises.delete(src);
+		}
+	});
 	trimDecodedGifCache();
 	return pending;
 }
