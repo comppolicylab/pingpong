@@ -1,18 +1,15 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
-	import { decompressFrames, parseGIF, type ParsedFrame } from 'gifuct-js';
-	import { clampedGifTimeMs, gifFrameIndexAtTime } from '$lib/utils/lecture-slide-gif';
-
-	type DecodedGif = {
-		frames: ParsedFrame[];
-		frameEndTimesMs: number[];
-		durationMs: number;
-		width: number;
-		height: number;
-	};
+	import {
+		clampedGifTimeMs,
+		gifFrameIndexAtTime,
+		loadLectureSlideGif,
+		type DecodedLectureSlideGif
+	} from '$lib/utils/lecture-slide-gif';
 
 	let {
 		src,
+		fallbackSrc = null,
 		offsetMs,
 		startOffsetMs,
 		endOffsetMs,
@@ -20,6 +17,7 @@
 		paused
 	}: {
 		src: string;
+		fallbackSrc?: string | null;
 		offsetMs: number;
 		startOffsetMs: number;
 		endOffsetMs: number;
@@ -28,8 +26,9 @@
 	} = $props();
 
 	let canvas: HTMLCanvasElement | null = $state(null);
-	let decodedGif: DecodedGif | null = $state(null);
+	let decodedGif: DecodedLectureSlideGif | null = $state(null);
 	let loadFailed = $state(false);
+	let hasRenderedFrame = $state(false);
 
 	let compositionCanvas: HTMLCanvasElement | null = null;
 	let compositionContext: CanvasRenderingContext2D | null = null;
@@ -38,7 +37,7 @@
 	let renderedFrameIndex = -1;
 	let restoreImageData: ImageData | null = null;
 
-	function resetRenderer(gif: DecodedGif) {
+	function resetRenderer(gif: DecodedLectureSlideGif) {
 		compositionCanvas = document.createElement('canvas');
 		compositionCanvas.width = gif.width;
 		compositionCanvas.height = gif.height;
@@ -61,7 +60,7 @@
 		restoreImageData = null;
 	}
 
-	function applyPreviousFrameDisposal(gif: DecodedGif) {
+	function applyPreviousFrameDisposal(gif: DecodedLectureSlideGif) {
 		if (!compositionContext || renderedFrameIndex < 0) return;
 		const previousFrame = gif.frames[renderedFrameIndex];
 		if (previousFrame.disposalType === 2) {
@@ -81,7 +80,7 @@
 		restoreImageData = null;
 	}
 
-	function drawNextFrame(gif: DecodedGif, frameIndex: number) {
+	function drawNextFrame(gif: DecodedLectureSlideGif, frameIndex: number) {
 		if (!compositionContext || !patchCanvas || !patchContext) return;
 		applyPreviousFrameDisposal(gif);
 
@@ -107,7 +106,7 @@
 		renderedFrameIndex = frameIndex;
 	}
 
-	function renderAtOffset(gif: DecodedGif, displayOffsetMs: number) {
+	function renderAtOffset(gif: DecodedLectureSlideGif, displayOffsetMs: number) {
 		if (!canvas || !compositionCanvas || !compositionContext) return;
 		const gifTimeMs = clampedGifTimeMs(displayOffsetMs, startOffsetMs, gif.durationMs);
 		const targetFrameIndex = gifFrameIndexAtTime(gif.frameEndTimesMs, gifTimeMs);
@@ -125,13 +124,15 @@
 		if (!context) return;
 		context.clearRect(0, 0, canvas.width, canvas.height);
 		context.drawImage(compositionCanvas, 0, 0);
+		hasRenderedFrame = true;
 	}
 
 	$effect(() => {
 		const requestedSrc = src;
-		const abortController = new AbortController();
+		let cancelled = false;
 		decodedGif = null;
 		loadFailed = false;
+		hasRenderedFrame = false;
 		compositionCanvas = null;
 		compositionContext = null;
 		patchCanvas = null;
@@ -141,35 +142,21 @@
 
 		void (async () => {
 			try {
-				const response = await fetch(requestedSrc, { signal: abortController.signal });
-				if (!response.ok) throw new Error(`GIF request failed with ${response.status}`);
-				const parsedGif = parseGIF(await response.arrayBuffer());
-				const frames = decompressFrames(parsedGif, true);
-				if (frames.length === 0) throw new Error('GIF contains no frames');
-				let durationMs = 0;
-				const frameEndTimesMs = frames.map((frame) => {
-					durationMs += Number.isFinite(frame.delay) && frame.delay > 0 ? frame.delay : 100;
-					return durationMs;
-				});
-				if (abortController.signal.aborted) return;
-				const gif = {
-					frames,
-					frameEndTimesMs,
-					durationMs,
-					width: parsedGif.lsd.width,
-					height: parsedGif.lsd.height
-				};
+				const gif = await loadLectureSlideGif(requestedSrc);
+				if (cancelled) return;
 				resetRenderer(gif);
 				decodedGif = gif;
 			} catch (error) {
-				if (!abortController.signal.aborted) {
+				if (!cancelled) {
 					console.error('Could not decode lecture slide GIF', error);
 					loadFailed = true;
 				}
 			}
 		})();
 
-		return () => abortController.abort();
+		return () => {
+			cancelled = true;
+		};
 	});
 
 	$effect(() => {
@@ -209,6 +196,19 @@
 		GIF content unavailable
 	</div>
 {:else}
-	<canvas bind:this={canvas} class="h-full w-full object-contain" aria-label="Animated GIF"
-	></canvas>
+	<div class="relative h-full w-full">
+		{#if fallbackSrc && !hasRenderedFrame}
+			<img
+				src={fallbackSrc}
+				alt=""
+				aria-hidden="true"
+				class="absolute inset-0 h-full w-full object-contain"
+			/>
+		{/if}
+		<canvas
+			bind:this={canvas}
+			class={`absolute inset-0 h-full w-full object-contain ${hasRenderedFrame ? '' : 'invisible'}`}
+			aria-label="Animated GIF"
+		></canvas>
+	</div>
 {/if}

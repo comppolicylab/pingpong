@@ -85,6 +85,7 @@
 		getLectureSlideDisplayOffsetMs,
 		getLectureSlidePageIndexAtOffset
 	} from '$lib/utils/lecture-video';
+	import { preloadLectureSlideGif } from '$lib/utils/lecture-slide-gif';
 	import LectureSlideTimedGif from '$lib/components/lecture-video/LectureSlideTimedGif.svelte';
 	import LectureSlideTimedVideo from '$lib/components/lecture-video/LectureSlideTimedVideo.svelte';
 	import { LECTURE_CHAT_TTS_VOLUME_SCALE } from '$lib/components/lecture-video/audio-levels';
@@ -210,7 +211,14 @@
 			offsetMs,
 			questionBoundaryMs
 		);
-		return lectureSlidePages[pageIndex] ?? null;
+		const visiblePage = lectureSlidePages[pageIndex] ?? null;
+		const upcomingPage = lectureSlidePages[pageIndex + 1] ?? null;
+		for (const page of [visiblePage, upcomingPage]) {
+			if (page?.content_kind === 'gif' && page.media_url) {
+				preloadLectureSlideGif(api.withMediaAuthQuery(page.media_url));
+			}
+		}
+		return visiblePage;
 	}
 	function lectureSlidePageImageUrl(page: api.LectureSlidePage): string | null {
 		return (
@@ -219,6 +227,14 @@
 				? api.getLectureSlidePageImageUrl(classId, threadId, page.id)
 				: null)
 		);
+	}
+	function lectureSlideGifFallbackUrl(page: api.LectureSlidePage | null): string | null {
+		if (!page) return null;
+		if (page.content_kind === 'slide') return lectureSlidePageImageUrl(page);
+		if (page.content_kind === 'image' && page.media_url) {
+			return api.withMediaAuthQuery(page.media_url);
+		}
+		return null;
 	}
 	function lectureSlidePageIndex(page: api.LectureSlidePage): number {
 		return lectureSlidePages.findIndex((item: api.LectureSlidePage) => item.id === page.id);
@@ -1853,6 +1869,8 @@
 				{#snippet visual(offsetMs, playbackPaused, timelineMedia, questionBoundaryMs)}
 					{@const visiblePage = lectureSlidePageAtOffset(offsetMs, questionBoundaryMs)}
 					{@const visiblePageIndex = visiblePage ? lectureSlidePageIndex(visiblePage) : -1}
+					{@const previousPage =
+						visiblePageIndex > 0 ? lectureSlidePages[visiblePageIndex - 1] : null}
 					{@const slideImageUrl = visiblePage ? lectureSlidePageImageUrl(visiblePage) : null}
 					{@const displayOffsetMs = visiblePage
 						? getLectureSlideDisplayOffsetMs(visiblePage, offsetMs, questionBoundaryMs)
@@ -1871,6 +1889,7 @@
 							{:else if visiblePage.content_kind === 'gif' && visiblePage.media_url && visiblePage.start_offset_ms != null && visiblePage.end_offset_ms != null}
 								<LectureSlideTimedGif
 									src={api.withMediaAuthQuery(visiblePage.media_url)}
+									fallbackSrc={lectureSlideGifFallbackUrl(previousPage)}
 									offsetMs={displayOffsetMs}
 									startOffsetMs={visiblePage.start_offset_ms}
 									endOffsetMs={visiblePage.end_offset_ms}
