@@ -90,6 +90,13 @@
 	import MCPServerModal from '$lib/components/MCPServerModal.svelte';
 	import PdfPageViewer from '$lib/components/PdfPageViewer.svelte';
 	import LectureSlideFilmstrip from '$lib/components/LectureSlideFilmstrip.svelte';
+	import {
+		applyLectureSlideContentJson as applyLectureSlideContentJsonDocument,
+		buildLectureSlideContentJson,
+		parseLectureSlideContentJson as parseLectureSlideContentJsonDocument,
+		type LectureSlideContentJson
+	} from '$lib/lectureSlideContentJson';
+	import { deriveLectureSlideProcessingTriggers } from '$lib/lectureSlideProcessing';
 	import { SvelteSet } from 'svelte/reactivity';
 	export let data;
 	$: lectureVideoDefaultInstructions = data.lectureVideoDefaults?.instructions || '';
@@ -201,6 +208,9 @@
 	type LectureSlideContentDraft = api.LectureSlideContentItemInput & {
 		id: number;
 		position: number;
+		title?: string | null;
+		extracted_text?: string | null;
+		image_description?: string | null;
 		media_url?: string | null;
 		media_content_type?: string | null;
 		media_filename?: string | null;
@@ -214,6 +224,9 @@
 		position: page.position,
 		content_kind: page.content_kind || 'slide',
 		source_page_number: page.source_page_number ?? page.position,
+		title: page.title,
+		extracted_text: page.extracted_text,
+		image_description: page.image_description,
 		media_stored_object_id: page.media_stored_object_id,
 		media_url: page.media_url,
 		media_content_type: page.media_content_type,
@@ -369,16 +382,29 @@
 		}))
 	});
 
-	const sortLectureSlideQuestionComparables = <
-		T extends { slide_position: number; question_text: string }
-	>(
-		questions: T[]
-	) =>
-		[...questions].sort((left, right) =>
-			left.slide_position === right.slide_position
-				? JSON.stringify(left).localeCompare(JSON.stringify(right))
-				: left.slide_position - right.slide_position
+	const lectureSlideContentJsonDocument = (): LectureSlideContentJson =>
+		buildLectureSlideContentJson(lectureSlidePageDrafts, lectureSlideQuestionDrafts);
+
+	const stringifyLectureSlideContentJson = () =>
+		JSON.stringify(lectureSlideContentJsonDocument(), null, 2);
+
+	const parseLectureSlideContentJson = (raw: string) =>
+		parseLectureSlideContentJsonDocument(raw, lectureSlidePageDrafts);
+
+	const applyLectureSlideContentJson = (content: LectureSlideContentJson) => {
+		const updated = applyLectureSlideContentJsonDocument(
+			content,
+			lectureSlidePageDrafts,
+			lectureSlideQuestionDrafts,
+			nextLectureSlideQuestionDraftId
 		);
+		lectureSlidePageDrafts = updated.pages;
+		lectureSlideQuestionDrafts = updated.questions;
+	};
+
+	const sortLectureSlideQuestionComparables = <T extends { slide_position: number }>(
+		questions: T[]
+	) => [...questions].sort((left, right) => left.slide_position - right.slide_position);
 
 	const lectureSlideQuestionInputComparable = (question: api.LectureSlideQuestionInput) => ({
 		mode: question.mode || 'complete',
@@ -605,6 +631,41 @@
 	let lectureSlideQuestionDrafts: LectureSlideQuestionDraft[] = [];
 	let selectedLectureSlideQuestionClientId: string | null = null;
 	let hasSetLectureSlideQuestionDrafts = false;
+	let lectureSlideContentJson = '';
+	let lectureSlideContentJsonDirty = false;
+	let lectureSlideContentJsonEditing = false;
+	let lectureSlideContentJsonError = '';
+	let hasSetLectureSlideContentJson = false;
+	const validateLectureSlideContentJsonDraft = (event: Event) => {
+		lectureSlideContentJson = (event.currentTarget as HTMLTextAreaElement).value;
+		lectureSlideContentJsonDirty = true;
+		const parsedContent = parseLectureSlideContentJson(lectureSlideContentJson);
+		if (!parsedContent.content || parsedContent.error) {
+			lectureSlideContentJsonError =
+				parsedContent.error || 'Lecture slide content JSON is invalid.';
+			return;
+		}
+		lectureSlideContentJsonError = '';
+	};
+	const finishEditingLectureSlideContentJson = () => {
+		lectureSlideContentJsonEditing = false;
+		if (lectureSlideContentJsonError) {
+			return;
+		}
+		const parsedContent = parseLectureSlideContentJson(lectureSlideContentJson);
+		if (!parsedContent.content || parsedContent.error) {
+			lectureSlideContentJsonError =
+				parsedContent.error || 'Lecture slide content JSON is invalid.';
+			return;
+		}
+		if (
+			JSON.stringify(parsedContent.content) !== JSON.stringify(lectureSlideContentJsonDocument())
+		) {
+			applyLectureSlideContentJson(parsedContent.content);
+		}
+		lectureSlideContentJsonDirty = false;
+		lectureSlideContentJson = stringifyLectureSlideContentJson();
+	};
 	let slideGenerationPrompt =
 		data.lectureSlideConfig?.generation_prompt || lectureSlideDefaultGenerationPrompt;
 	let hasSetSlideGenerationPrompt = false;
@@ -1244,25 +1305,24 @@
 			regenerateSlideNarrationRequested ||
 			regenerateSlideQuestionsRequested ||
 			regenerateSlideAudioRequested);
-	$: lectureSlideFullProcessingTriggeredByFormChanges =
-		isLectureSlideMode && !data.isCreating && lectureSlideDeckIdChanged;
-	$: lectureSlideNarrationTriggeredByFormChanges =
-		isLectureSlideMode &&
-		!data.isCreating &&
-		(lectureSlideFullProcessingTriggeredByFormChanges ||
-			slideNarrationPromptChanged ||
-			lectureSlideAdditionalContextFilesChanged);
-	$: lectureSlideQuestionsTriggeredByFormChanges =
-		isLectureSlideMode &&
-		!data.isCreating &&
-		(lectureSlideFullProcessingTriggeredByFormChanges ||
-			slideGenerationPromptChanged ||
-			lectureSlideAdditionalContextFilesChanged);
-	$: lectureSlideAudioTriggeredByFormChanges =
-		isLectureSlideMode &&
-		!data.isCreating &&
-		!lectureSlideNarrationTriggeredByFormChanges &&
-		(lectureSlideVoiceChanged || lectureSlidePagesChanged);
+	$: lectureSlideProcessingTriggers = deriveLectureSlideProcessingTriggers({
+		isLectureSlideMode,
+		isCreating: data.isCreating,
+		deckIdChanged: lectureSlideDeckIdChanged,
+		structureChanged: lectureSlideStructureChanged,
+		narrationPromptChanged: slideNarrationPromptChanged,
+		additionalContextFilesChanged: lectureSlideAdditionalContextFilesChanged,
+		notesChanged: lectureSlideNotesChanged,
+		narrationChanged: lectureSlideNarrationChanged,
+		generationPromptChanged: slideGenerationPromptChanged,
+		questionDraftsRequireGeneration: lectureSlideQuestionDraftsRequireGeneration,
+		voiceChanged: lectureSlideVoiceChanged,
+		completeQuestionsChanged: lectureSlideCompleteQuestionsChanged
+	});
+	$: lectureSlideFullProcessingTriggeredByFormChanges = lectureSlideProcessingTriggers.full;
+	$: lectureSlideNarrationTriggeredByFormChanges = lectureSlideProcessingTriggers.narration;
+	$: lectureSlideQuestionsTriggeredByFormChanges = lectureSlideProcessingTriggers.questions;
+	$: lectureSlideAudioTriggeredByFormChanges = lectureSlideProcessingTriggers.audio;
 	$: if (
 		(lectureSlideNarrationTriggeredByFormChanges ||
 			lectureSlideFullProcessingTriggeredByFormChanges) &&
@@ -1334,6 +1394,15 @@
 		);
 	}
 	$: if (
+		hasSetLectureSlidePageDrafts &&
+		hasSetLectureSlideQuestionDrafts &&
+		!lectureSlideContentJsonEditing &&
+		!lectureSlideContentJsonDirty
+	) {
+		lectureSlideContentJson = stringifyLectureSlideContentJson();
+		hasSetLectureSlideContentJson = true;
+	}
+	$: if (
 		!hasSetLectureSlideAdditionalContextFiles &&
 		lectureSlideConfigReady &&
 		!lectureSlideConfigLoadError
@@ -1376,6 +1445,59 @@
 			narration_text: (page.content_kind || 'slide') === 'video' ? '' : page.narration_text || ''
 		}))
 	);
+	$: currentLectureSlideStructureNormalized = JSON.stringify(
+		(data.lectureSlideConfig?.pages || []).map((page) => ({
+			position: page.position,
+			content_kind: page.content_kind || 'slide',
+			source_page_number:
+				(page.content_kind || 'slide') === 'slide'
+					? (page.source_page_number ?? page.position)
+					: null,
+			media_stored_object_id: page.media_stored_object_id ?? null
+		}))
+	);
+	$: lectureSlideStructureNormalized = JSON.stringify(
+		lectureSlidePageDrafts.map((page) => ({
+			position: page.position,
+			content_kind: page.content_kind,
+			source_page_number:
+				page.content_kind === 'slide' ? (page.source_page_number ?? page.position) : null,
+			media_stored_object_id: page.media_stored_object_id ?? null
+		}))
+	);
+	$: lectureSlideStructureChanged =
+		hasSetLectureSlidePageDrafts &&
+		lectureSlideStructureNormalized !== currentLectureSlideStructureNormalized;
+	$: currentLectureSlideNotesNormalized = JSON.stringify(
+		(data.lectureSlideConfig?.pages || []).map((page) => ({
+			position: page.position,
+			user_notes: page.user_notes || ''
+		}))
+	);
+	$: lectureSlideNotesNormalized = JSON.stringify(
+		lectureSlidePageDrafts.map((page) => ({
+			position: page.position,
+			user_notes: page.user_notes || ''
+		}))
+	);
+	$: lectureSlideNotesChanged =
+		hasSetLectureSlidePageDrafts &&
+		lectureSlideNotesNormalized !== currentLectureSlideNotesNormalized;
+	$: currentLectureSlideNarrationNormalized = JSON.stringify(
+		(data.lectureSlideConfig?.pages || []).map((page) => ({
+			position: page.position,
+			narration_text: (page.content_kind || 'slide') === 'video' ? '' : page.narration_text || ''
+		}))
+	);
+	$: lectureSlideNarrationNormalized = JSON.stringify(
+		lectureSlidePageDrafts.map((page) => ({
+			position: page.position,
+			narration_text: page.content_kind === 'video' ? '' : page.narration_text || ''
+		}))
+	);
+	$: lectureSlideNarrationChanged =
+		hasSetLectureSlidePageDrafts &&
+		lectureSlideNarrationNormalized !== currentLectureSlideNarrationNormalized;
 	$: lectureSlidePagesChanged =
 		hasSetLectureSlidePageDrafts &&
 		JSON.stringify(
@@ -1403,6 +1525,11 @@
 	$: lectureSlideQuestionsChanged =
 		hasSetLectureSlideQuestionDrafts &&
 		lectureSlideQuestionsNormalized !== currentLectureSlideQuestionsNormalized;
+	$: lectureSlideQuestionDraftsRequireGeneration =
+		lectureSlideQuestionsChanged &&
+		lectureSlideQuestionDrafts.some((question) => question.mode !== 'complete');
+	$: lectureSlideCompleteQuestionsChanged =
+		lectureSlideQuestionsChanged && !lectureSlideQuestionDraftsRequireGeneration;
 	$: currentLectureSlideAdditionalContextFileIds = JSON.stringify(
 		(currentLectureSlideDeck?.additional_context_files || []).map((file) => file.id)
 	);
@@ -2895,6 +3022,9 @@
 		if (lectureSlideQuestionsChanged) {
 			modifiedFields.push('lecture slide questions');
 		}
+		if (lectureSlideContentJsonDirty) {
+			modifiedFields.push('lecture slide content JSON');
+		}
 		if (lectureSlideAdditionalContextFilesChanged) {
 			modifiedFields.push('lecture slide context files');
 		}
@@ -4096,6 +4226,24 @@
 				$loadingMessage = '';
 				return;
 			}
+			let lectureSlideJsonAppliedChanges = false;
+			if (lectureSlideContentJsonDirty) {
+				const parsedContent = parseLectureSlideContentJson(lectureSlideContentJson);
+				if (!parsedContent.content || parsedContent.error) {
+					sadToast(parsedContent.error || 'Lecture slide content JSON is invalid.');
+					$loading = false;
+					$loadingMessage = '';
+					return;
+				}
+				lectureSlideJsonAppliedChanges =
+					JSON.stringify(parsedContent.content) !==
+					JSON.stringify(lectureSlideContentJsonDocument());
+				if (lectureSlideJsonAppliedChanges) {
+					applyLectureSlideContentJson(parsedContent.content);
+				}
+				lectureSlideContentJsonDirty = false;
+				lectureSlideContentJson = stringifyLectureSlideContentJson();
+			}
 			const lectureSlideQuestionError = validateLectureSlideQuestionDrafts(
 				lectureSlideQuestionDrafts
 			);
@@ -4110,6 +4258,7 @@
 				lectureSlideDeckIdChanged ||
 				lectureSlidePagesChanged ||
 				lectureSlideQuestionsChanged ||
+				lectureSlideJsonAppliedChanges ||
 				lectureSlideAdditionalContextFilesChanged ||
 				lectureSlideVoiceChanged ||
 				slideGenerationPromptChanged ||
@@ -4118,12 +4267,20 @@
 				regenerateSlideQuestionsRequested ||
 				regenerateSlideAudioRequested;
 			const shouldSubmitLectureSlideQuestions =
-				data.isCreating || lectureSlideDeckIdChanged || lectureSlideQuestionsChanged;
+				data.isCreating ||
+				lectureSlideDeckIdChanged ||
+				lectureSlideQuestionsChanged ||
+				lectureSlideJsonAppliedChanges;
 
 			if (data.isCreating || lectureSlideFieldsChanged) {
 				params.lecture_slide_deck_id = selectedLectureSlideDeckId;
 				params.lecture_slide_page_notes = lectureSlidePageDrafts.map(lectureSlideDraftToPageNotes);
-				if (data.isCreating || lectureSlideDeckIdChanged || lectureSlidePagesChanged) {
+				if (
+					data.isCreating ||
+					lectureSlideDeckIdChanged ||
+					lectureSlidePagesChanged ||
+					lectureSlideJsonAppliedChanges
+				) {
 					params.lecture_slide_content_items = lectureSlidePageDrafts.map(
 						lectureSlideDraftToContentItem
 					);
@@ -6439,6 +6596,34 @@
 										class="text-sm"
 									/>
 								</div>
+								{#if hasSetLectureSlideContentJson && lectureSlidePageDrafts.length > 0}
+									<div class="col-span-2 mb-1">
+										<Label for="lecture_slide_content_json" class="mb-0 text-gray-800">
+											Lecture Content JSON
+										</Label>
+										<Helper class="pb-1">
+											Edit all slide notes, narration, and end-of-slide questions in one document.
+											The source_context fields are reference-only; slide timing is derived
+											automatically.
+										</Helper>
+										<Textarea
+											id="lecture_slide_content_json"
+											name="lecture_slide_content_json"
+											rows={18}
+											bind:value={lectureSlideContentJson}
+											disabled={preventEdits}
+											onfocus={() => {
+												lectureSlideContentJsonEditing = true;
+											}}
+											oninput={validateLectureSlideContentJsonDraft}
+											onblur={finishEditingLectureSlideContentJson}
+											class="font-mono text-xs"
+										/>
+										{#if lectureSlideContentJsonError}
+											<Helper class="pt-1 text-red-700">{lectureSlideContentJsonError}</Helper>
+										{/if}
+									</div>
+								{/if}
 								{#if !data.isCreating}
 									<div class="mb-2 flex flex-col gap-2 text-sm text-gray-600">
 										<div class="flex flex-wrap items-center gap-3">
