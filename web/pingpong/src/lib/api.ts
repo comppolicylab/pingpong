@@ -1869,6 +1869,9 @@ export type LectureSlidePage = {
 	position: number;
 	content_kind: LectureSlideContentKind;
 	source_page_number?: number | null;
+	title?: string | null;
+	extracted_text?: string | null;
+	image_description?: string | null;
 	start_offset_ms?: number | null;
 	end_offset_ms?: number | null;
 	image_url?: string | null;

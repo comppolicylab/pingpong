@@ -777,6 +777,9 @@ class LectureSlidePageView(BaseModel):
     position: int
     content_kind: LectureSlideContentKind = LectureSlideContentKind.SLIDE
     source_page_number: int | None = Field(None, ge=0)
+    title: str | None = None
+    extracted_text: str | None = None
+    image_description: str | None = None
     start_offset_ms: int | None = Field(None, ge=0)
     end_offset_ms: int | None = Field(None, ge=0)
     image_url: str | None = None

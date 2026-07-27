@@ -939,6 +939,15 @@ async def test_lecture_slide_config_returns_pending_question_drafts(
                 hide_prompt=False,
             )
         )
+        session.add(
+            models.LectureSlidePage(
+                lecture_slide_deck_id=deck.id,
+                position=0,
+                title="Random assignment",
+                extracted_text="Treatment group and control group",
+                image_description="A diagram splitting participants into two groups.",
+            )
+        )
         await session.commit()
 
     response = api.get(
@@ -949,6 +958,11 @@ async def test_lecture_slide_config_returns_pending_question_drafts(
     assert response.status_code == 200
     body = response.json()
     assert body["questions"] == []
+    assert body["pages"][0]["title"] == "Random assignment"
+    assert body["pages"][0]["extracted_text"] == "Treatment group and control group"
+    assert body["pages"][0]["image_description"] == (
+        "A diagram splitting participants into two groups."
+    )
     assert [
         (question["mode"], question["slide_position"], question["question_text"])
         for question in body["question_drafts"]

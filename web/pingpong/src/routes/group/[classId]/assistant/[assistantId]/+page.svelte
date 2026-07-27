@@ -90,7 +90,7 @@
 	import MCPServerModal from '$lib/components/MCPServerModal.svelte';
 	import PdfPageViewer from '$lib/components/PdfPageViewer.svelte';
 	import LectureSlideFilmstrip from '$lib/components/LectureSlideFilmstrip.svelte';
-	import { SvelteSet } from 'svelte/reactivity';
+	import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 	export let data;
 	$: lectureVideoDefaultInstructions = data.lectureVideoDefaults?.instructions || '';
 	$: lectureVideoDefaultGenerationPrompt = data.lectureVideoDefaults?.generation_prompt || '';
@@ -201,6 +201,9 @@
 	type LectureSlideContentDraft = api.LectureSlideContentItemInput & {
 		id: number;
 		position: number;
+		title?: string | null;
+		extracted_text?: string | null;
+		image_description?: string | null;
 		media_url?: string | null;
 		media_content_type?: string | null;
 		media_filename?: string | null;
@@ -214,6 +217,9 @@
 		position: page.position,
 		content_kind: page.content_kind || 'slide',
 		source_page_number: page.source_page_number ?? page.position,
+		title: page.title,
+		extracted_text: page.extracted_text,
+		image_description: page.image_description,
 		media_stored_object_id: page.media_stored_object_id,
 		media_url: page.media_url,
 		media_content_type: page.media_content_type,
@@ -368,6 +374,255 @@
 			correct: option.correct
 		}))
 	});
+
+	type LectureSlideContentJsonOption = {
+		option_text: string;
+		correct: boolean;
+		post_answer_text: string;
+	};
+
+	type LectureSlideContentJsonQuestion = {
+		type: api.LectureSlideQuestionType;
+		intro_text: string;
+		question_text: string;
+		options: LectureSlideContentJsonOption[];
+	};
+
+	type LectureSlideContentJsonSlide = {
+		slide_number: number;
+		content_kind: api.LectureSlideContentKind;
+		source_context: {
+			slide_title: string | null;
+			extracted_slide_text: string | null;
+			image_description: string | null;
+		};
+		user_notes: string;
+		narration_text: string | null;
+		questions: LectureSlideContentJsonQuestion[];
+	};
+
+	type LectureSlideContentJson = {
+		version: 1;
+		slides: LectureSlideContentJsonSlide[];
+	};
+
+	const lectureSlideContentJsonDocument = (): LectureSlideContentJson => ({
+		version: 1,
+		slides: [...lectureSlidePageDrafts]
+			.sort((left, right) => left.position - right.position)
+			.map((page) => ({
+				slide_number: page.position + 1,
+				content_kind: page.content_kind,
+				source_context: {
+					slide_title: page.title || null,
+					extracted_slide_text: page.extracted_text || null,
+					image_description: page.image_description || null
+				},
+				user_notes: page.user_notes || '',
+				narration_text: page.content_kind === 'video' ? null : page.narration_text || '',
+				questions: lectureSlideQuestionDrafts
+					.filter((question) => question.slide_position === page.position)
+					.map((question) => ({
+						type: 'single_select' as const,
+						intro_text: question.intro_text || '',
+						question_text: question.question_text || '',
+						options: question.options.map((option) => ({
+							option_text: option.option_text || '',
+							correct: option.correct,
+							post_answer_text: option.post_answer_text || ''
+						}))
+					}))
+			}))
+	});
+
+	const stringifyLectureSlideContentJson = () =>
+		JSON.stringify(lectureSlideContentJsonDocument(), null, 2);
+
+	const isJsonRecord = (value: unknown): value is Record<string, unknown> =>
+		typeof value === 'object' && value !== null && !Array.isArray(value);
+
+	const parseLectureSlideContentJson = (
+		raw: string
+	): { content: LectureSlideContentJson | null; error: string | null } => {
+		let parsed: unknown;
+		try {
+			parsed = JSON.parse(raw);
+		} catch {
+			return { content: null, error: 'Lecture slide content must be valid JSON.' };
+		}
+		if (!isJsonRecord(parsed) || parsed.version !== 1 || !Array.isArray(parsed.slides)) {
+			return {
+				content: null,
+				error: 'Lecture slide content must be a Version 1 object with a slides array.'
+			};
+		}
+		if (parsed.slides.length !== lectureSlidePageDrafts.length) {
+			return {
+				content: null,
+				error: `Lecture slide content must include exactly ${lectureSlidePageDrafts.length} slides.`
+			};
+		}
+
+		const slides: LectureSlideContentJsonSlide[] = [];
+		const seenSlideNumbers = new SvelteSet<number>();
+		for (const rawSlide of parsed.slides) {
+			if (!isJsonRecord(rawSlide)) {
+				return { content: null, error: 'Each lecture slide must be a JSON object.' };
+			}
+			const slideNumber = rawSlide.slide_number;
+			if (
+				typeof slideNumber !== 'number' ||
+				!Number.isInteger(slideNumber) ||
+				slideNumber < 1 ||
+				slideNumber > lectureSlidePageDrafts.length ||
+				seenSlideNumbers.has(slideNumber)
+			) {
+				return {
+					content: null,
+					error: 'Each slide_number must be unique and match an existing slide.'
+				};
+			}
+			seenSlideNumbers.add(slideNumber);
+			const existingPage = lectureSlidePageDrafts.find((page) => page.position === slideNumber - 1);
+			if (!existingPage || rawSlide.content_kind !== existingPage.content_kind) {
+				return {
+					content: null,
+					error: `Slide ${slideNumber} must keep its existing content_kind.`
+				};
+			}
+			if (
+				typeof rawSlide.user_notes !== 'string' ||
+				!(typeof rawSlide.narration_text === 'string' || rawSlide.narration_text === null) ||
+				!Array.isArray(rawSlide.questions)
+			) {
+				return {
+					content: null,
+					error: `Slide ${slideNumber} must include user_notes, narration_text, and questions.`
+				};
+			}
+			if (
+				existingPage.content_kind === 'video' &&
+				typeof rawSlide.narration_text === 'string' &&
+				rawSlide.narration_text.trim()
+			) {
+				return {
+					content: null,
+					error: `Slide ${slideNumber} is a video and cannot have generated narration.`
+				};
+			}
+
+			const questions: LectureSlideContentJsonQuestion[] = [];
+			for (const rawQuestion of rawSlide.questions) {
+				if (
+					!isJsonRecord(rawQuestion) ||
+					rawQuestion.type !== 'single_select' ||
+					typeof rawQuestion.intro_text !== 'string' ||
+					typeof rawQuestion.question_text !== 'string' ||
+					!Array.isArray(rawQuestion.options)
+				) {
+					return {
+						content: null,
+						error: `Every question on slide ${slideNumber} must be a single_select question with text and options.`
+					};
+				}
+				const options: LectureSlideContentJsonOption[] = [];
+				for (const rawOption of rawQuestion.options) {
+					if (
+						!isJsonRecord(rawOption) ||
+						typeof rawOption.option_text !== 'string' ||
+						typeof rawOption.correct !== 'boolean' ||
+						typeof rawOption.post_answer_text !== 'string'
+					) {
+						return {
+							content: null,
+							error: `Every answer option on slide ${slideNumber} must include option_text, correct, and post_answer_text.`
+						};
+					}
+					options.push({
+						option_text: rawOption.option_text,
+						correct: rawOption.correct,
+						post_answer_text: rawOption.post_answer_text
+					});
+				}
+				questions.push({
+					type: 'single_select',
+					intro_text: rawQuestion.intro_text,
+					question_text: rawQuestion.question_text,
+					options
+				});
+			}
+			slides.push({
+				slide_number: slideNumber,
+				content_kind: existingPage.content_kind,
+				source_context: {
+					slide_title: existingPage.title || null,
+					extracted_slide_text: existingPage.extracted_text || null,
+					image_description: existingPage.image_description || null
+				},
+				user_notes: rawSlide.user_notes,
+				narration_text: rawSlide.narration_text,
+				questions
+			});
+		}
+		return { content: { version: 1, slides }, error: null };
+	};
+
+	const applyLectureSlideContentJson = (content: LectureSlideContentJson) => {
+		const slidesByPosition = new SvelteMap(
+			content.slides.map((slide) => [slide.slide_number - 1, slide])
+		);
+		const existingQuestionsBySlide = new SvelteMap<number, LectureSlideQuestionDraft[]>();
+		for (const question of lectureSlideQuestionDrafts) {
+			const questions = existingQuestionsBySlide.get(question.slide_position) || [];
+			questions.push(question);
+			existingQuestionsBySlide.set(question.slide_position, questions);
+		}
+
+		lectureSlidePageDrafts = lectureSlidePageDrafts.map((page) => {
+			const slide = slidesByPosition.get(page.position);
+			return slide
+				? {
+						...page,
+						user_notes: slide.user_notes,
+						narration_text: page.content_kind === 'video' ? '' : slide.narration_text || ''
+					}
+				: page;
+		});
+		lectureSlideQuestionDrafts = content.slides.flatMap((slide) => {
+			const slidePosition = slide.slide_number - 1;
+			const existingQuestions = existingQuestionsBySlide.get(slidePosition) || [];
+			return slide.questions.map((question, questionIndex) => {
+				const existingQuestion = existingQuestions[questionIndex];
+				const correctCount = question.options.filter((option) => option.correct).length;
+				const complete =
+					question.question_text.trim().length > 0 &&
+					question.options.length >= 2 &&
+					question.options.every((option) => option.option_text.trim().length > 0) &&
+					correctCount === 1;
+				const hasDraftContent =
+					question.question_text.trim().length > 0 ||
+					question.intro_text.trim().length > 0 ||
+					question.options.length > 0;
+				return {
+					id: existingQuestion?.id,
+					client_id: existingQuestion?.client_id || nextLectureSlideQuestionDraftId(),
+					mode: complete ? 'complete' : hasDraftContent ? 'partial' : 'marker',
+					slide_position: slidePosition,
+					question_text: question.question_text,
+					intro_text: question.intro_text,
+					options: question.options.map((option, optionIndex) => ({
+						id: existingQuestion?.options[optionIndex]?.id,
+						client_id:
+							existingQuestion?.options[optionIndex]?.client_id ||
+							nextLectureSlideQuestionDraftId(),
+						option_text: option.option_text,
+						post_answer_text: option.post_answer_text,
+						correct: option.correct
+					}))
+				};
+			});
+		});
+	};
 
 	const sortLectureSlideQuestionComparables = <
 		T extends { slide_position: number; question_text: string }
@@ -605,6 +860,35 @@
 	let lectureSlideQuestionDrafts: LectureSlideQuestionDraft[] = [];
 	let selectedLectureSlideQuestionClientId: string | null = null;
 	let hasSetLectureSlideQuestionDrafts = false;
+	let lectureSlideContentJson = '';
+	let lectureSlideContentJsonDirty = false;
+	let lectureSlideContentJsonEditing = false;
+	let lectureSlideContentJsonError = '';
+	let hasSetLectureSlideContentJson = false;
+	const applyValidLectureSlideContentJsonDraft = (event: Event) => {
+		lectureSlideContentJson = (event.currentTarget as HTMLTextAreaElement).value;
+		lectureSlideContentJsonDirty = true;
+		const parsedContent = parseLectureSlideContentJson(lectureSlideContentJson);
+		if (!parsedContent.content || parsedContent.error) {
+			lectureSlideContentJsonError =
+				parsedContent.error || 'Lecture slide content JSON is invalid.';
+			return;
+		}
+		lectureSlideContentJsonError = '';
+		if (
+			JSON.stringify(parsedContent.content) !== JSON.stringify(lectureSlideContentJsonDocument())
+		) {
+			applyLectureSlideContentJson(parsedContent.content);
+		}
+	};
+	const finishEditingLectureSlideContentJson = () => {
+		lectureSlideContentJsonEditing = false;
+		if (lectureSlideContentJsonError) {
+			return;
+		}
+		lectureSlideContentJsonDirty = false;
+		lectureSlideContentJson = stringifyLectureSlideContentJson();
+	};
 	let slideGenerationPrompt =
 		data.lectureSlideConfig?.generation_prompt || lectureSlideDefaultGenerationPrompt;
 	let hasSetSlideGenerationPrompt = false;
@@ -1250,19 +1534,25 @@
 		isLectureSlideMode &&
 		!data.isCreating &&
 		(lectureSlideFullProcessingTriggeredByFormChanges ||
+			lectureSlideStructureChanged ||
 			slideNarrationPromptChanged ||
-			lectureSlideAdditionalContextFilesChanged);
+			lectureSlideAdditionalContextFilesChanged ||
+			(lectureSlideNotesChanged && !lectureSlideNarrationChanged));
 	$: lectureSlideQuestionsTriggeredByFormChanges =
 		isLectureSlideMode &&
 		!data.isCreating &&
 		(lectureSlideFullProcessingTriggeredByFormChanges ||
+			lectureSlideStructureChanged ||
 			slideGenerationPromptChanged ||
-			lectureSlideAdditionalContextFilesChanged);
+			lectureSlideAdditionalContextFilesChanged ||
+			lectureSlideQuestionDraftsRequireGeneration);
 	$: lectureSlideAudioTriggeredByFormChanges =
 		isLectureSlideMode &&
 		!data.isCreating &&
 		!lectureSlideNarrationTriggeredByFormChanges &&
-		(lectureSlideVoiceChanged || lectureSlidePagesChanged);
+		(lectureSlideVoiceChanged ||
+			lectureSlideNarrationChanged ||
+			lectureSlideCompleteQuestionsChanged);
 	$: if (
 		(lectureSlideNarrationTriggeredByFormChanges ||
 			lectureSlideFullProcessingTriggeredByFormChanges) &&
@@ -1334,6 +1624,15 @@
 		);
 	}
 	$: if (
+		hasSetLectureSlidePageDrafts &&
+		hasSetLectureSlideQuestionDrafts &&
+		!lectureSlideContentJsonEditing &&
+		!lectureSlideContentJsonDirty
+	) {
+		lectureSlideContentJson = stringifyLectureSlideContentJson();
+		hasSetLectureSlideContentJson = true;
+	}
+	$: if (
 		!hasSetLectureSlideAdditionalContextFiles &&
 		lectureSlideConfigReady &&
 		!lectureSlideConfigLoadError
@@ -1376,6 +1675,55 @@
 			narration_text: (page.content_kind || 'slide') === 'video' ? '' : page.narration_text || ''
 		}))
 	);
+	$: currentLectureSlideStructureNormalized = JSON.stringify(
+		(data.lectureSlideConfig?.pages || []).map((page) => ({
+			position: page.position,
+			content_kind: page.content_kind || 'slide',
+			source_page_number: page.source_page_number ?? page.position,
+			media_stored_object_id: page.media_stored_object_id ?? null
+		}))
+	);
+	$: lectureSlideStructureNormalized = JSON.stringify(
+		lectureSlidePageDrafts.map((page) => ({
+			position: page.position,
+			content_kind: page.content_kind,
+			source_page_number: page.source_page_number ?? null,
+			media_stored_object_id: page.media_stored_object_id ?? null
+		}))
+	);
+	$: lectureSlideStructureChanged =
+		hasSetLectureSlidePageDrafts &&
+		lectureSlideStructureNormalized !== currentLectureSlideStructureNormalized;
+	$: currentLectureSlideNotesNormalized = JSON.stringify(
+		(data.lectureSlideConfig?.pages || []).map((page) => ({
+			position: page.position,
+			user_notes: page.user_notes || ''
+		}))
+	);
+	$: lectureSlideNotesNormalized = JSON.stringify(
+		lectureSlidePageDrafts.map((page) => ({
+			position: page.position,
+			user_notes: page.user_notes || ''
+		}))
+	);
+	$: lectureSlideNotesChanged =
+		hasSetLectureSlidePageDrafts &&
+		lectureSlideNotesNormalized !== currentLectureSlideNotesNormalized;
+	$: currentLectureSlideNarrationNormalized = JSON.stringify(
+		(data.lectureSlideConfig?.pages || []).map((page) => ({
+			position: page.position,
+			narration_text: (page.content_kind || 'slide') === 'video' ? '' : page.narration_text || ''
+		}))
+	);
+	$: lectureSlideNarrationNormalized = JSON.stringify(
+		lectureSlidePageDrafts.map((page) => ({
+			position: page.position,
+			narration_text: page.content_kind === 'video' ? '' : page.narration_text || ''
+		}))
+	);
+	$: lectureSlideNarrationChanged =
+		hasSetLectureSlidePageDrafts &&
+		lectureSlideNarrationNormalized !== currentLectureSlideNarrationNormalized;
 	$: lectureSlidePagesChanged =
 		hasSetLectureSlidePageDrafts &&
 		JSON.stringify(
@@ -1403,6 +1751,11 @@
 	$: lectureSlideQuestionsChanged =
 		hasSetLectureSlideQuestionDrafts &&
 		lectureSlideQuestionsNormalized !== currentLectureSlideQuestionsNormalized;
+	$: lectureSlideQuestionDraftsRequireGeneration =
+		lectureSlideQuestionsChanged &&
+		lectureSlideQuestionDrafts.some((question) => question.mode !== 'complete');
+	$: lectureSlideCompleteQuestionsChanged =
+		lectureSlideQuestionsChanged && !lectureSlideQuestionDraftsRequireGeneration;
 	$: currentLectureSlideAdditionalContextFileIds = JSON.stringify(
 		(currentLectureSlideDeck?.additional_context_files || []).map((file) => file.id)
 	);
@@ -2895,6 +3248,9 @@
 		if (lectureSlideQuestionsChanged) {
 			modifiedFields.push('lecture slide questions');
 		}
+		if (lectureSlideContentJsonDirty) {
+			modifiedFields.push('lecture slide content JSON');
+		}
 		if (lectureSlideAdditionalContextFilesChanged) {
 			modifiedFields.push('lecture slide context files');
 		}
@@ -4096,6 +4452,25 @@
 				$loadingMessage = '';
 				return;
 			}
+			let lectureSlideJsonAppliedChanges = false;
+			if (lectureSlideContentJsonDirty) {
+				const parsedContent = parseLectureSlideContentJson(lectureSlideContentJson);
+				if (!parsedContent.content || parsedContent.error) {
+					sadToast(parsedContent.error || 'Lecture slide content JSON is invalid.');
+					$loading = false;
+					$loadingMessage = '';
+					return;
+				}
+				lectureSlideJsonAppliedChanges =
+					JSON.stringify(parsedContent.content) !==
+					JSON.stringify(lectureSlideContentJsonDocument());
+				if (lectureSlideJsonAppliedChanges) {
+					applyLectureSlideContentJson(parsedContent.content);
+				} else {
+					lectureSlideContentJsonDirty = false;
+					lectureSlideContentJson = stringifyLectureSlideContentJson();
+				}
+			}
 			const lectureSlideQuestionError = validateLectureSlideQuestionDrafts(
 				lectureSlideQuestionDrafts
 			);
@@ -4110,6 +4485,7 @@
 				lectureSlideDeckIdChanged ||
 				lectureSlidePagesChanged ||
 				lectureSlideQuestionsChanged ||
+				lectureSlideJsonAppliedChanges ||
 				lectureSlideAdditionalContextFilesChanged ||
 				lectureSlideVoiceChanged ||
 				slideGenerationPromptChanged ||
@@ -4118,12 +4494,20 @@
 				regenerateSlideQuestionsRequested ||
 				regenerateSlideAudioRequested;
 			const shouldSubmitLectureSlideQuestions =
-				data.isCreating || lectureSlideDeckIdChanged || lectureSlideQuestionsChanged;
+				data.isCreating ||
+				lectureSlideDeckIdChanged ||
+				lectureSlideQuestionsChanged ||
+				lectureSlideJsonAppliedChanges;
 
 			if (data.isCreating || lectureSlideFieldsChanged) {
 				params.lecture_slide_deck_id = selectedLectureSlideDeckId;
 				params.lecture_slide_page_notes = lectureSlidePageDrafts.map(lectureSlideDraftToPageNotes);
-				if (data.isCreating || lectureSlideDeckIdChanged || lectureSlidePagesChanged) {
+				if (
+					data.isCreating ||
+					lectureSlideDeckIdChanged ||
+					lectureSlidePagesChanged ||
+					lectureSlideJsonAppliedChanges
+				) {
 					params.lecture_slide_content_items = lectureSlidePageDrafts.map(
 						lectureSlideDraftToContentItem
 					);
@@ -6439,6 +6823,34 @@
 										class="text-sm"
 									/>
 								</div>
+								{#if hasSetLectureSlideContentJson && lectureSlidePageDrafts.length > 0}
+									<div class="col-span-2 mb-1">
+										<Label for="lecture_slide_content_json" class="mb-0 text-gray-800">
+											Lecture Content JSON
+										</Label>
+										<Helper class="pb-1">
+											Edit all slide notes, narration, and end-of-slide questions in one document.
+											The source_context fields are reference-only; slide timing is derived
+											automatically.
+										</Helper>
+										<Textarea
+											id="lecture_slide_content_json"
+											name="lecture_slide_content_json"
+											rows={18}
+											bind:value={lectureSlideContentJson}
+											disabled={preventEdits}
+											onfocus={() => {
+												lectureSlideContentJsonEditing = true;
+											}}
+											oninput={applyValidLectureSlideContentJsonDraft}
+											onblur={finishEditingLectureSlideContentJson}
+											class="font-mono text-xs"
+										/>
+										{#if lectureSlideContentJsonError}
+											<Helper class="pt-1 text-red-700">{lectureSlideContentJsonError}</Helper>
+										{/if}
+									</div>
+								{/if}
 								{#if !data.isCreating}
 									<div class="mb-2 flex flex-col gap-2 text-sm text-gray-600">
 										<div class="flex flex-wrap items-center gap-3">
