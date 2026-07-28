@@ -202,7 +202,7 @@
 		message.metadata?.lecture_context_pending === true;
 
 	const getThreadImageUrl = (fileId: string) =>
-		api.fullPath(`/class/${classId}/thread/${threadId}/image/${fileId}`);
+		api.withMediaAuthQuery(api.fullPath(`/class/${classId}/thread/${threadId}/image/${fileId}`));
 
 	const messageHasVisibleText = (message: api.OpenAIMessage) =>
 		message.content.some(
