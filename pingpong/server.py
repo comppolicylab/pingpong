@@ -11148,9 +11148,17 @@ async def validate_assistant_lecture_video_voice(
     body: schemas.ValidateLectureVideoVoiceRequest,
     request: StateRequest,
 ):
-    await lecture_video_service.get_lecture_video_assistant_for_class(
-        request.state["db"], int(assistant_id), int(class_id)
-    )
+    assistant = await models.Assistant.get_by_id(request.state["db"], int(assistant_id))
+    if not assistant or assistant.class_id != int(class_id):
+        raise HTTPException(404, f"Assistant {assistant_id} not found.")
+    if assistant.interaction_mode not in {
+        schemas.InteractionMode.LECTURE_VIDEO,
+        schemas.InteractionMode.LECTURE_SLIDES,
+    }:
+        raise HTTPException(
+            400,
+            "This endpoint only supports assistants in Lecture Video or Lecture Slides mode.",
+        )
     return await _validate_lecture_video_voice_id(
         int(class_id),
         request,
