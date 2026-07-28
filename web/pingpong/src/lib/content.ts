@@ -1,5 +1,6 @@
 import {
 	join,
+	withMediaAuthQuery,
 	type Content,
 	type MCPListToolsCallItem,
 	type MCPServerCallItem,
@@ -133,7 +134,9 @@ export const parseTextContent = (
 					threadVersion === 2)
 			) {
 				const { start_index, end_index, file_path } = annotation;
-				const url = join(baseUrl, `/message/${messageId}/file/${file_path.file_id}`);
+				const url = withMediaAuthQuery(
+					join(baseUrl, `/message/${messageId}/file/${file_path.file_id}`)
+				);
 				replacements.push({ start: start_index, end: end_index, newValue: url });
 			} else if (annotation.type === 'file_citation' && annotation.text !== 'responses_v3') {
 				const { start_index, end_index, file_citation } = annotation;

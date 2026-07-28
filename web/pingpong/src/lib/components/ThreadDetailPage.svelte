@@ -757,7 +757,7 @@
 	};
 
 	const getThreadImageUrl = (fileId: string) =>
-		api.fullPath(`/class/${classId}/thread/${threadId}/image/${fileId}`);
+		api.withMediaAuthQuery(api.fullPath(`/class/${classId}/thread/${threadId}/image/${fileId}`));
 
 	const getOptimisticVisionFile = (
 		message: api.OpenAIMessage,
