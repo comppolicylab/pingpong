@@ -5754,6 +5754,9 @@ class Assistant(Base):
         Boolean, nullable=False, default=False, server_default="false"
     )
     should_record_user_information = Column(Boolean, server_default="false")
+    prevent_user_thread_deletion = Column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
     disable_prompt_randomization = Column(
         Boolean, nullable=False, server_default="false"
     )
@@ -9150,6 +9153,9 @@ class Thread(Base):
         server_default=schemas.InteractionMode.CHAT.name,
     )
     display_user_info = Column(Boolean, server_default="false")
+    prevent_user_thread_deletion = Column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
     voice_mode_recording = relationship(
         "VoiceModeRecording",
         back_populates="thread",

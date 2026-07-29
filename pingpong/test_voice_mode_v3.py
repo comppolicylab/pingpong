@@ -40,7 +40,8 @@ async def test_create_audio_thread_supports_version_3_assistant(
             creator_id=123,
             use_latex=False,
             use_image_descriptions=False,
-            should_record_user_information=False,
+            should_record_user_information=True,
+            prevent_user_thread_deletion=True,
         )
         session.add_all([class_, assistant])
         await session.commit()
@@ -63,6 +64,8 @@ async def test_create_audio_thread_supports_version_3_assistant(
         assert created_thread.version == 3
         assert created_thread.thread_id is None
         assert created_thread.interaction_mode == schemas.InteractionMode.VOICE
+        assert created_thread.display_user_info is True
+        assert created_thread.prevent_user_thread_deletion is True
 
 
 @with_user(123)

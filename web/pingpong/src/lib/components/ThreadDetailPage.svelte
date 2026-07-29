@@ -125,6 +125,7 @@
 	$: isAnonymousSession = data?.me?.status === 'anonymous';
 	$: teachers = data?.supervisors || [];
 	$: canDeleteThread = data.canDeleteThread;
+	$: threadDeletionDisabledByModerators = data.threadDeletionDisabledByModerators === true;
 	$: canPublishThread = data.canPublishThread;
 	$: canViewAssistant = data.canViewAssistant;
 	$: messages = threadMgr.messages;
@@ -2655,6 +2656,12 @@
 									<DropdownItem onclick={deleteThread} disabled={!canDeleteThread}>
 										<span class:text-gray-300={!canDeleteThread}>Delete</span>
 									</DropdownItem>
+									{#if threadDeletionDisabledByModerators}
+										<Tooltip
+											defaultClass="text-wrap py-2 px-3 text-sm font-normal shadow-xs"
+											arrow={false}>Moderators have disabled deleting this conversation.</Tooltip
+										>
+									{/if}
 								</Dropdown>
 							</div>
 						{/if}

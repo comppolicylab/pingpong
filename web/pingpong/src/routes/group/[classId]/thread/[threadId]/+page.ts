@@ -30,6 +30,7 @@ export const load: PageLoad = async ({ fetch, params, parent }) => {
 	let threadInteractionMode: api.InteractionMode | null = null;
 	let threadRecording: api.VoiceModeRecordingInfo | null = null;
 	let threadDisplayUserInfo = false;
+	let threadPreventsUserDeletion = false;
 	let threadLectureVideoMismatch = false;
 	let threadLectureSlideMismatch = false;
 	let assistantGrants = { canViewAssistant: false };
@@ -38,6 +39,8 @@ export const load: PageLoad = async ({ fetch, params, parent }) => {
 	threadInteractionMode = expanded.data.thread.interaction_mode || 'chat';
 	threadRecording = expanded.data.recording || null;
 	threadDisplayUserInfo = expanded.data.thread.display_user_info || false;
+	threadPreventsUserDeletion =
+		threadDisplayUserInfo && (expanded.data.thread.prevent_user_thread_deletion || false);
 	threadLectureVideoMismatch =
 		expanded.data.lecture_video_matches_assistant === false &&
 		threadInteractionMode === 'lecture_video';
@@ -60,7 +63,9 @@ export const load: PageLoad = async ({ fetch, params, parent }) => {
 		threadInteractionMode,
 		availableTools: threadTools,
 		canDeleteThread:
-			threadGrants.canDelete && (!threadDisplayUserInfo || threadGrants.canManageThreads),
+			threadGrants.canDelete && (!threadPreventsUserDeletion || threadGrants.canManageThreads),
+		threadDeletionDisabledByModerators:
+			threadPreventsUserDeletion && !threadGrants.canManageThreads,
 		canPublishThread: threadGrants.canPublish,
 		canViewAssistant: assistantGrants.canViewAssistant,
 		threadRecording,

@@ -111,11 +111,14 @@
 		const willDisplayUserInfo = data.class.private
 			? false
 			: (assistant.should_record_user_information ?? false);
+		const willPreventUserThreadDeletion =
+			willDisplayUserInfo && (assistant.prevent_user_thread_deletion ?? false);
 		return {
 			creator: isCourseAssistant ? 'Moderation Team' : creator,
 			isCourseAssistant,
 			isMyAssistant,
-			willDisplayUserInfo
+			willDisplayUserInfo,
+			willPreventUserThreadDeletion
 		};
 	};
 
@@ -943,6 +946,27 @@
 								Talk to this assistant using your voice.<br />Create a new session to begin.
 							</p>
 						</div>
+						{#if assistantMeta.willDisplayUserInfo}
+							<div
+								class="flex max-w-sm flex-row items-stretch gap-2 rounded-2xl border border-red-600 px-3 py-2 text-center"
+							>
+								<UsersSolid size="sm" class="hidden pt-0 text-red-600 sm:inline" />
+								<Span class="text-sm font-normal text-gray-700"
+									><Button
+										class="p-0 text-sm font-normal text-gray-700 underline"
+										onclick={showModeratorsModal}
+										ontouchstart={showModeratorsModal}>Moderators</Button
+									> can see this thread,
+									<span class="font-semibold"
+										>your full name, and listen to a recording of your conversation</span
+									>.{#if assistantMeta.willPreventUserThreadDeletion}<span
+											class="mt-1 block font-semibold"
+											>You will not be able to delete this conversation because moderators have
+											disabled deletion.</span
+										>{/if}</Span
+								>
+							</div>
+						{/if}
 						<div class="flex flex-row p-1.5">
 							<Button
 								class="flex flex-row gap-1.5 rounded-lg bg-blue-dark-40 px-4 py-1.5 text-xs text-white transition-all hover:bg-blue-dark-50 hover:text-blue-light-50"
@@ -1003,6 +1027,26 @@
 								: 'Watch a video and ask and answer questions as you go.'}
 						</p>
 					</div>
+					{#if assistantMeta.willDisplayUserInfo}
+						<div
+							class="flex max-w-sm flex-row items-stretch gap-2 rounded-2xl border border-red-600 px-3 py-2 text-center"
+						>
+							<UsersSolid size="sm" class="hidden pt-0 text-red-600 sm:inline" />
+							<Span class="text-sm font-normal text-gray-700"
+								><Button
+									class="p-0 text-sm font-normal text-gray-700 underline"
+									onclick={showModeratorsModal}
+									ontouchstart={showModeratorsModal}>Moderators</Button
+								> can see this thread and
+								<span class="font-semibold">your full name</span
+								>.{#if assistantMeta.willPreventUserThreadDeletion}<span
+										class="mt-1 block font-semibold"
+										>You will not be able to delete this conversation because moderators have
+										disabled deletion.</span
+									>{/if}</Span
+							>
+						</div>
+					{/if}
 					<div class="flex flex-row p-1.5">
 						<Button
 							class="flex flex-row gap-1.5 rounded-lg bg-blue-dark-40 px-4 py-1.5 text-xs text-white transition-all hover:bg-blue-dark-50 hover:text-blue-light-50"
@@ -1027,7 +1071,11 @@
 									onclick={showModeratorsModal}
 									ontouchstart={showModeratorsModal}>Moderators</Button
 								> have enabled a setting for this thread only that allows them to see
-								<span class="font-semibold">your full name</span> and its content.</Span
+								<span class="font-semibold">your full name</span> and its content.{#if assistantMeta.willPreventUserThreadDeletion}<span
+										class="mt-1 block font-semibold"
+										>You will not be able to delete this conversation because moderators have
+										disabled deletion.</span
+									>{/if}</Span
 							>
 						</div>
 					{/if}
@@ -1065,7 +1113,11 @@
 									onclick={showModeratorsModal}
 									ontouchstart={showModeratorsModal}>Moderators</Button
 								> have enabled a setting for this thread only that allows them to see
-								<span class="font-semibold">your full name</span> and its content.</Span
+								<span class="font-semibold">your full name</span> and its content.{#if assistantMeta.willPreventUserThreadDeletion}<span
+										class="mt-1 block font-semibold"
+										>You will not be able to delete this conversation because moderators have
+										disabled deletion.</span
+									>{/if}</Span
 							>
 						</div>
 					{/if}

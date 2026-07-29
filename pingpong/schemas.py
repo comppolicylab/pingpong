@@ -1650,6 +1650,7 @@ class Assistant(BaseModel):
     assistant_should_message_first: bool | None = None
     allow_lesson_timeline_bypass: bool = False
     should_record_user_information: bool | None = None
+    prevent_user_thread_deletion: bool = False
     disable_prompt_randomization: bool | None = None
     allow_user_file_uploads: bool | None = None
     allow_user_image_uploads: bool | None = None
@@ -2035,6 +2036,7 @@ class CreateAssistant(BaseModel):
     assistant_should_message_first: bool = False
     allow_lesson_timeline_bypass: bool = False
     should_record_user_information: bool = False
+    prevent_user_thread_deletion: bool = False
     disable_prompt_randomization: bool = False
     allow_user_file_uploads: bool = True
     allow_user_image_uploads: bool = True
@@ -2150,6 +2152,7 @@ class UpdateAssistant(BaseModel):
     assistant_should_message_first: bool | None = None
     allow_lesson_timeline_bypass: bool | None = None
     should_record_user_information: bool | None = None
+    prevent_user_thread_deletion: bool | None = None
     disable_prompt_randomization: bool | None = None
     allow_user_file_uploads: bool | None = None
     allow_user_image_uploads: bool | None = None
@@ -2214,6 +2217,7 @@ class Thread(BaseModel):
     created: datetime
     last_activity: datetime
     display_user_info: bool
+    prevent_user_thread_deletion: bool = False
     anonymous_session: bool = False
     lecture_video_id: int | None = None
     is_current_user_participant: bool = False

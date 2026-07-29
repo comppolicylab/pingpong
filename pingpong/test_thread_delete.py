@@ -159,7 +159,7 @@ async def test_thread_delete_removes_mcp_server_tool_run_associations(db):
 
 @with_user(3100)
 @with_authz(grants=[("user:3100", "can_delete", "thread:3101")])
-async def test_recorded_thread_cannot_be_deleted_by_participant(
+async def test_protected_thread_cannot_be_deleted_by_participant(
     api, db, valid_user_token
 ):
     async with db.async_session() as session:
@@ -174,6 +174,7 @@ async def test_recorded_thread_cannot_be_deleted_by_participant(
                 version=3,
                 private=True,
                 display_user_info=True,
+                prevent_user_thread_deletion=True,
             )
         )
         await session.commit()
@@ -199,7 +200,7 @@ async def test_recorded_thread_cannot_be_deleted_by_participant(
         ("user:3200", "can_manage_threads", "class:3202"),
     ]
 )
-async def test_recorded_thread_can_be_deleted_by_supervisor(api, db, valid_user_token):
+async def test_protected_thread_can_be_deleted_by_supervisor(api, db, valid_user_token):
     async with db.async_session() as session:
         session.add(
             models.Class(id=3202, name="Recorded Thread Class", api_key="sk-test")
@@ -212,6 +213,7 @@ async def test_recorded_thread_can_be_deleted_by_supervisor(api, db, valid_user_
                 version=3,
                 private=True,
                 display_user_info=True,
+                prevent_user_thread_deletion=True,
             )
         )
         await session.commit()
@@ -225,3 +227,116 @@ async def test_recorded_thread_can_be_deleted_by_supervisor(api, db, valid_user_
 
     async with db.async_session() as session:
         assert await models.Thread.get_by_id(session, 3201) is None
+
+
+@with_user(3300)
+@with_authz(grants=[("user:3300", "can_delete", "thread:3301")])
+async def test_recorded_thread_can_be_deleted_when_protection_is_off(
+    api, db, valid_user_token
+):
+    async with db.async_session() as session:
+        session.add(
+            models.Class(id=3302, name="Recorded Thread Class", api_key="sk-test")
+        )
+        session.add(
+            models.Thread(
+                id=3301,
+                thread_id="recorded-thread-3301",
+                class_id=3302,
+                version=3,
+                private=True,
+                display_user_info=True,
+            )
+        )
+        await session.commit()
+
+    response = api.delete(
+        "/api/v1/class/3302/thread/3301",
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+
+    assert response.status_code == 200, response.text
+
+    async with db.async_session() as session:
+        assert await models.Thread.get_by_id(session, 3301) is None
+
+
+@with_user(3400)
+@with_authz(grants=[("user:3400", "can_delete", "thread:3401")])
+async def test_protection_flag_is_ignored_without_recorded_user_information(
+    api, db, valid_user_token
+):
+    async with db.async_session() as session:
+        session.add(
+            models.Class(id=3402, name="Unrecorded Thread Class", api_key="sk-test")
+        )
+        session.add(
+            models.Thread(
+                id=3401,
+                thread_id="unrecorded-thread-3401",
+                class_id=3402,
+                version=3,
+                private=True,
+                display_user_info=False,
+                prevent_user_thread_deletion=True,
+            )
+        )
+        await session.commit()
+
+    response = api.delete(
+        "/api/v1/class/3402/thread/3401",
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+
+    assert response.status_code == 200, response.text
+
+    async with db.async_session() as session:
+        assert await models.Thread.get_by_id(session, 3401) is None
+
+
+@with_user(3500)
+@with_authz(grants=[("user:3500", "can_create_thread", "class:3502")])
+async def test_chat_thread_copies_deletion_protection_from_assistant(
+    api, db, valid_user_token
+):
+    async with db.async_session() as session:
+        class_ = models.Class(
+            id=3502,
+            name="Protected Chat Class",
+            api_key="sk-test",
+            private=False,
+        )
+        assistant = models.Assistant(
+            id=3503,
+            name="Protected Chat Assistant",
+            version=3,
+            instructions="You are helpful.",
+            interaction_mode=schemas.InteractionMode.CHAT,
+            description="Chat assistant",
+            tools="[]",
+            model="gpt-4o-mini",
+            class_id=class_.id,
+            creator_id=3500,
+            use_latex=False,
+            use_image_descriptions=False,
+            assistant_should_message_first=False,
+            should_record_user_information=True,
+            prevent_user_thread_deletion=True,
+        )
+        session.add_all([class_, assistant])
+        await session.commit()
+
+    response = api.post(
+        "/api/v1/class/3502/thread",
+        json={"assistant_id": 3503, "message": "Hello"},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+
+    assert response.status_code == 200, response.text
+    thread_id = response.json()["thread"]["id"]
+
+    async with db.async_session() as session:
+        thread = await models.Thread.get_by_id(session, thread_id)
+        assert thread is not None
+        assert thread.display_user_info is True
+        assert thread.prevent_user_thread_deletion is True
