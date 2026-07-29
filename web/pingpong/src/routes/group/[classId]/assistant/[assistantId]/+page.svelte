@@ -5843,7 +5843,7 @@
 						<Badge
 							class="flex max-w-fit shrink-0 flex-row items-center gap-x-2 rounded-lg border border-gray-400 bg-gradient-to-b from-gray-100 to-gray-200 px-2 py-0.5 text-xs text-gray-800 normal-case"
 							><CloseOutline size="sm" />
-							<div>No quantitative markup for assistant responses</div>
+							<div>No formatting and visualizations for assistant responses</div>
 						</Badge>
 						<Helper
 							>This interaction mode does not support LaTeX, Mermaid, or SVG formatting for
