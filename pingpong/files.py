@@ -247,6 +247,9 @@ async def handle_delete_files(
         authz (AuthzClient): Authorization client
         oai_client (openai.AsyncClient): OpenAI API client
         file_ids (list[int]): File IDs to delete
+        class_id (int): Class from which the files are being removed
+        skip_in_use (bool): Retain files that are still used by assistants instead
+            of rejecting the deletion request
 
     Returns:
         GenericStatus: Status of the operation
@@ -279,6 +282,13 @@ async def handle_delete_files(
                 "Remove them from all assistants before deleting!",
             )
         in_use_file_ids = {file.id for file in in_use_files}
+        logger.info(
+            "Retaining files still used by assistants. class_id=%s file_ids=%s",
+            sanitize_for_log(str(class_id)),
+            sanitize_for_log(
+                ",".join(str(file_id) for file_id in sorted(in_use_file_ids))
+            ),
+        )
         files = [file for file in files if file.id not in in_use_file_ids]
         file_ids_found = [file.id for file in files]
         if not file_ids_found:
@@ -306,7 +316,10 @@ async def handle_delete_files(
         deleted_files, missing_ids = await File.delete_multiple(
             session, file_ids_to_delete
         )
+        file_ids_to_delete_set = set(file_ids_to_delete)
         for file in files:
+            if file.id not in file_ids_to_delete_set:
+                continue
             revoked_grants.extend(_file_grants(file, class_id))
         await authz.write_safe(revoke=revoked_grants)
 

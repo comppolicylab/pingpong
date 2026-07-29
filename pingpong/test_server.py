@@ -1963,6 +1963,19 @@ async def test_copy_assistant_shares_private_files_with_new_owner(db):
                 file_id=source_file.id,
             )
         )
+        source_mcp_tool = await models.MCPServerTool.create(
+            session,
+            {
+                "display_name": "Source MCP",
+                "server_url": "https://example.com/mcp",
+                "created_by_user_id": source_creator.id,
+            },
+        )
+        await models.Assistant.synchronize_assistant_mcp_server_tools(
+            session,
+            assistant.id,
+            [source_mcp_tool.id],
+        )
 
         loaded = await models.Assistant.get_by_id_with_copy_context(
             session, assistant.id
@@ -1992,8 +2005,23 @@ async def test_copy_assistant_shares_private_files_with_new_owner(db):
         assert [file.id for file in copied_with_ci_files.code_interpreter_files] == [
             copied_files[0].id
         ]
+        copied_mcp_tools = await models.MCPServerTool.get_for_assistant(
+            session, copied.id
+        )
+        assert len(copied_mcp_tools) == 1
+        assert copied_mcp_tools[0].created_by_user_id == copied_creator.id
 
     openai_client.files.create.assert_not_awaited()
+    grants = [
+        grant
+        for call in authz.write_safe.await_args_list
+        for grant in call.kwargs.get("grant", [])
+    ]
+    assert (
+        "class:1",
+        "parent",
+        f"user_file:{source_file.id}",
+    ) in grants
 
 
 @with_user(123)

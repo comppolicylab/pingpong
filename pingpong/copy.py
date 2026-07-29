@@ -500,7 +500,7 @@ async def copy_assistant(
                     "description": mcp_tool.description,
                     "enabled": mcp_tool.enabled,
                     "created_by_user_id": (
-                        copied_creator_id
+                        creator_id
                         if creator_id is not None
                         else mcp_tool.created_by_user_id
                     ),
@@ -571,6 +571,8 @@ async def copy_assistant(
     return new_assistant
 
 
+# Group cloning preserves each source assistant's creator as historical attribution;
+# only direct assistant copies override the creator with the user making the copy.
 async def copy_moderator_published_assistants(
     session: AsyncSession,
     client: OpenFgaAuthzClient,
