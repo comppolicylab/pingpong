@@ -2946,6 +2946,7 @@ export type Assistant = {
 	assistant_should_message_first: boolean | null;
 	allow_lesson_timeline_bypass: boolean;
 	should_record_user_information: boolean | null;
+	prevent_user_thread_deletion: boolean;
 	disable_prompt_randomization: boolean | null;
 	allow_user_file_uploads: boolean | null;
 	allow_user_image_uploads: boolean | null;
@@ -3109,6 +3110,7 @@ export type CreateAssistantRequest = {
 	assistant_should_message_first?: boolean;
 	allow_lesson_timeline_bypass?: boolean;
 	should_record_user_information?: boolean;
+	prevent_user_thread_deletion?: boolean;
 	disable_prompt_randomization?: boolean;
 	allow_user_file_uploads?: boolean;
 	allow_user_image_uploads?: boolean;
@@ -3185,6 +3187,7 @@ export type UpdateAssistantRequest = {
 	assistant_should_message_first?: boolean;
 	allow_lesson_timeline_bypass?: boolean | null;
 	should_record_user_information?: boolean;
+	prevent_user_thread_deletion?: boolean;
 	disable_prompt_randomization?: boolean;
 	allow_user_file_uploads?: boolean;
 	allow_user_image_uploads?: boolean;
@@ -3883,6 +3886,7 @@ export type Thread = {
 	created: string;
 	last_activity: string;
 	display_user_info?: boolean;
+	prevent_user_thread_deletion?: boolean;
 	anonymous_session?: boolean;
 	is_current_user_participant?: boolean;
 };

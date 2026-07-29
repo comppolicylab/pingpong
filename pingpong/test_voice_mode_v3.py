@@ -63,6 +63,56 @@ async def test_create_audio_thread_supports_version_3_assistant(
         assert created_thread.version == 3
         assert created_thread.thread_id is None
         assert created_thread.interaction_mode == schemas.InteractionMode.VOICE
+        assert created_thread.display_user_info is False
+        assert created_thread.prevent_user_thread_deletion is False
+
+
+@with_user(123)
+@with_authz(grants=[("user:123", "can_create_thread", "class:1")])
+async def test_audio_thread_copies_deletion_protection_from_assistant(
+    api, db, valid_user_token
+):
+    async with db.async_session() as session:
+        class_ = models.Class(
+            id=1,
+            name="Protected Voice Class",
+            term="Spring 2026",
+            api_key="sk-test",
+            private=False,
+        )
+        assistant = models.Assistant(
+            id=11,
+            name="Protected Voice Assistant",
+            version=3,
+            instructions="You are a voice assistant.",
+            interaction_mode=schemas.InteractionMode.VOICE,
+            description="Voice assistant",
+            tools="[]",
+            model="gpt-4o-mini",
+            class_id=class_.id,
+            creator_id=123,
+            use_latex=False,
+            use_image_descriptions=False,
+            should_record_user_information=True,
+            prevent_user_thread_deletion=True,
+        )
+        session.add_all([class_, assistant])
+        await session.commit()
+
+    response = api.post(
+        "/api/v1/class/1/thread/audio",
+        json={"assistant_id": 11},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert response.status_code == 200
+
+    async with db.async_session() as session:
+        created_thread = await models.Thread.get_by_id(
+            session, int(response.json()["thread"]["id"])
+        )
+        assert created_thread is not None
+        assert created_thread.display_user_info is True
+        assert created_thread.prevent_user_thread_deletion is True
 
 
 @with_user(123)
@@ -410,6 +460,155 @@ def _fake_class_models_response(
         "default_prompts": [],
         "enforce_classic_assistants": False,
     }
+
+
+@with_user(123)
+@with_authz(grants=[("user:123", "can_create_assistants", "class:1")])
+async def test_create_assistant_rejects_deletion_protection_without_recording(
+    api, db, valid_user_token, monkeypatch
+):
+    async def fake_list_class_models(class_id: str, request, openai_client):  # type: ignore[no-untyped-def]
+        return _fake_class_models_response()
+
+    server_module = importlib.import_module("pingpong.server")
+    monkeypatch.setattr(server_module, "list_class_models", fake_list_class_models)
+
+    async with db.async_session() as session:
+        session.add(
+            models.Class(
+                id=1,
+                name="Chat Class",
+                term="Spring 2026",
+                api_key="sk-test",
+                private=False,
+            )
+        )
+        await session.commit()
+
+    response = api.post(
+        "/api/v1/class/1/assistant",
+        json={
+            "name": "Protected Assistant",
+            "instructions": "You are helpful.",
+            "description": "Test assistant",
+            "interaction_mode": "chat",
+            "model": "gpt-4o-mini",
+            "tools": [],
+            "should_record_user_information": False,
+            "prevent_user_thread_deletion": True,
+        },
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == (
+        "Preventing conversation deletion requires recording user information."
+    )
+
+
+@with_user(123)
+@with_authz(grants=[("user:123", "can_edit", "assistant:11")])
+async def test_update_assistant_rejects_deletion_protection_without_recording(
+    api, db, valid_user_token, monkeypatch
+):
+    async def fake_list_class_models(class_id: str, request, openai_client):  # type: ignore[no-untyped-def]
+        return _fake_class_models_response()
+
+    server_module = importlib.import_module("pingpong.server")
+    monkeypatch.setattr(server_module, "list_class_models", fake_list_class_models)
+
+    async with db.async_session() as session:
+        class_ = models.Class(
+            id=1,
+            name="Chat Class",
+            term="Spring 2026",
+            api_key="sk-test",
+            private=False,
+        )
+        assistant = models.Assistant(
+            id=11,
+            name="Unrecorded Assistant",
+            version=3,
+            instructions="You are helpful.",
+            interaction_mode=schemas.InteractionMode.CHAT,
+            description="Test assistant",
+            tools="[]",
+            model="gpt-4o-mini",
+            class_id=class_.id,
+            creator_id=123,
+            use_latex=False,
+            use_image_descriptions=False,
+            locked=False,
+            should_record_user_information=False,
+        )
+        session.add_all([class_, assistant])
+        await session.commit()
+
+    response = api.put(
+        "/api/v1/class/1/assistant/11",
+        json={"prevent_user_thread_deletion": True},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == (
+        "Preventing conversation deletion requires recording user information."
+    )
+
+
+@with_user(123)
+@with_authz(grants=[("user:123", "can_edit", "assistant:11")])
+async def test_update_assistant_disables_deletion_protection_when_recording_is_disabled(
+    api, db, valid_user_token, monkeypatch
+):
+    async def fake_list_class_models(class_id: str, request, openai_client):  # type: ignore[no-untyped-def]
+        return _fake_class_models_response()
+
+    server_module = importlib.import_module("pingpong.server")
+    monkeypatch.setattr(server_module, "list_class_models", fake_list_class_models)
+
+    async with db.async_session() as session:
+        class_ = models.Class(
+            id=1,
+            name="Chat Class",
+            term="Spring 2026",
+            api_key="sk-test",
+            private=False,
+        )
+        assistant = models.Assistant(
+            id=11,
+            name="Protected Assistant",
+            version=3,
+            instructions="You are helpful.",
+            interaction_mode=schemas.InteractionMode.CHAT,
+            description="Test assistant",
+            tools="[]",
+            model="gpt-4o-mini",
+            class_id=class_.id,
+            creator_id=123,
+            use_latex=False,
+            use_image_descriptions=False,
+            locked=False,
+            should_record_user_information=True,
+            prevent_user_thread_deletion=True,
+        )
+        session.add_all([class_, assistant])
+        await session.commit()
+
+    response = api.put(
+        "/api/v1/class/1/assistant/11",
+        json={"should_record_user_information": False},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["should_record_user_information"] is False
+    assert response.json()["prevent_user_thread_deletion"] is False
+
+    async with db.async_session() as session:
+        updated = await models.Assistant.get_by_id(session, 11)
+        assert updated.should_record_user_information is False
+        assert updated.prevent_user_thread_deletion is False
 
 
 def test_voice_model_capabilities_support_next_gen():

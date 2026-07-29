@@ -7937,6 +7937,11 @@ async def create_audio_thread(
         "timezone": req.timezone,
         "display_user_info": assistant.should_record_user_information
         and not class_.private,
+        "prevent_user_thread_deletion": (
+            assistant.prevent_user_thread_deletion
+            and assistant.should_record_user_information
+            and not class_.private
+        ),
     }
 
     result: None | models.Thread = None
@@ -8145,6 +8150,11 @@ async def create_lecture_thread(
         "lecture_slide_deck_id": lecture_slide_deck_id,
         "display_user_info": assistant.should_record_user_information
         and not class_.private,
+        "prevent_user_thread_deletion": (
+            assistant.prevent_user_thread_deletion
+            and assistant.should_record_user_information
+            and not class_.private
+        ),
     }
 
     result: None | models.Thread = None
@@ -8503,6 +8513,11 @@ async def create_thread(
         "timezone": req.timezone,
         "display_user_info": assistant.should_record_user_information
         and not class_.private,
+        "prevent_user_thread_deletion": (
+            assistant.prevent_user_thread_deletion
+            and assistant.should_record_user_information
+            and not class_.private
+        ),
     }
 
     thread_db_record: None | models.Thread = None
@@ -9817,6 +9832,26 @@ async def delete_thread(
     thread = await models.Thread.get_by_id_with_users_voice_mode(
         request.state["db"], int(thread_id)
     )
+    if thread is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
+
+    class_ = await models.Class.get_by_id(request.state["db"], thread.class_id)
+    if class_ is None:
+        raise HTTPException(status_code=404, detail="Group not found")
+
+    if (
+        thread.display_user_info
+        and thread.prevent_user_thread_deletion
+        and not class_.private
+        and not await Authz(
+            "can_manage_threads", f"class:{thread.class_id}"
+        ).test_with_cache(request)
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail="Recorded conversations cannot be deleted by participants.",
+        )
+
     # Detach the vector store from the thread and delete it
     vector_store_obj_id = None
     file_ids_to_delete = []
@@ -11842,6 +11877,11 @@ async def create_assistant(
             status_code=400,
             detail="This class is private and does not allow recording user information.",
         )
+    if req.prevent_user_thread_deletion and not req.should_record_user_information:
+        raise HTTPException(
+            status_code=400,
+            detail="Preventing conversation deletion requires recording user information.",
+        )
     if req.hide_file_search_document_names and not req.hide_file_search_result_quotes:
         raise HTTPException(
             status_code=400,
@@ -12908,6 +12948,23 @@ async def update_assistant(
             status_code=400,
             detail="This class is private and does not allow recording user information.",
         )
+    should_record_user_information = (
+        req.should_record_user_information
+        if (
+            "should_record_user_information" in req.model_fields_set
+            and req.should_record_user_information is not None
+        )
+        else asst.should_record_user_information
+    )
+    if (
+        "prevent_user_thread_deletion" in req.model_fields_set
+        and req.prevent_user_thread_deletion
+        and not should_record_user_information
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="Preventing conversation deletion requires recording user information.",
+        )
     openai_update: dict[str, Any] = {}
     tool_resources: ToolResources = {}
     update_tool_resources = False
@@ -13863,6 +13920,17 @@ async def update_assistant(
         and req.should_record_user_information is not None
     ):
         asst.should_record_user_information = req.should_record_user_information
+
+    if (
+        "prevent_user_thread_deletion" in req.model_fields_set
+        and req.prevent_user_thread_deletion is not None
+    ):
+        asst.prevent_user_thread_deletion = req.prevent_user_thread_deletion
+    if (
+        "should_record_user_information" in req.model_fields_set
+        and req.should_record_user_information is False
+    ):
+        asst.prevent_user_thread_deletion = False
 
     if (
         "allow_lesson_timeline_bypass" in req.model_fields_set

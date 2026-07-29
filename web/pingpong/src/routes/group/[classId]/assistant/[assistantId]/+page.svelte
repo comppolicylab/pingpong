@@ -2422,6 +2422,20 @@
 		hasSetShouldRecordNameOrVoice = true;
 	}
 
+	let preventUserThreadDeletion = false;
+	let hasSetPreventUserThreadDeletion = false;
+	$: if (
+		assistant?.prevent_user_thread_deletion !== undefined &&
+		assistant?.prevent_user_thread_deletion !== null &&
+		!hasSetPreventUserThreadDeletion
+	) {
+		preventUserThreadDeletion = assistant.prevent_user_thread_deletion;
+		hasSetPreventUserThreadDeletion = true;
+	}
+	$: if (!shouldRecordNameOrVoice && preventUserThreadDeletion) {
+		preventUserThreadDeletion = false;
+	}
+
 	let allowUserFileUploads = true;
 	let hasSetAllowUserFileUploads = false;
 	$: if (
@@ -3301,6 +3315,7 @@
 				])
 			],
 			should_record_user_information: shouldRecordNameOrVoice,
+			prevent_user_thread_deletion: preventUserThreadDeletion,
 			disable_prompt_randomization: disablePromptRandomization,
 			allow_user_file_uploads: allowUserFileUploads,
 			allow_user_image_uploads: allowUserImageUploads,
@@ -6969,6 +6984,24 @@
 										>created while this option is enabled</span
 									> will show the user's name and be recorded.
 								{/if}</Helper
+							>
+						</div>
+						<div class="col-span-2 mb-1">
+							<Checkbox
+								id="prevent_user_thread_deletion"
+								name="prevent_user_thread_deletion"
+								disabled={preventEdits || isClassPrivate || !shouldRecordNameOrVoice}
+								class={isClassPrivate || !shouldRecordNameOrVoice
+									? 'text-gray-400 contrast-50 grayscale'
+									: 'text-gray-800 contrast-100 grayscale-0'}
+								bind:checked={preventUserThreadDeletion}
+								>Prevent Users from Deleting Conversations</Checkbox
+							>
+							<Helper
+								>Prevent participants from deleting conversations created with this assistant.
+								Moderators can still delete them. Only threads <span class="font-extrabold"
+									>created while this option is enabled</span
+								> are protected. Recording user information must also be enabled.</Helper
 							>
 						</div>
 						{#if isLectureMode}
