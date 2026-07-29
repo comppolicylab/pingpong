@@ -399,7 +399,7 @@
 								<Modal
 									open={!!copyModalState[assistant.id]}
 									size="md"
-									onclose={() => closeCopyModal(assistant.id)}
+									on:close={() => closeCopyModal(assistant.id)}
 								>
 									<div class="text-left break-words whitespace-normal">
 										<Heading tag="h3" class="font-serif text-2xl font-medium text-blue-dark-40"
@@ -478,7 +478,7 @@
 									open={!!deleteModalState[assistant.id]}
 									size="xs"
 									autoclose
-									onclose={() => closeDeleteModal(assistant.id)}
+									on:close={() => closeDeleteModal(assistant.id)}
 								>
 									<ConfirmationModal
 										warningTitle={`Delete ${assistant?.name || 'this assistant'}?`}
@@ -495,7 +495,7 @@
 									outsideclose
 									size="md"
 									open={!!notesModalState[assistant.id]}
-									onclose={() => closeNotesModal(assistant.id)}
+									on:close={() => closeNotesModal(assistant.id)}
 								>
 									<slot name="header">
 										<Heading tag="h3" class="font-serif text-2xl font-medium text-blue-dark-40"
