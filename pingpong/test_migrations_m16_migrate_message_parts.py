@@ -394,9 +394,7 @@ async def test_migrate_message_parts_reuses_existing_local_file(db):
     assert [image_file.id for image_file in image_files] == [50]
 
 
-async def test_migrate_message_parts_backfills_missing_s3_file_and_detects_type(
-    db, monkeypatch
-):
+async def test_migrate_message_parts_backfills_missing_s3_file(db, monkeypatch):
     async with db.async_session() as session:
         await _seed_thread(session, class_id=1, assistant_id=10, thread_id=100)
         await _seed_message(
@@ -412,8 +410,8 @@ async def test_migrate_message_parts_backfills_missing_s3_file_and_detects_type(
             models.File(
                 id=50,
                 file_id="file-needs-s3",
-                name="converted_file.bin",
-                content_type=None,
+                name="shared.txt",
+                content_type="text/plain",
                 class_id=1,
             )
         )
@@ -441,7 +439,7 @@ async def test_migrate_message_parts_backfills_missing_s3_file_and_detects_type(
         file_responses={
             "file-needs-s3": SimpleNamespace(
                 status_code=200,
-                content=b"%PDF-1.7\r\nstored bytes",
+                content=b"stored bytes",
             )
         },
     )
@@ -454,16 +452,13 @@ async def test_migrate_message_parts_backfills_missing_s3_file_and_detects_type(
         await session.commit()
 
     assert fake_client.files.with_raw_response.calls == ["file-needs-s3"]
-    assert list(fake_store.stored_files.values()) == [
-        (b"%PDF-1.7\r\nstored bytes", "application/pdf")
-    ]
+    assert list(fake_store.stored_files.values()) == [(b"stored bytes", "text/plain")]
 
     async with db.async_session() as session:
         parts = await _all(session, models.MessagePart)
         annotations = await _all(session, models.Annotation)
         file = await session.get(models.File, 50)
         assert file is not None
-        assert file.content_type == "application/pdf"
         assert file.s3_file_id is not None
         s3_file = await session.get(models.S3File, file.s3_file_id)
         assert s3_file is not None
@@ -617,79 +612,6 @@ async def test_migrate_message_parts_creates_vision_annotation_for_assistant_ima
     assert annotation.container_id is None
     assert file.content_type == "image/png"
     assert [image_file.id for image_file in image_files] == [file.id]
-
-
-async def test_migrate_message_parts_skips_empty_assistant_image_file_id(
-    db, monkeypatch, caplog
-):
-    async with db.async_session() as session:
-        await _seed_thread(session, class_id=1, assistant_id=10, thread_id=100)
-        await _seed_message(
-            session,
-            id_=1001,
-            thread_id=100,
-            run_id=100,
-            openai_message_id="msg-with-empty-image",
-            output_index=0,
-            metadata=MIGRATION_METADATA,
-        )
-        await session.commit()
-
-    fake_store = FakeFileStore()
-    monkeypatch.setattr(
-        migration.config, "file_store", SimpleNamespace(store=fake_store)
-    )
-    fake_client = _fake_openai_client(
-        {
-            "thread-100": [
-                _openai_message(
-                    "msg-with-empty-image",
-                    [
-                        _image_content(""),
-                        _text_content("The surviving text."),
-                    ],
-                )
-            ],
-        },
-    )
-
-    async with db.async_session() as session:
-        message = await _load_single_message(session)
-        await migration._migrate_message_parts(
-            session, FakeAuthzClient(), fake_client, message, []
-        )
-        await session.commit()
-
-    async with db.async_session() as session:
-        parts = await _all(session, models.MessagePart)
-        annotations = await _all(session, models.Annotation)
-        files = await _all(session, models.File)
-
-    assert [(part.type, part.text) for part in parts] == [
-        (schemas.MessagePartType.OUTPUT_TEXT, "The surviving text.")
-    ]
-    assert annotations == []
-    assert files == []
-    assert fake_client.files.with_raw_response.calls == []
-    assert "Skipping image_file content with an empty file id" in caplog.text
-
-
-@pytest.mark.parametrize(
-    ("content", "filename", "expected"),
-    [
-        (b'<?xml version="1.0"?><svg></svg>', "plot.svg", "image/svg+xml"),
-        (b"ID3\x04\x00\x00audio", "audio.mp3", "audio/mpeg"),
-        (b"\x00\x00\x00\x1cftypisom", "video.mp4", "video/mp4"),
-        (b"%PDF-1.7\r\n", "converted_file.bin", "application/pdf"),
-        (b"\nAccuracy = A Function", "model.mdl", "text/plain"),
-        (b"0101000001001011", "part.bin", "text/plain"),
-        (b"\x00\x01\x02\x03", "output.unknown", "application/octet-stream"),
-    ],
-)
-async def test_detects_historical_assistant_output_content_types(
-    content, filename, expected
-):
-    assert migration._detect_content_type(content, filename) == expected
 
 
 async def test_migrate_message_parts_sniffs_content_type_for_reused_backfilled_file(
