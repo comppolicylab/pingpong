@@ -4,6 +4,7 @@ import pytest
 from sqlalchemy import func, select
 
 from pingpong import models, schemas
+from pingpong.testutil import with_authz, with_user
 
 pytestmark = pytest.mark.asyncio
 
@@ -154,3 +155,73 @@ async def test_thread_delete_removes_mcp_server_tool_run_associations(db):
 
     assert run_assoc_count == 0
     assert deleted_thread is None
+
+
+@with_user(3100)
+@with_authz(grants=[("user:3100", "can_delete", "thread:3101")])
+async def test_recorded_thread_cannot_be_deleted_by_participant(
+    api, db, valid_user_token
+):
+    async with db.async_session() as session:
+        session.add(
+            models.Class(id=3102, name="Recorded Thread Class", api_key="sk-test")
+        )
+        session.add(
+            models.Thread(
+                id=3101,
+                thread_id="recorded-thread-3101",
+                class_id=3102,
+                version=3,
+                private=True,
+                display_user_info=True,
+            )
+        )
+        await session.commit()
+
+    response = api.delete(
+        "/api/v1/class/3102/thread/3101",
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+
+    assert response.status_code == 403, response.text
+    assert response.json() == {
+        "detail": "Recorded conversations cannot be deleted by participants."
+    }
+
+    async with db.async_session() as session:
+        assert await models.Thread.get_by_id(session, 3101) is not None
+
+
+@with_user(3200)
+@with_authz(
+    grants=[
+        ("user:3200", "can_delete", "thread:3201"),
+        ("user:3200", "can_manage_threads", "class:3202"),
+    ]
+)
+async def test_recorded_thread_can_be_deleted_by_supervisor(api, db, valid_user_token):
+    async with db.async_session() as session:
+        session.add(
+            models.Class(id=3202, name="Recorded Thread Class", api_key="sk-test")
+        )
+        session.add(
+            models.Thread(
+                id=3201,
+                thread_id="recorded-thread-3201",
+                class_id=3202,
+                version=3,
+                private=True,
+                display_user_info=True,
+            )
+        )
+        await session.commit()
+
+    response = api.delete(
+        "/api/v1/class/3202/thread/3201",
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+
+    assert response.status_code == 200, response.text
+
+    async with db.async_session() as session:
+        assert await models.Thread.get_by_id(session, 3201) is None

@@ -9817,6 +9817,14 @@ async def delete_thread(
     thread = await models.Thread.get_by_id_with_users_voice_mode(
         request.state["db"], int(thread_id)
     )
+    if thread.display_user_info and not await Authz(
+        "can_manage_threads", f"class:{thread.class_id}"
+    ).test(request):
+        raise HTTPException(
+            status_code=403,
+            detail="Recorded conversations cannot be deleted by participants.",
+        )
+
     # Detach the vector store from the thread and delete it
     vector_store_obj_id = None
     file_ids_to_delete = []

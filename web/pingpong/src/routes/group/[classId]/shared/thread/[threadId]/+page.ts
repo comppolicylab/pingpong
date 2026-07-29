@@ -11,7 +11,12 @@ export const load: PageLoad = async ({ fetch, params }) => {
 		api.getThread(fetch, classId, threadId),
 		api.grants(fetch, {
 			canDelete: { target_type: 'thread', target_id: threadId, relation: 'can_delete' },
-			canPublish: { target_type: 'thread', target_id: threadId, relation: 'can_publish' }
+			canPublish: { target_type: 'thread', target_id: threadId, relation: 'can_publish' },
+			canManageThreads: {
+				target_type: 'class',
+				target_id: classId,
+				relation: 'can_manage_threads'
+			}
 		})
 	]);
 
@@ -61,7 +66,8 @@ export const load: PageLoad = async ({ fetch, params }) => {
 		threadModel,
 		threadInteractionMode,
 		availableTools: threadTools,
-		canDeleteThread: threadGrants.canDelete,
+		canDeleteThread:
+			threadGrants.canDelete && (!threadDisplayUserInfo || threadGrants.canManageThreads),
 		canPublishThread: threadGrants.canPublish,
 		canViewAssistant: assistantGrants.canViewAssistant,
 		threadRecording,
