@@ -4993,6 +4993,8 @@ def format_instructions(
     instructions: str,
     use_latex: bool = False,
     use_image_descriptions: bool = False,
+    use_mermaid: bool = False,
+    use_svg: bool = False,
     disable_prompt_randomization: bool = False,
     thread_id: str | None = None,
     user_id: int | None = None,
@@ -5005,8 +5007,20 @@ def format_instructions(
         InteractionMode.LECTURE_SLIDES,
     }
 
+    formatting_instructions: list[str] = []
+    diagram_formatting_instructions: list[str] = []
     if use_latex:
-        diagram_formatting_instructions = (
+        formatting_instructions.append(
+            "---Formatting: LaTeX---\n"
+            "Use LaTeX with math mode delimiters when outputting "
+            "mathematical tokens. Use the single dollar sign $ with spaces "
+            "surrounding it to delimit "
+            "inline math. For block-level math, use double dollar signs $$ "
+            "with newlines before and after them as the opening and closing "
+            "delimiter. Do not use LaTeX inside backticks."
+        )
+    if use_mermaid:
+        mermaid_formatting_instructions = (
             "---Formatting: Mermaid---\n"
             "When a diagram would make the answer clearer, use Mermaid. "
             "Wrap Mermaid diagrams in fenced code blocks with the language "
@@ -5016,7 +5030,12 @@ def format_instructions(
             "    A-->B\n"
             "```\n"
             "Do not put Mermaid inside inline backticks or mix Mermaid "
-            "syntax with LaTeX math.\n\n"
+            "syntax with LaTeX math."
+        )
+        formatting_instructions.append(mermaid_formatting_instructions)
+        diagram_formatting_instructions.append(mermaid_formatting_instructions)
+    if use_svg:
+        svg_formatting_instructions = (
             "---Formatting: SVG---\n"
             "When a static diagram would make the answer clearer, you may use SVG. "
             "Wrap SVG in fenced code blocks with the language set to svg, for example:\n"
@@ -5030,7 +5049,15 @@ def format_instructions(
             "foreignObject, or external assets inside SVG. Prefer simple inline "
             "styles or attributes and include a viewBox."
         )
-        if lecture_lesson_mode:
+        formatting_instructions.append(svg_formatting_instructions)
+        diagram_formatting_instructions.append(svg_formatting_instructions)
+    combined_formatting_instructions = "\n\n".join(formatting_instructions)
+    combined_diagram_formatting_instructions = "\n\n".join(
+        diagram_formatting_instructions
+    )
+
+    if lecture_lesson_mode:
+        if use_latex:
             instructions += (
                 "\n\n"
                 "---Formatting: Lecture Dual Speech/Display Blocks---\n"
@@ -5147,21 +5174,17 @@ def format_instructions(
                 "labels or symbols.\n"
                 "If you are deciding between raw LaTeX and a block "
                 "in a lecture-video response, choose the block.\n"
-                "Do not mention the block syntax to the user.\n\n"
-                + diagram_formatting_instructions
+                "Do not mention the block syntax to the user."
+                + (
+                    "\n\n" + combined_diagram_formatting_instructions
+                    if combined_diagram_formatting_instructions
+                    else ""
+                )
             )
-        else:
-            instructions += (
-                "\n\n"
-                "---Formatting: LaTeX---\n"
-                "Use LaTeX with math mode delimiters when outputting "
-                "mathematical tokens. Use the single dollar sign $ with spaces "
-                "surrounding it to delimit "
-                "inline math. For block-level math, use double dollar signs $$ "
-                "with newlines before and after them as the opening and closing "
-                "delimiter. Do not use LaTeX inside backticks.\n\n"
-                + diagram_formatting_instructions
-            )
+        elif combined_diagram_formatting_instructions:
+            instructions += "\n\n" + combined_diagram_formatting_instructions
+    elif combined_formatting_instructions:
+        instructions += "\n\n" + combined_formatting_instructions
 
     if use_image_descriptions:
         instructions += (

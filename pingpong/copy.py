@@ -429,6 +429,8 @@ async def copy_assistant(
         notes=assistant.notes,
         assistant_id="",
         use_latex=assistant.use_latex,
+        use_mermaid=assistant.use_mermaid,
+        use_svg=assistant.use_svg,
         use_image_descriptions=assistant.use_image_descriptions,
         hide_prompt=assistant.hide_prompt,
         locked=assistant.locked,
@@ -527,6 +529,8 @@ async def copy_assistant(
             instructions=format_instructions(
                 assistant.instructions,
                 use_latex=assistant.use_latex,
+                use_mermaid=assistant.use_mermaid,
+                use_svg=assistant.use_svg,
                 use_image_descriptions=assistant.use_image_descriptions,
                 disable_prompt_randomization=assistant.disable_prompt_randomization,
             ),

@@ -34,10 +34,12 @@ def followup_snippet(payload: str) -> str:
     return f"{SAY_MARKER_START}followups{SAY_MARKER_SEPARATOR}{payload}{SAY_MARKER_END}"
 
 
-def test_format_instructions_adds_block_contract_for_lecture_video_latex_only():
+def test_format_instructions_adds_block_contract_for_lecture_video_markup():
     instructions = format_instructions(
         "Be helpful.",
         use_latex=True,
+        use_mermaid=True,
+        use_svg=True,
         interaction_mode=schemas.InteractionMode.LECTURE_VIDEO,
     )
 
@@ -104,6 +106,19 @@ def test_format_instructions_does_not_add_block_contract_for_normal_latex_chat()
     assert "---Formatting: Lecture Dual Speech/Display Blocks---" not in instructions
     assert "---Context: Lecture Message Positions---" not in instructions
     assert "---Formatting: Lecture Follow-ups---" not in instructions
+
+
+def test_format_instructions_enables_markup_options_independently():
+    instructions = format_instructions(
+        "Be helpful.",
+        use_latex=False,
+        use_mermaid=True,
+        use_svg=False,
+    )
+
+    assert "---Formatting: LaTeX---" not in instructions
+    assert "---Formatting: Mermaid---" in instructions
+    assert "---Formatting: SVG---" not in instructions
 
 
 def test_format_instructions_does_not_add_block_contract_without_latex():

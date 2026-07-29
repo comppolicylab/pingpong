@@ -10,6 +10,8 @@
 	export let content = '';
 	export let syntax = true;
 	export let latex = false;
+	export let mermaid = true;
+	export let svg = true;
 	export let inlineWebSources: InlineWebSource[] = [];
 
 	let container: HTMLDivElement;
@@ -17,7 +19,7 @@
 	let mountedDiagrams: object[] = [];
 	let wrappedDiagramMountVersion = 0;
 
-	$: segments = parseMarkdownSegments(content, { syntax, latex });
+	$: segments = parseMarkdownSegments(content, { syntax, latex, mermaid, svg });
 	$: wrappedDiagramSegments = segments.filter(
 		(
 			segment

@@ -1807,8 +1807,26 @@
 		useLatex = assistant?.use_latex;
 		hasSetUseLatex = true;
 	}
-	$: if (isLectureMode && !useLatex) {
+	let useMermaid = data.isCreating;
+	let hasSetUseMermaid = false;
+	$: if (
+		assistant?.use_mermaid !== undefined &&
+		assistant?.use_mermaid !== null &&
+		!hasSetUseMermaid
+	) {
+		useMermaid = assistant.use_mermaid;
+		hasSetUseMermaid = true;
+	}
+	let useSvg = data.isCreating;
+	let hasSetUseSvg = false;
+	$: if (assistant?.use_svg !== undefined && assistant?.use_svg !== null && !hasSetUseSvg) {
+		useSvg = assistant.use_svg;
+		hasSetUseSvg = true;
+	}
+	$: if (isLectureMode && (!useLatex || !useMermaid || !useSvg)) {
 		useLatex = true;
+		useMermaid = true;
+		useSvg = true;
 	}
 	let mcpServersLocal: MCPServerToolInput[] = [];
 	$: mcpServersFromRequest = data.mcpServers.slice();
@@ -2622,6 +2640,8 @@
 			forcedAssistantVersion = 3;
 			convertToNextGen = null;
 			useLatex = true;
+			useMermaid = true;
+			useSvg = true;
 		} else {
 			forcedAssistantVersion = null;
 		}
@@ -2862,6 +2882,18 @@
 						? false
 						: (preventEdits ? !!assistant?.use_latex : newValue) !== oldValue;
 				break;
+			case 'use_mermaid':
+				dirty =
+					newValue === undefined
+						? false
+						: (preventEdits ? !!assistant?.use_mermaid : newValue) !== oldValue;
+				break;
+			case 'use_svg':
+				dirty =
+					newValue === undefined
+						? false
+						: (preventEdits ? !!assistant?.use_svg : newValue) !== oldValue;
+				break;
 			case 'use_image_descriptions':
 				dirty = newValue === undefined ? false : newValue !== !!oldValue;
 				break;
@@ -2908,6 +2940,8 @@
 					'model',
 					'published',
 					'use_latex',
+					'use_mermaid',
+					'use_svg',
 					'use_image_descriptions',
 					'hide_prompt',
 					'disable_prompt_randomization',
@@ -3240,6 +3274,8 @@
 			overwrite_manifest: isLectureVideoMode ? overwriteManifest : undefined,
 			published: body.published?.toString() === 'on',
 			use_latex: isLectureMode ? true : body.use_latex?.toString() === 'on',
+			use_mermaid: isLectureMode ? true : body.use_mermaid?.toString() === 'on',
+			use_svg: isLectureMode ? true : body.use_svg?.toString() === 'on',
 			use_image_descriptions: isLectureMode
 				? (assistant?.use_image_descriptions ?? false)
 				: isUsingClassicAssistantVersion && body.use_image_descriptions?.toString() === 'on',
@@ -4010,6 +4046,8 @@
 		const result = await api.previewAssistantInstructions(fetch, data.class.id, {
 			instructions,
 			use_latex: isLectureMode ? true : useLatex,
+			use_mermaid: isLectureMode ? true : useMermaid,
+			use_svg: isLectureMode ? true : useSvg,
 			disable_prompt_randomization: disablePromptRandomization,
 			interaction_mode: interactionMode
 		});
@@ -5778,24 +5816,38 @@
 			</div>
 			<div class="col-span-2 mb-4">
 				{#if interactionMode === 'chat'}
-					<Checkbox id="use_latex" name="use_latex" disabled={preventEdits} bind:checked={useLatex}
-						>Use LaTeX and other markup</Checkbox
-					>
+					<Label>Formatting and visualizations</Label>
 					<Helper
-						>Enable LaTeX formatting and other advanced features like Mermaid diagrams for assistant
-						responses. Your prompt will be enhanced with additional instructions for handling these
-						features. Click "Preview" to see the full prompt.</Helper
+						>Choose which options the assistant should use. Your prompt will be enhanced with
+						instructions for each enabled option. Click "Preview" to see the full prompt.</Helper
 					>
+					<div class="mt-2 flex flex-col gap-y-2">
+						<Checkbox
+							id="use_latex"
+							name="use_latex"
+							disabled={preventEdits}
+							bind:checked={useLatex}>Use LaTeX</Checkbox
+						>
+						<Checkbox
+							id="use_mermaid"
+							name="use_mermaid"
+							disabled={preventEdits}
+							bind:checked={useMermaid}>Use Mermaid</Checkbox
+						>
+						<Checkbox id="use_svg" name="use_svg" disabled={preventEdits} bind:checked={useSvg}
+							>Use SVG</Checkbox
+						>
+					</div>
 				{:else}
 					<div class="flex flex-col gap-y-1">
 						<Badge
 							class="flex max-w-fit shrink-0 flex-row items-center gap-x-2 rounded-lg border border-gray-400 bg-gradient-to-b from-gray-100 to-gray-200 px-2 py-0.5 text-xs text-gray-800 normal-case"
 							><CloseOutline size="sm" />
-							<div>No LaTeX formatting for assistant responses</div>
+							<div>No quantitative markup for assistant responses</div>
 						</Badge>
 						<Helper
-							>This interaction mode does not support LaTeX formatting for assistant responses. To
-							use LaTeX formatting, switch to Chat mode.</Helper
+							>This interaction mode does not support LaTeX, Mermaid, or SVG formatting for
+							assistant responses. To use these options, switch to Chat mode.</Helper
 						>
 					</div>
 				{/if}

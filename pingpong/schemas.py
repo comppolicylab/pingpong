@@ -1662,6 +1662,8 @@ class Assistant(BaseModel):
     hide_code_interpreter_output: bool | None = None
     hide_mcp_server_call_details: bool | None = None
     use_latex: bool | None
+    use_mermaid: bool
+    use_svg: bool
     use_image_descriptions: bool | None
     hide_prompt: bool | None
     published: datetime | None
@@ -2029,6 +2031,8 @@ class CreateAssistant(BaseModel):
     overwrite_manifest: bool | None = None
     published: bool = False
     use_latex: bool = False
+    use_mermaid: bool = False
+    use_svg: bool = False
     use_image_descriptions: bool = False
     hide_prompt: bool = False
     assistant_should_message_first: bool = False
@@ -2072,6 +2076,8 @@ class CreateAssistant(BaseModel):
 class AssistantInstructionsPreviewRequest(BaseModel):
     instructions: str
     use_latex: bool = False
+    use_mermaid: bool = False
+    use_svg: bool = False
     disable_prompt_randomization: bool = False
     interaction_mode: InteractionMode | None = None
 
@@ -2145,6 +2151,8 @@ class UpdateAssistant(BaseModel):
     tools: list[ToolOption] | None = None
     published: bool | None = None
     use_latex: bool | None = None
+    use_mermaid: bool | None = None
+    use_svg: bool | None = None
     hide_prompt: bool | None = None
     assistant_should_message_first: bool | None = None
     allow_lesson_timeline_bypass: bool | None = None

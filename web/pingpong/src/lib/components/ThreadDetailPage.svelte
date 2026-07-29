@@ -404,6 +404,8 @@
 	$: groupArchived = !!data.class?.archived;
 	$: assistantDeleted = !$assistantId && $assistantId === 0;
 	let useLatex = false;
+	let useMermaid = false;
+	let useSvg = false;
 	let useImageDescriptions = false;
 	let assistantVersion: number | null = null;
 	let assistantInteractionMode: api.AssistantInteractionMode | null = null;
@@ -453,6 +455,8 @@
 		);
 		if (assistant) {
 			useLatex = assistant.use_latex || false;
+			useMermaid = assistant.use_mermaid || false;
+			useSvg = assistant.use_svg || false;
 			useImageDescriptions = assistant.use_image_descriptions || false;
 			assistantInteractionMode = assistant.interaction_mode;
 			assistantVersion = assistant.version ?? null;
@@ -464,6 +468,8 @@
 				'Lecture Video';
 		} else {
 			useLatex = false;
+			useMermaid = false;
+			useSvg = false;
 			useImageDescriptions = false;
 			assistantInteractionMode = null;
 			assistantVersion = null;
@@ -1803,6 +1809,8 @@
 							{resolvedAssistantVersion}
 							version={$version}
 							{useLatex}
+							{useMermaid}
+							{useSvg}
 							{userTimezone}
 							meName={data?.me?.user?.name || data?.me?.user?.email || 'Me'}
 							meImage={data?.me?.profile?.image_url || ''}
@@ -1963,6 +1971,8 @@
 							{resolvedAssistantVersion}
 							version={$version}
 							{useLatex}
+							{useMermaid}
+							{useSvg}
 							{userTimezone}
 							meName={data?.me?.user?.name || data?.me?.user?.email || 'Me'}
 							meImage={data?.me?.profile?.image_url || ''}
@@ -2107,6 +2117,8 @@
 											inlineWebSources={parsedTextContent.inlineWebSources}
 											syntax={true}
 											latex={useLatex}
+											mermaid={useMermaid}
+											svg={useSvg}
 										/>
 									</div>
 									{#if quoteCitations.length > 0}
