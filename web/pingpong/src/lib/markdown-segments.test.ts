@@ -150,4 +150,28 @@ graph TD
 			}
 		]);
 	});
+
+	it('renders disabled diagram kinds as ordinary code blocks', () => {
+		const segments = parseMarkdownSegments(
+			`
+\`\`\`mermaid
+graph TD
+A-->B
+\`\`\`
+
+\`\`\`svg
+<svg viewBox="0 0 10 10"></svg>
+\`\`\`
+`,
+			{ syntax: true, latex: false, mermaid: false, svg: true }
+		);
+
+		expect(segments).toHaveLength(2);
+		expect(segments[0].type).toBe('html');
+		expect(segments[0].type === 'html' && segments[0].content).toContain('language-mermaid');
+		expect(segments[1]).toMatchObject({
+			type: 'diagram',
+			diagram: { kind: 'svg', state: 'complete' }
+		});
+	});
 });

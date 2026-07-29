@@ -5718,6 +5718,8 @@ class Assistant(Base):
     notes = Column(String, nullable=True)
     assistant_id = Column(String)
     use_latex = Column(Boolean)
+    use_mermaid = Column(Boolean, nullable=False, server_default="true")
+    use_svg = Column(Boolean, nullable=False, server_default="true")
     use_image_descriptions = Column(Boolean)
     hide_prompt = Column(Boolean, default=False)
     locked = Column(Boolean, server_default="false")
@@ -6130,6 +6132,8 @@ class Assistant(Base):
         params["assistant_id"] = assistant_id
         params["published"] = func.now() if data.published else None
         params["use_latex"] = data.use_latex
+        params["use_mermaid"] = data.use_mermaid
+        params["use_svg"] = data.use_svg
         params["use_image_descriptions"] = data.use_image_descriptions
         params["vector_store_id"] = vector_store_id
         params["lecture_video_id"] = lecture_video_id

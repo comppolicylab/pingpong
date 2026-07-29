@@ -2940,6 +2940,8 @@ export type Assistant = {
 	avatar_url: string | null;
 	published: string | null;
 	use_latex: boolean | null;
+	use_mermaid: boolean;
+	use_svg: boolean;
 	use_image_descriptions: boolean | null;
 	hide_prompt: boolean | null;
 	locked: boolean | null;
@@ -3104,6 +3106,8 @@ export type CreateAssistantRequest = {
 	file_search_file_ids: string[];
 	published?: boolean;
 	use_latex?: boolean;
+	use_mermaid?: boolean;
+	use_svg?: boolean;
 	use_image_descriptions?: boolean;
 	hide_prompt?: boolean;
 	deleted_private_files?: number[];
@@ -3181,6 +3185,8 @@ export type UpdateAssistantRequest = {
 	file_search_file_ids?: string[];
 	published?: boolean;
 	use_latex?: boolean;
+	use_mermaid?: boolean;
+	use_svg?: boolean;
 	use_image_descriptions?: boolean;
 	hide_prompt?: boolean;
 	deleted_private_files?: number[];
@@ -3285,6 +3291,8 @@ export type AssistantInstructionsPreviewResponse = {
 export type AssistantInstructionsPreviewRequest = {
 	instructions: string;
 	use_latex: boolean;
+	use_mermaid: boolean;
+	use_svg: boolean;
 	disable_prompt_randomization: boolean;
 	interaction_mode?: InteractionMode;
 };

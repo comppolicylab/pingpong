@@ -49,6 +49,8 @@
 		resolvedAssistantVersion,
 		version,
 		useLatex,
+		useMermaid,
+		useSvg,
 		userTimezone,
 		meName,
 		meImage,
@@ -83,6 +85,8 @@
 		resolvedAssistantVersion: number;
 		version: number;
 		useLatex: boolean;
+		useMermaid: boolean;
+		useSvg: boolean;
 		userTimezone: string;
 		meName: string;
 		meImage: string;
@@ -490,6 +494,8 @@
 										inlineWebSources={parsedTextContent.inlineWebSources}
 										syntax={true}
 										latex={useLatex}
+										mermaid={useMermaid}
+										svg={useSvg}
 									/>
 								</div>
 								{#if quoteCitations.length > 0}

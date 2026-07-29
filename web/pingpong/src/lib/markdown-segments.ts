@@ -4,6 +4,11 @@ import { parseDiagramFence } from './diagram';
 import type { MarkdownRendererOptions } from './markdown';
 import { lexMarkdown, renderMarkdownTokens } from './markdown';
 
+export type MarkdownSegmentOptions = MarkdownRendererOptions & {
+	mermaid?: boolean;
+	svg?: boolean;
+};
+
 export type MarkdownSegment =
 	| { type: 'html'; content: string }
 	| { type: 'diagram'; diagram: Diagram }
@@ -101,7 +106,8 @@ const wrapChildSegments = (
 const splitListToken = (
 	token: TokenWithChildren,
 	links: TokensList['links'],
-	nextPlaceholderId: () => string
+	nextPlaceholderId: () => string,
+	options: MarkdownSegmentOptions
 ): InternalSegment[] => {
 	const segments: InternalSegment[] = [];
 	const bufferedItems: TokenWithChildren[] = [];
@@ -131,7 +137,7 @@ const splitListToken = (
 	for (const item of token.items ?? []) {
 		const itemSegments = wrapChildSegments(
 			item,
-			splitBlockTokens(withLinks([...(item.tokens ?? [])], links), nextPlaceholderId),
+			splitBlockTokens(withLinks([...(item.tokens ?? [])], links), nextPlaceholderId, options),
 			links,
 			nextPlaceholderId
 		);
@@ -173,19 +179,20 @@ const splitListToken = (
 const splitNestedToken = (
 	token: TokenWithChildren,
 	links: TokensList['links'],
-	nextPlaceholderId: () => string
+	nextPlaceholderId: () => string,
+	options: MarkdownSegmentOptions
 ) => {
 	if (token.type === 'blockquote' && token.tokens) {
 		return wrapChildSegments(
 			token,
-			splitBlockTokens(withLinks([...token.tokens], links), nextPlaceholderId),
+			splitBlockTokens(withLinks([...token.tokens], links), nextPlaceholderId, options),
 			links,
 			nextPlaceholderId
 		);
 	}
 
 	if (token.type === 'list' && token.items) {
-		return splitListToken(token, links, nextPlaceholderId);
+		return splitListToken(token, links, nextPlaceholderId, options);
 	}
 
 	return null;
@@ -193,7 +200,8 @@ const splitNestedToken = (
 
 const splitBlockTokens = (
 	tokens: TokensList,
-	nextPlaceholderId: () => string
+	nextPlaceholderId: () => string,
+	options: MarkdownSegmentOptions
 ): InternalSegment[] => {
 	const segments: InternalSegment[] = [];
 	const htmlTokens: TokenWithChildren[] = [];
@@ -208,15 +216,22 @@ const splitBlockTokens = (
 	};
 
 	for (const token of tokens as TokenWithChildren[]) {
-		const diagram =
+		let diagram =
 			token.type === 'code' ? parseDiagramFence(token.lang, token.raw, token.text) : null;
+		if (
+			diagram &&
+			((diagram.kind === 'mermaid' && options.mermaid === false) ||
+				(diagram.kind === 'svg' && options.svg === false))
+		) {
+			diagram = null;
+		}
 		if (diagram) {
 			flushHtmlTokens();
 			segments.push({ type: 'diagram', diagram });
 			continue;
 		}
 
-		const nestedSegments = splitNestedToken(token, tokens.links, nextPlaceholderId);
+		const nestedSegments = splitNestedToken(token, tokens.links, nextPlaceholderId, options);
 		if (!nestedSegments) {
 			htmlTokens.push(token);
 			continue;
@@ -239,17 +254,21 @@ const splitBlockTokens = (
 
 export const parseMarkdownSegments = (
 	markdownContent: string,
-	options: MarkdownRendererOptions
+	options: MarkdownSegmentOptions
 ): MarkdownSegment[] => {
+	const rendererOptions: MarkdownRendererOptions = {
+		syntax: options.syntax,
+		latex: options.latex
+	};
 	let placeholderIdCounter = 0;
 	const nextPlaceholderId = () => `markdown-diagram-${placeholderIdCounter++}`;
-	const tokens = lexMarkdown(markdownContent, options);
-	const segments = splitBlockTokens(tokens, nextPlaceholderId)
+	const tokens = lexMarkdown(markdownContent, rendererOptions);
+	const segments = splitBlockTokens(tokens, nextPlaceholderId, options)
 		.map((segment): MarkdownSegment => {
 			if (segment.type === 'html') {
 				return {
 					type: 'html',
-					content: renderMarkdownTokens(segment.tokens, options)
+					content: renderMarkdownTokens(segment.tokens, rendererOptions)
 				};
 			}
 
@@ -257,7 +276,7 @@ export const parseMarkdownSegments = (
 				return {
 					type: 'diagram',
 					diagram: segment.diagram,
-					wrapperHtml: renderMarkdownTokens(segment.tokens, options),
+					wrapperHtml: renderMarkdownTokens(segment.tokens, rendererOptions),
 					placeholderId: segment.placeholderId
 				};
 			}
@@ -267,7 +286,7 @@ export const parseMarkdownSegments = (
 		.filter((segment) => segment.type !== 'html' || segment.content.length > 0);
 
 	if (!segments.length) {
-		return [{ type: 'html', content: renderMarkdownTokens(tokens, options) }];
+		return [{ type: 'html', content: renderMarkdownTokens(tokens, rendererOptions) }];
 	}
 
 	return segments;

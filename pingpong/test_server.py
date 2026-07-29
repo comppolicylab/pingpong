@@ -2112,7 +2112,7 @@ async def test_copy_assistant_service_rejects_non_ready_lecture_video(
 @with_user(123)
 @with_institution(1, "Test Institution")
 @with_authz(grants=[("user:123", "can_create_assistants", "class:1")])
-async def test_preview_assistant_instructions_includes_latex_formatting(
+async def test_preview_assistant_instructions_includes_selected_markup_formatting(
     api, db, institution, valid_user_token
 ):
     async with db.async_session() as session:
@@ -2122,14 +2122,20 @@ async def test_preview_assistant_instructions_includes_latex_formatting(
 
     response = api.post(
         "/api/v1/class/1/assistant_instructions",
-        json={"instructions": "Be helpful", "use_latex": True},
+        json={
+            "instructions": "Be helpful",
+            "use_latex": True,
+            "use_mermaid": False,
+            "use_svg": True,
+        },
         headers={"Authorization": f"Bearer {valid_user_token}"},
     )
 
     assert response.status_code == 200
     instructions_preview = response.json()["instructions_preview"]
     assert "---Formatting: LaTeX---" in instructions_preview
-    assert "---Formatting: Mermaid---" in instructions_preview
+    assert "---Formatting: Mermaid---" not in instructions_preview
+    assert "---Formatting: SVG---" in instructions_preview
 
 
 @with_user(123)
@@ -2245,6 +2251,9 @@ async def test_copy_assistant_to_other_class(
             creator_id=123,
             published=None,
             version=3,
+            use_latex=True,
+            use_mermaid=False,
+            use_svg=True,
         )
         session.add_all([source_class, target_class, assistant])
         await session.commit()
@@ -2260,6 +2269,9 @@ async def test_copy_assistant_to_other_class(
     assert data["class_id"] == target_class.id
     assert data["name"] == "Assistant Copy"
     assert data["published"] is None
+    assert data["use_latex"] is True
+    assert data["use_mermaid"] is False
+    assert data["use_svg"] is True
 
     assert (
         "grant",

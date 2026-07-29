@@ -398,6 +398,8 @@ def _build_run_instructions(
         return format_instructions(
             base_instructions,
             use_latex=True,
+            use_mermaid=True,
+            use_svg=True,
             use_image_descriptions=asst.use_image_descriptions,
             disable_prompt_randomization=asst.disable_prompt_randomization,
             thread_id=str(thread.id),
@@ -456,6 +458,8 @@ async def _ensure_thread_instructions_migrated(
             asst.instructions,
             asst.use_latex,
             asst.use_image_descriptions,
+            use_mermaid=asst.use_mermaid,
+            use_svg=asst.use_svg,
             disable_prompt_randomization=asst.disable_prompt_randomization,
             thread_id=thread.thread_id or str(thread.id),
             user_id=user_id,
@@ -7930,6 +7934,8 @@ async def create_audio_thread(
             assistant.instructions,
             assistant.use_latex,
             assistant.use_image_descriptions,
+            use_mermaid=assistant.use_mermaid,
+            use_svg=assistant.use_svg,
             disable_prompt_randomization=assistant.disable_prompt_randomization,
             thread_id=thread.id if thread else None,
             user_id=request.state["session"].user.id,
@@ -7952,6 +7958,8 @@ async def create_audio_thread(
                 assistant.instructions,
                 assistant.use_latex,
                 assistant.use_image_descriptions,
+                use_mermaid=assistant.use_mermaid,
+                use_svg=assistant.use_svg,
                 disable_prompt_randomization=assistant.disable_prompt_randomization,
                 thread_id=result.id,
                 user_id=request.state["session"].user.id,
@@ -8504,6 +8512,8 @@ async def create_thread(
             assistant.instructions,
             assistant.use_latex,
             assistant.use_image_descriptions,
+            use_mermaid=assistant.use_mermaid,
+            use_svg=assistant.use_svg,
             disable_prompt_randomization=assistant.disable_prompt_randomization,
             thread_id=thread.id if thread and thread.id else None,
             user_id=request.state["session"].user.id,
@@ -8537,6 +8547,8 @@ async def create_thread(
                 assistant.instructions,
                 assistant.use_latex,
                 assistant.use_image_descriptions,
+                use_mermaid=assistant.use_mermaid,
+                use_svg=assistant.use_svg,
                 disable_prompt_randomization=assistant.disable_prompt_randomization,
                 thread_id=thread_db_record.id,
                 user_id=request.state["session"].user.id,
@@ -8942,6 +8954,8 @@ async def create_run(
                     asst.instructions,
                     asst.use_latex,
                     asst.use_image_descriptions,
+                    use_mermaid=asst.use_mermaid,
+                    use_svg=asst.use_svg,
                     disable_prompt_randomization=asst.disable_prompt_randomization,
                     thread_id=thread.thread_id,
                     user_id=request.state["session"].user.id,
@@ -11947,6 +11961,8 @@ async def create_assistant(
     is_lesson_mode = is_video or is_slides
     if is_lesson_mode:
         req.use_latex = True
+        req.use_mermaid = True
+        req.use_svg = True
     lecture_video_object_id = None
     lecture_video_manifest = None
     lecture_video_voice_id = None
@@ -12160,6 +12176,8 @@ async def create_assistant(
                 instructions=format_instructions(
                     req.instructions,
                     use_latex=req.use_latex,
+                    use_mermaid=req.use_mermaid,
+                    use_svg=req.use_svg,
                     use_image_descriptions=req.use_image_descriptions,
                 ),
                 model=_model,
@@ -12433,6 +12451,12 @@ async def preview_assistant_instructions(
             use_latex=True
             if _is_lecture_lesson_mode(req.interaction_mode)
             else req.use_latex,
+            use_mermaid=True
+            if _is_lecture_lesson_mode(req.interaction_mode)
+            else req.use_mermaid,
+            use_svg=True
+            if _is_lecture_lesson_mode(req.interaction_mode)
+            else req.use_svg,
             disable_prompt_randomization=req.disable_prompt_randomization,
             user_id=request.state["session"].user.id,
             thread_id=f"preview_{uuid.uuid4()}",
@@ -13698,9 +13722,22 @@ async def update_assistant(
         if not asst.use_latex:
             update_instructions = True
             asst.use_latex = True
-    elif "use_latex" in req.model_fields_set and req.use_latex is not None:
-        update_instructions = True
-        asst.use_latex = req.use_latex
+        if not asst.use_mermaid:
+            update_instructions = True
+            asst.use_mermaid = True
+        if not asst.use_svg:
+            update_instructions = True
+            asst.use_svg = True
+    else:
+        if "use_latex" in req.model_fields_set and req.use_latex is not None:
+            update_instructions = True
+            asst.use_latex = req.use_latex
+        if "use_mermaid" in req.model_fields_set and req.use_mermaid is not None:
+            update_instructions = True
+            asst.use_mermaid = req.use_mermaid
+        if "use_svg" in req.model_fields_set and req.use_svg is not None:
+            update_instructions = True
+            asst.use_svg = req.use_svg
 
     if (
         "use_image_descriptions" in req.model_fields_set
@@ -14559,6 +14596,8 @@ async def update_assistant(
         openai_update["instructions"] = format_instructions(
             asst.instructions,
             use_latex=asst.use_latex,
+            use_mermaid=asst.use_mermaid,
+            use_svg=asst.use_svg,
             use_image_descriptions=asst.use_image_descriptions,
         )
 
@@ -14590,6 +14629,8 @@ async def update_assistant(
                         instructions=format_instructions(
                             asst.instructions,
                             use_latex=asst.use_latex,
+                            use_mermaid=asst.use_mermaid,
+                            use_svg=asst.use_svg,
                             use_image_descriptions=asst.use_image_descriptions,
                         ),
                         model=_model,
