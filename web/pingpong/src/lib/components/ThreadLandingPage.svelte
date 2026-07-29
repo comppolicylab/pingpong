@@ -1084,13 +1084,7 @@
 			<div class="shrink-0 grow-0">
 				<input type="hidden" name="assistant_id" value={assistant.id} />
 				<input type="hidden" name="parties" value={parties} />
-				<div
-					class="my-3"
-					class:hidden={!isPrivate &&
-						assistantMeta.willDisplayUserInfo &&
-						assistant.interaction_mode === 'chat' &&
-						(assistant.assistant_should_message_first ?? false)}
-				>
+				<div class="my-3">
 					{#if isPrivate}
 						<div
 							class="flex w-full flex-wrap items-start gap-2 text-[0.7rem] sm:text-xs lg:flex-nowrap"
