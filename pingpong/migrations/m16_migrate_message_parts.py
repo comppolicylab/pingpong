@@ -1,5 +1,6 @@
 import io
 import logging
+import mimetypes
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -34,6 +35,8 @@ from pingpong.server import OpenAIClient
 logger = logging.getLogger(__name__)
 
 LOCAL_BATCH_SIZE = 100
+CONTENT_TYPE_SNIFF_BYTES = 1024
+GENERIC_CONTENT_TYPES = {"application/octet-stream", "text/plain"}
 
 
 @dataclass(frozen=True)
@@ -282,6 +285,28 @@ async def _persist_message_parts(
     stats: MessagePartMigrationStats,
 ) -> None:
     contents = list(openai_message.content)
+    for part_index, content in enumerate(contents):
+        if (
+            _is_image_file_content(content)
+            and not (content.image_file.file_id or "").strip()
+        ):
+            logger.warning(
+                "Skipping image_file content with an empty file id. "
+                "message_id=%s openai_message_id=%s part_index=%s role=%s",
+                local_message.id,
+                openai_message.id,
+                part_index,
+                local_message.role,
+            )
+    contents = [
+        content
+        for content in contents
+        if not (
+            _is_image_file_content(content)
+            and not (content.image_file.file_id or "").strip()
+        )
+    ]
+
     ci_image_contents: list[ImageFileContentBlock] = []
     if local_message.role == schemas.MessageRole.ASSISTANT:
         # Code interpreter output images arrive as `image_file` content blocks in
@@ -542,7 +567,10 @@ async def _create_annotation_data_and_persist_file(
             }
         )
 
-        if _is_ci_supported(local_file.content_type):
+        if _is_confident_ci_content_type(
+            local_file.content_type,
+            local_file.name,
+        ):
             await models.Thread.add_code_interpreter_files(
                 session=session,
                 thread_id=local_thread.id,
@@ -765,10 +793,12 @@ async def _backfill_s3_file(
         )
 
     if not local_file.content_type:
-        # OpenAI serves file content as application/octet-stream and code
-        # interpreter images have extensionless UUID filenames, so the magic
-        # bytes are the only type signal available.
-        local_file.content_type = _sniff_image_content_type(response.content)
+        # OpenAI serves historical Assistant output files as
+        # application/octet-stream, so inspect the bytes and filename rather than
+        # relying on the response header.
+        local_file.content_type = _detect_content_type(
+            response.content, local_file.name
+        )
         session.add(local_file)
 
     # filename generation taken from `pingpong.files.handle_create_file`
@@ -806,23 +836,25 @@ async def _sniff_content_type_from_store(
     head = b""
     async for chunk in config.file_store.store.get(name=s3_file.key):
         head += chunk
-        if len(head) >= 16:
+        if len(head) >= CONTENT_TYPE_SNIFF_BYTES:
             break
 
-    content_type = _sniff_image_content_type(head)
-    if content_type:
-        local_file.content_type = content_type
-        session.add(local_file)
-        logger.info(
-            "m16 sniffed content type from stored file. local_file_id=%s "
-            "openai_file_id=%s content_type=%s",
-            local_file.id,
-            local_file.file_id,
-            content_type,
-        )
+    content_type = _detect_content_type(
+        head[:CONTENT_TYPE_SNIFF_BYTES],
+        local_file.name,
+    )
+    local_file.content_type = content_type
+    session.add(local_file)
+    logger.info(
+        "m16 sniffed content type from stored file. local_file_id=%s "
+        "openai_file_id=%s content_type=%s",
+        local_file.id,
+        local_file.file_id,
+        content_type,
+    )
 
 
-def _sniff_image_content_type(content: bytes) -> str | None:
+def _detect_content_type(content: bytes, filename: str | None) -> str:
     if content.startswith(b"\x89PNG\r\n\x1a\n"):
         return "image/png"
     if content.startswith(b"\xff\xd8\xff"):
@@ -831,7 +863,53 @@ def _sniff_image_content_type(content: bytes) -> str | None:
         return "image/gif"
     if content[:4] == b"RIFF" and content[8:12] == b"WEBP":
         return "image/webp"
-    return None
+    if content.startswith(b"%PDF-"):
+        return "application/pdf"
+    if content.startswith(b"ID3") or (
+        len(content) >= 2 and content[0] == 0xFF and content[1] & 0xE0 == 0xE0
+    ):
+        return "audio/mpeg"
+    if len(content) >= 12 and content[4:8] == b"ftyp":
+        return "video/mp4"
+
+    head = content[:1024].lstrip()
+    if head.startswith(b"<svg") or (head.startswith(b"<?xml") and b"<svg" in head):
+        return "image/svg+xml"
+
+    inferred_content_type = file_extension_to_mime_type(Path(filename or "").suffix)
+    if inferred_content_type:
+        return inferred_content_type
+
+    if content and b"\x00" not in content[:1024]:
+        try:
+            content[:1024].decode("utf-8")
+        except UnicodeDecodeError:
+            pass
+        else:
+            return "text/plain"
+
+    guessed_type, _ = mimetypes.guess_type(filename or "")
+    if guessed_type and guessed_type != "application/octet-stream":
+        return guessed_type
+
+    return "application/octet-stream"
+
+
+def _is_confident_ci_content_type(
+    content_type: str | None,
+    filename: str | None,
+) -> bool:
+    if not content_type or not _is_ci_supported(content_type):
+        return False
+
+    if content_type not in GENERIC_CONTENT_TYPES:
+        return True
+
+    # Generic types can be inferred from an arbitrary UTF-8 prefix or used as a
+    # fallback for unknown binary data. Only treat them as CI inputs when the
+    # filename independently identifies a known type such as .txt or .pkl.
+    inferred_content_type = file_extension_to_mime_type(Path(filename or "").suffix)
+    return inferred_content_type == content_type
 
 
 def _get_annotations_for_content(content: MessageContent) -> list[OpenAIAnnotation]:
