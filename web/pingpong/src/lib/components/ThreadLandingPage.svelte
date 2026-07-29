@@ -1048,6 +1048,21 @@
 					</div>
 				{:else if assistant.interaction_mode === 'chat' && (assistant.assistant_should_message_first ?? false)}
 					<div class="h-[5%] max-h-8"></div>
+					{#if !isPrivate && assistantMeta.willDisplayUserInfo}
+						<div
+							class="my-5 flex max-w-sm flex-col items-center justify-center gap-1 rounded-2xl border border-red-600 px-3 py-2 text-center"
+						>
+							<UsersSolid class="h-10 w-10 text-red-600" />
+							<Span class="text-sm font-normal text-gray-700"
+								><Button
+									class="p-0 text-sm font-normal text-gray-700 underline"
+									onclick={showModeratorsModal}
+									ontouchstart={showModeratorsModal}>Moderators</Button
+								> have enabled a setting for this thread only that allows them to see
+								<span class="font-semibold">your full name</span> and its content.</Span
+							>
+						</div>
+					{/if}
 					<div class="flex min-w-2/5 flex-col items-center">
 						<p class="font-base text-center text-base text-gray-600">
 							The assistant will send the first message.<br />Start a new conversation to begin.
@@ -1069,7 +1084,13 @@
 			<div class="shrink-0 grow-0">
 				<input type="hidden" name="assistant_id" value={assistant.id} />
 				<input type="hidden" name="parties" value={parties} />
-				<div class="my-3">
+				<div
+					class="my-3"
+					class:hidden={!isPrivate &&
+						assistantMeta.willDisplayUserInfo &&
+						assistant.interaction_mode === 'chat' &&
+						(assistant.assistant_should_message_first ?? false)}
+				>
 					{#if isPrivate}
 						<div
 							class="flex w-full flex-wrap items-start gap-2 text-[0.7rem] sm:text-xs lg:flex-nowrap"
