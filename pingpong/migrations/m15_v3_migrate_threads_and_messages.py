@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from itertools import groupby
 from pathlib import Path
 
-from openai import APIStatusError, Omit, omit
+from openai import APIStatusError, AuthenticationError, Omit, omit
 from openai.types.beta.threads import Message, Run
 from openai.types.beta.threads.runs import (
     CodeInterpreterToolCall,
@@ -57,6 +57,7 @@ async def migrate_threads_and_messages_to_v3(
     )
 
     failed_threads: list[str] = []
+    authentication_failed_class_ids: list[int] = []
     async for class_id in _v2_thread_class_ids(session, resume=resume):
         try:
             openai_client = await get_openai_client_by_class_id(session, class_id)
@@ -66,6 +67,7 @@ async def migrate_threads_and_messages_to_v3(
             )
             continue
 
+        authentication_failed = False
         async for assistant in _assistants_with_v2_threads(
             session, class_id, resume=resume
         ):
@@ -78,9 +80,21 @@ async def migrate_threads_and_messages_to_v3(
                 async with session.begin_nested() as savepoint:
                     try:
                         await _migrate_thread(session, openai_client, thread, assistant)
-                        # NOTE: we deliberately keep thread versions as `2` for now since
-                        # we are not ready to have the client interpret these objects as v3
-                        # threads
+                        # Non-empty threads remain v2 until their message parts and
+                        # attachments are migrated. Empty threads have no downstream work,
+                        # so _migrate_thread promotes them directly to v3.
+                    except AuthenticationError as e:
+                        await savepoint.rollback()
+                        logger.error(
+                            "Could not authenticate with OpenAI during m15. "
+                            "class_id=%s status_code=%s error_code=%s",
+                            class_id,
+                            e.status_code,
+                            e.code,
+                        )
+                        authentication_failed_class_ids.append(class_id)
+                        authentication_failed = True
+                        break
                     except Exception:
                         await savepoint.rollback()
                         logger.exception(
@@ -93,14 +107,27 @@ async def migrate_threads_and_messages_to_v3(
             # Commit the successful threads for this assistant even if another thread
             # failed and was rolled back to its savepoint.
             await session.commit()
+            if authentication_failed:
+                # Every assistant in the class uses the same client. Leave the failed and
+                # unattempted threads at v2 rather than repeating the same invalid
+                # credential against every thread.
+                break
 
-    if failed_threads:
+    if failed_threads or authentication_failed_class_ids:
         # Surface the incomplete migration to the operator after preserving all
         # successful thread work. The migration is rerunnable, so failed thread IDs can
         # be retried after the underlying OpenAI/API issue is fixed.
-        raise RuntimeError(
-            f"Failed to migrate {len(failed_threads)} thread(s): {failed_threads}"
-        )
+        failures: list[str] = []
+        if failed_threads:
+            failures.append(
+                f"Failed to migrate {len(failed_threads)} thread(s): {failed_threads}"
+            )
+        if authentication_failed_class_ids:
+            failures.append(
+                "OpenAI authentication failed for class(es): "
+                f"{authentication_failed_class_ids}"
+            )
+        raise RuntimeError("; ".join(failures))
 
 
 def _v2_thread_filters(*, resume: bool) -> tuple:
@@ -391,13 +418,17 @@ async def _migrate_thread(
         session, thread, seen_tool_call_ids
     )
     pruned_orphan_runs = await _prune_orphan_runs(session, thread)
+    promoted_to_v3 = not openai_messages
+    if promoted_to_v3:
+        thread.version = 3
     logger.info(
         "m15 cleaned thread. thread_id=%s stale_messages_deleted=%s "
-        "stale_tool_calls_deleted=%s orphan_runs_deleted=%s",
+        "stale_tool_calls_deleted=%s orphan_runs_deleted=%s promoted_to_v3=%s",
         thread.id,
         deleted_stale_messages,
         deleted_stale_tool_calls,
         pruned_orphan_runs,
+        promoted_to_v3,
     )
 
     session.add(thread)
