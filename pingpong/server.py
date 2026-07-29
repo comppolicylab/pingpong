@@ -12240,7 +12240,6 @@ async def copy_assistant(
         require_published=False,
         force_private=True,
         creator_id=request.state["session"].user.id,
-        copy_private_files=True,
     )
     if not new_assistant:
         raise HTTPException(status_code=400, detail="Assistant could not be copied.")
@@ -14275,6 +14274,7 @@ async def update_assistant(
                 openai_client,
                 files_to_delete,
                 class_id=int(class_id),
+                skip_in_use=True,
             )
         except HTTPException:
             raise

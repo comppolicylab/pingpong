@@ -86,8 +86,13 @@ async def test_delete_orphaned_s3_files_raises_on_store_delete_failure(
 
 @pytest.mark.asyncio
 @with_user(123)
-@with_authz(grants=[("user:123", "can_edit", "assistant:11")])
-async def test_update_assistant_rejects_deleting_file_used_by_other_assistant(
+@with_authz(
+    grants=[
+        ("user:123", "can_edit", "assistant:11"),
+        ("user:123", "can_edit", "assistant:12"),
+    ]
+)
+async def test_update_assistant_preserves_file_until_last_assistant_detaches(
     api, db, valid_user_token, monkeypatch
 ):
     async def fake_list_class_models(class_id: str, request, openai_client):  # type: ignore[no-untyped-def]
@@ -161,7 +166,10 @@ async def test_update_assistant_rejects_deleting_file_used_by_other_assistant(
         )
         await session.execute(
             insert(models.code_interpreter_file_assistant_association).values(
-                assistant_id=other_assistant.id, file_id=file.id
+                [
+                    {"assistant_id": assistant_to_update.id, "file_id": file.id},
+                    {"assistant_id": other_assistant.id, "file_id": file.id},
+                ]
             )
         )
         await session.commit()
@@ -171,16 +179,32 @@ async def test_update_assistant_rejects_deleting_file_used_by_other_assistant(
         json={
             "name": "Updated Assistant",
             "tools": [],
+            "code_interpreter_file_ids": [],
             "deleted_private_files": [file.id],
         },
         headers={"Authorization": f"Bearer {valid_user_token}"},
     )
-    assert response.status_code == 403
-    assert "in use by assistants" in response.json()["detail"]
+    assert response.status_code == 200
 
     async with db.async_session() as session:
         existing_file = await models.File.get_by_id(session, file.id)
         assert existing_file is not None
+        assert await models.File.assistant_count_using_file(session, file.id, 1) == 1
+
+    response = api.put(
+        "/api/v1/class/1/assistant/12",
+        json={
+            "name": "Updated Other Assistant",
+            "tools": [],
+            "code_interpreter_file_ids": [],
+            "deleted_private_files": [file.id],
+        },
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert response.status_code == 200
+
+    async with db.async_session() as session:
+        assert await models.File.get_by_id(session, file.id) is None
 
 
 @pytest.mark.asyncio

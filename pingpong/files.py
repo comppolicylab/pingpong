@@ -237,6 +237,8 @@ async def handle_delete_files(
     oai_client: openai.AsyncClient,
     file_ids: list[int],
     class_id: int,
+    *,
+    skip_in_use: bool = False,
 ) -> GenericStatus:
     """Handle file deletion for multiple files.
 
@@ -269,12 +271,18 @@ async def handle_delete_files(
 
     in_use_files = [file for file in files if usage_counts.get(file.id, 0) > 0]
     if in_use_files:
-        file_names = ", ".join(file.name for file in in_use_files)
-        raise HTTPException(
-            status_code=403,
-            detail=f"The following files are in use by assistants: {file_names}. "
-            "Remove them from all assistants before deleting!",
-        )
+        if not skip_in_use:
+            file_names = ", ".join(file.name for file in in_use_files)
+            raise HTTPException(
+                status_code=403,
+                detail=f"The following files are in use by assistants: {file_names}. "
+                "Remove them from all assistants before deleting!",
+            )
+        in_use_file_ids = {file.id for file in in_use_files}
+        files = [file for file in files if file.id not in in_use_file_ids]
+        file_ids_found = [file.id for file in files]
+        if not file_ids_found:
+            return GenericStatus(status="ok")
 
     await File.remove_files_from_class(session, file_ids_found, class_id)
 

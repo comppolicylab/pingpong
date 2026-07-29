@@ -1908,26 +1908,16 @@ async def test_copy_assistant_within_class(
 
 
 @pytest.mark.asyncio
-async def test_copy_assistant_duplicates_private_files_for_new_owner(
-    db, config, monkeypatch
-):
-    class StoredFiles:
-        async def get(self, name: str):
-            assert name == "uploads/source.docx"
-            yield b"source contents"
-
-    monkeypatch.setattr(config, "file_store", SimpleNamespace(store=StoredFiles()))
+async def test_copy_assistant_shares_private_files_with_new_owner(db):
     authz = AsyncMock()
     openai_client = AsyncMock()
-    openai_client.files.create.return_value = SimpleNamespace(id="file-copy")
     openai_client.vector_stores.create.return_value = SimpleNamespace(id="vs-copy")
 
     async with db.async_session() as session:
         source_creator = models.User(id=123, email="source@example.com")
         copied_creator = models.User(id=456, email="copier@example.com")
         class_ = models.Class(id=1, name="Test Class", api_key="test-key")
-        stored_file = models.S3File(key="uploads/source.docx")
-        session.add_all([source_creator, copied_creator, class_, stored_file])
+        session.add_all([source_creator, copied_creator, class_])
         await session.flush()
         source_file = await models.File.create(
             session,
@@ -1941,7 +1931,6 @@ async def test_copy_assistant_duplicates_private_files_for_new_owner(
                 "class_id": class_.id,
                 "uploader_id": source_creator.id,
                 "private": True,
-                "s3_file_id": stored_file.id,
             },
             class_id=class_.id,
         )
@@ -1987,7 +1976,6 @@ async def test_copy_assistant_duplicates_private_files_for_new_owner(
             require_published=False,
             force_private=True,
             creator_id=copied_creator.id,
-            copy_private_files=True,
         )
 
         assert copied is not None
@@ -1996,10 +1984,8 @@ async def test_copy_assistant_duplicates_private_files_for_new_owner(
             session, copied.vector_store_id
         )
         assert len(copied_files) == 1
-        assert copied_files[0].id != source_file.id
-        assert copied_files[0].file_id == "file-copy"
-        assert copied_files[0].uploader_id == copied_creator.id
-        assert copied_files[0].s3_file_id == source_file.s3_file_id
+        assert copied_files[0].id == source_file.id
+        assert copied_files[0].file_id == source_file.file_id
         copied_with_ci_files = await models.Assistant.get_by_id_with_ci_files(
             session, copied.id
         )
@@ -2007,12 +1993,7 @@ async def test_copy_assistant_duplicates_private_files_for_new_owner(
             copied_files[0].id
         ]
 
-    openai_client.files.create.assert_awaited_once()
-    assert (
-        "user:456",
-        "owner",
-        f"user_file:{copied_files[0].id}",
-    ) in authz.write_safe.await_args_list[0].kwargs["grant"]
+    openai_client.files.create.assert_not_awaited()
 
 
 @with_user(123)
