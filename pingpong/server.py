@@ -9832,12 +9832,20 @@ async def delete_thread(
     thread = await models.Thread.get_by_id_with_users_voice_mode(
         request.state["db"], int(thread_id)
     )
+    if thread is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
+
+    class_ = await models.Class.get_by_id(request.state["db"], thread.class_id)
+    if class_ is None:
+        raise HTTPException(status_code=404, detail="Group not found")
+
     if (
         thread.display_user_info
         and thread.prevent_user_thread_deletion
-        and not await Authz("can_manage_threads", f"class:{thread.class_id}").test(
-            request
-        )
+        and not class_.private
+        and not await Authz(
+            "can_manage_threads", f"class:{thread.class_id}"
+        ).test_with_cache(request)
     ):
         raise HTTPException(
             status_code=403,

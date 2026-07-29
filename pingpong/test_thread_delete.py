@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import importlib
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+
 import pytest
 from sqlalchemy import func, select
 
@@ -292,6 +296,81 @@ async def test_protection_flag_is_ignored_without_recorded_user_information(
 
     async with db.async_session() as session:
         assert await models.Thread.get_by_id(session, 3401) is None
+
+
+@with_user(3450)
+@with_authz(grants=[("user:3450", "can_delete", "thread:3451")])
+async def test_delete_missing_thread_returns_not_found(
+    api, db, valid_user_token, monkeypatch
+):
+    server_module = importlib.import_module("pingpong.server")
+    monkeypatch.setattr(
+        server_module,
+        "get_openai_client_for_class",
+        AsyncMock(return_value=SimpleNamespace()),
+    )
+
+    async with db.async_session() as session:
+        session.add(
+            models.Class(
+                id=3452,
+                name="Missing Thread Class",
+                api_key="sk-test",
+            )
+        )
+        await session.commit()
+
+    response = api.delete(
+        "/api/v1/class/3452/thread/3451",
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+
+    assert response.status_code == 404, response.text
+    assert response.json() == {"detail": "Thread not found"}
+
+
+@with_user(3470)
+@with_authz(grants=[("user:3470", "can_delete", "class:3472")])
+async def test_private_class_with_protected_thread_can_be_deleted(
+    api, db, valid_user_token, monkeypatch
+):
+    server_module = importlib.import_module("pingpong.server")
+    monkeypatch.setattr(
+        server_module,
+        "get_openai_client_for_class",
+        AsyncMock(return_value=SimpleNamespace()),
+    )
+
+    async with db.async_session() as session:
+        class_ = models.Class(
+            id=3472,
+            name="Private Recorded Thread Class",
+            api_key="sk-test",
+            private=True,
+        )
+        thread = models.Thread(
+            id=3471,
+            thread_id=None,
+            class_id=class_.id,
+            version=3,
+            private=True,
+            display_user_info=True,
+            prevent_user_thread_deletion=True,
+        )
+        session.add_all([class_, thread])
+        await session.commit()
+
+    response = api.delete(
+        "/api/v1/class/3472",
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json() == {"status": "ok"}
+
+    async with db.async_session() as session:
+        assert await models.Thread.get_by_id(session, 3471) is None
+        assert await models.Class.get_by_id(session, 3472) is None
 
 
 @with_user(3500)

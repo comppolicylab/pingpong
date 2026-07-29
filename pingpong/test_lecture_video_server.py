@@ -1152,6 +1152,8 @@ async def test_create_lecture_thread_success(api, db, institution, valid_user_to
             version=3,
             lecture_video_id=lecture_video.id,
             instructions="You are a lecture assistant.",
+            should_record_user_information=True,
+            prevent_user_thread_deletion=True,
         )
         session.add(assistant)
         await session.commit()
@@ -1169,6 +1171,8 @@ async def test_create_lecture_thread_success(api, db, institution, valid_user_to
     assert data["thread"]["lecture_video_id"] == lecture_video.id
     assert data["thread"]["name"] == "Lecture Lesson"
     assert data["thread"]["private"] is True
+    assert data["thread"]["display_user_info"] is True
+    assert data["thread"]["prevent_user_thread_deletion"] is True
     assert data["session_token"] is None
 
 

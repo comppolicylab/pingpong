@@ -40,7 +40,9 @@ export const load: PageLoad = async ({ fetch, params, parent }) => {
 	threadRecording = expanded.data.recording || null;
 	threadDisplayUserInfo = expanded.data.thread.display_user_info || false;
 	threadPreventsUserDeletion =
-		threadDisplayUserInfo && (expanded.data.thread.prevent_user_thread_deletion || false);
+		!parentData.class?.private &&
+		threadDisplayUserInfo &&
+		(expanded.data.thread.prevent_user_thread_deletion || false);
 	threadLectureVideoMismatch =
 		expanded.data.lecture_video_matches_assistant === false &&
 		threadInteractionMode === 'lecture_video';

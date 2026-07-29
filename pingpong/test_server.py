@@ -1876,6 +1876,8 @@ async def test_copy_assistant_within_class(
             published=None,
             version=3,
             allow_lesson_timeline_bypass=True,
+            should_record_user_information=True,
+            prevent_user_thread_deletion=True,
         )
         stored_avatar = models.S3File(key="assistant-avatar.png")
         avatar_file = models.File(
@@ -1908,12 +1910,16 @@ async def test_copy_assistant_within_class(
     assert len(data["name"]) == 100
     assert data["published"] is None
     assert data["allow_lesson_timeline_bypass"] is True
+    assert data["should_record_user_information"] is True
+    assert data["prevent_user_thread_deletion"] is True
 
     async with db.async_session() as session:
         saved = await models.Assistant.get_by_id(session, data["id"])
         assert saved.instructions == original_instructions
         assert saved.creator_id == creator_id
         assert saved.allow_lesson_timeline_bypass is True
+        assert saved.should_record_user_information is True
+        assert saved.prevent_user_thread_deletion is True
         assert saved.avatar_file_id != original_avatar_file_id
         copied_avatar = await models.File.get_by_id_with_download(
             session, saved.avatar_file_id
