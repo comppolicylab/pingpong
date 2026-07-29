@@ -1,7 +1,10 @@
 import json
 import logging
+
 import openai
 from openai.types.beta.assistant_create_params import ToolResources
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from pingpong import models
 from pingpong.ai import (
     format_instructions,
@@ -24,7 +27,6 @@ from pingpong.schemas import (
     VectorStoreType,
 )
 from pingpong.vector_stores import create_vector_store
-from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
 
@@ -382,6 +384,7 @@ async def copy_assistant(
     new_name: str | None = None,
     require_published: bool = True,
     force_private: bool = False,
+    creator_id: int | None = None,
 ) -> models.Assistant | None:
     """
     Copy an assistant to the target class.
@@ -398,6 +401,8 @@ async def copy_assistant(
         await ensure_lecture_video_copy_credentials(
             session, assistant.class_id, target_class_id
         )
+
+    copied_creator_id = creator_id if creator_id is not None else assistant.creator_id
 
     new_vector_store_id, new_vector_store_obj_id = None, None
     if assistant.vector_store_id:
@@ -447,7 +452,7 @@ async def copy_assistant(
         class_id=target_class_id,
         vector_store_id=new_vector_store_id,
         lecture_video_id=new_lecture_video_id,
-        creator_id=assistant.creator_id,
+        creator_id=copied_creator_id,
         published=None if force_private else assistant.published,
         should_record_user_information=assistant.should_record_user_information,
         disable_prompt_randomization=assistant.disable_prompt_randomization,
@@ -509,7 +514,11 @@ async def copy_assistant(
                     "authorization_token": mcp_tool.authorization_token,
                     "description": mcp_tool.description,
                     "enabled": mcp_tool.enabled,
-                    "created_by_user_id": mcp_tool.created_by_user_id,
+                    "created_by_user_id": (
+                        creator_id
+                        if creator_id is not None
+                        else mcp_tool.created_by_user_id
+                    ),
                 },
             )
             new_mcp_servers.append(new_tool)
@@ -550,7 +559,7 @@ async def copy_assistant(
             temperature=assistant.temperature,
             metadata={
                 "class_id": str(target_class_id),
-                "creator_id": str(assistant.creator_id),
+                "creator_id": str(copied_creator_id),
             },
             tool_resources=tool_resources,
         )
@@ -561,7 +570,7 @@ async def copy_assistant(
 
     grants = [
         (f"class:{target_class_id}", "parent", f"assistant:{new_assistant.id}"),
-        (f"user:{assistant.creator_id}", "owner", f"assistant:{new_assistant.id}"),
+        (f"user:{copied_creator_id}", "owner", f"assistant:{new_assistant.id}"),
     ]
 
     if assistant.published and not force_private:
@@ -577,6 +586,8 @@ async def copy_assistant(
     return new_assistant
 
 
+# Group cloning preserves each source assistant's creator as historical attribution;
+# only direct assistant copies override the creator with the user making the copy.
 async def copy_moderator_published_assistants(
     session: AsyncSession,
     client: OpenFgaAuthzClient,

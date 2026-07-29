@@ -12291,6 +12291,7 @@ async def create_assistant(
             openai_client,
             files_to_delete,
             class_id=int(class_id),
+            skip_in_use=True,
         )
 
         # Create MCP servers and associate with assistant
@@ -12541,6 +12542,7 @@ async def copy_assistant(
         new_name=requested_name or _default_copy_name(assistant.name),
         require_published=False,
         force_private=True,
+        creator_id=request.state["session"].user.id,
     )
     if not new_assistant:
         raise HTTPException(status_code=400, detail="Assistant could not be copied.")
@@ -14575,6 +14577,7 @@ async def update_assistant(
                 openai_client,
                 files_to_delete,
                 class_id=int(class_id),
+                skip_in_use=True,
             )
         except HTTPException:
             raise
@@ -14634,6 +14637,7 @@ async def update_assistant(
                 openai_client,
                 unused_context_file_ids_to_delete,
                 class_id=int(class_id),
+                skip_in_use=True,
             )
         except Exception:
             logger.exception(
@@ -14788,6 +14792,7 @@ async def delete_assistant(
 
     # Detach the vector store from the assistant and delete it
     vector_store_obj_id = None
+    private_file_candidates: set[int] = set()
     lecture_video_id_to_delete = asst.lecture_video_id
     lecture_slide_deck_id_to_delete = asst.lecture_slide_deck_id
     old_avatar_keys = await _delete_assistant_avatar(request.state["db"], asst)
@@ -14796,16 +14801,23 @@ async def delete_assistant(
         vector_store_id = asst.vector_store_id
         asst.vector_store_id = None
         # Keep the OAI vector store ID for deletion
-        vector_store_obj_id = await delete_vector_store_db(
+        vector_store_result = await delete_vector_store_db_returning_file_ids(
             request.state["db"], vector_store_id
         )
+        vector_store_obj_id = vector_store_result.vector_store_id
+        private_file_candidates.update(vector_store_result.deleted_file_ids)
 
     # Remove any CI files associations with the assistant
-    stmt = delete(models.code_interpreter_file_assistant_association).where(
-        models.code_interpreter_file_assistant_association.c.assistant_id
-        == int(asst.id)
+    stmt = (
+        delete(models.code_interpreter_file_assistant_association)
+        .where(
+            models.code_interpreter_file_assistant_association.c.assistant_id
+            == int(asst.id)
+        )
+        .returning(models.code_interpreter_file_assistant_association.c.file_id)
     )
-    await request.state["db"].execute(stmt)
+    deleted_ci_files = await request.state["db"].execute(stmt)
+    private_file_candidates.update(row[0] for row in deleted_ci_files.fetchall())
 
     revokes = [
         (f"class:{class_id}", "parent", f"assistant:{asst.id}"),
@@ -14848,6 +14860,29 @@ async def delete_assistant(
 
     # clean up grants
     await request.state["authz"].write_safe(revoke=revokes)
+    if private_file_candidates:
+        candidate_files = await models.File.get_all_by_id(
+            request.state["db"], list(private_file_candidates)
+        )
+        private_file_ids = [file.id for file in candidate_files if file.private]
+        try:
+            await handle_delete_files(
+                request.state["db"],
+                request.state["authz"],
+                openai_client,
+                private_file_ids,
+                class_id=int(class_id),
+                skip_in_use=True,
+            )
+        except Exception:
+            logger.exception(
+                "Failed to clean up private files after assistant delete. "
+                "assistant_id=%s file_ids=%s",
+                asst.id,
+                sanitize_for_log(
+                    ",".join(str(file_id) for file_id in private_file_ids)
+                ),
+            )
     if lecture_video_id_to_delete is not None:
         try:
             # Cancel first in case the lecture video is still kept alive by threads.
@@ -14898,6 +14933,7 @@ async def delete_assistant(
                 openai_client,
                 unused_context_file_ids_to_delete,
                 class_id=int(class_id),
+                skip_in_use=True,
             )
         except Exception:
             logger.exception(

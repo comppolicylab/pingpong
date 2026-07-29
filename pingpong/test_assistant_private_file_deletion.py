@@ -1,6 +1,8 @@
 from datetime import datetime, timezone
 import importlib
+import logging
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 from sqlalchemy import insert
@@ -86,9 +88,14 @@ async def test_delete_orphaned_s3_files_raises_on_store_delete_failure(
 
 @pytest.mark.asyncio
 @with_user(123)
-@with_authz(grants=[("user:123", "can_edit", "assistant:11")])
-async def test_update_assistant_rejects_deleting_file_used_by_other_assistant(
-    api, db, valid_user_token, monkeypatch
+@with_authz(
+    grants=[
+        ("user:123", "can_edit", "assistant:11"),
+        ("user:123", "can_delete", "assistant:12"),
+    ]
+)
+async def test_update_assistant_preserves_file_until_last_assistant_detaches(
+    api, db, valid_user_token, monkeypatch, caplog
 ):
     async def fake_list_class_models(class_id: str, request, openai_client):  # type: ignore[no-untyped-def]
         return _fake_class_models_response(
@@ -161,26 +168,140 @@ async def test_update_assistant_rejects_deleting_file_used_by_other_assistant(
         )
         await session.execute(
             insert(models.code_interpreter_file_assistant_association).values(
-                assistant_id=other_assistant.id, file_id=file.id
+                [
+                    {"assistant_id": assistant_to_update.id, "file_id": file.id},
+                    {"assistant_id": other_assistant.id, "file_id": file.id},
+                ]
             )
         )
         await session.commit()
 
-    response = api.put(
-        "/api/v1/class/1/assistant/11",
-        json={
-            "name": "Updated Assistant",
-            "tools": [],
-            "deleted_private_files": [file.id],
-        },
-        headers={"Authorization": f"Bearer {valid_user_token}"},
-    )
-    assert response.status_code == 403
-    assert "in use by assistants" in response.json()["detail"]
+    with caplog.at_level(logging.INFO, logger="pingpong.files"):
+        response = api.put(
+            "/api/v1/class/1/assistant/11",
+            json={
+                "name": "Updated Assistant",
+                "tools": [],
+                "code_interpreter_file_ids": [],
+                "deleted_private_files": [file.id],
+            },
+            headers={"Authorization": f"Bearer {valid_user_token}"},
+        )
+    assert response.status_code == 200
+    assert "Retaining files still used by assistants" in caplog.text
 
     async with db.async_session() as session:
         existing_file = await models.File.get_by_id(session, file.id)
         assert existing_file is not None
+        assert await models.File.assistant_count_using_file(session, file.id, 1) == 1
+
+    response = api.delete(
+        "/api/v1/class/1/assistant/12",
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert response.status_code == 200
+
+    async with db.async_session() as session:
+        assert await models.File.get_by_id(session, file.id) is None
+
+
+@pytest.mark.asyncio
+async def test_delete_files_preserves_cross_class_file_until_last_class_removes_it(db):
+    authz = AsyncMock()
+    openai_client = AsyncMock()
+
+    async with db.async_session() as session:
+        uploader = models.User(id=999, email="uploader999@example.com")
+        source_class = models.Class(id=1, name="Source Class", api_key="sk-test")
+        target_class = models.Class(id=2, name="Target Class", api_key="sk-test")
+        session.add_all([uploader, source_class, target_class])
+        await session.flush()
+        file = await models.File.create(
+            session,
+            {
+                "name": "Cross-class private upload",
+                "content_type": "text/plain",
+                "file_id": "file-cross-class",
+                "private": True,
+                "uploader_id": uploader.id,
+                "class_id": source_class.id,
+            },
+            source_class.id,
+        )
+        await models.File.add_files_to_class(session, target_class.id, [file.id])
+
+        await files.handle_delete_files(
+            session,
+            authz,
+            openai_client,
+            [file.id],
+            target_class.id,
+            skip_in_use=True,
+        )
+
+        assert await models.File.get_by_id(session, file.id) is not None
+        assert await models.File.class_count_using_file(session, file.id) == 1
+        openai_client.files.delete.assert_not_awaited()
+
+        await files.handle_delete_files(
+            session,
+            authz,
+            openai_client,
+            [file.id],
+            source_class.id,
+            skip_in_use=True,
+        )
+
+        assert await models.File.get_by_id(session, file.id) is None
+        openai_client.files.delete.assert_awaited_once_with(file.file_id)
+
+
+@pytest.mark.asyncio
+async def test_delete_files_keeps_uploader_grant_for_cross_class_class_file(db):
+    authz = AsyncMock()
+    openai_client = AsyncMock()
+
+    async with db.async_session() as session:
+        uploader = models.User(id=999, email="uploader999@example.com")
+        source_class = models.Class(id=1, name="Source Class", api_key="sk-test")
+        target_class = models.Class(id=2, name="Target Class", api_key="sk-test")
+        session.add_all([uploader, source_class, target_class])
+        await session.flush()
+        file = await models.File.create(
+            session,
+            {
+                "name": "Cross-class shared upload",
+                "content_type": "text/plain",
+                "file_id": "file-cross-class-shared",
+                "private": False,
+                "uploader_id": uploader.id,
+                "class_id": source_class.id,
+            },
+            source_class.id,
+        )
+        await models.File.add_files_to_class(session, target_class.id, [file.id])
+
+        await files.handle_delete_files(
+            session,
+            authz,
+            openai_client,
+            [file.id],
+            target_class.id,
+        )
+
+        revokes = [
+            revoke
+            for call in authz.write_safe.await_args_list
+            for revoke in call.kwargs.get("revoke", [])
+        ]
+        assert (
+            f"user:{uploader.id}",
+            "owner",
+            f"class_file:{file.id}",
+        ) not in revokes
+        assert await models.File.get_by_id(session, file.id) is not None
+        assert await models.File.class_count_using_file(session, file.id) == 1
+        openai_client.files.delete.assert_not_awaited()
 
 
 @pytest.mark.asyncio
