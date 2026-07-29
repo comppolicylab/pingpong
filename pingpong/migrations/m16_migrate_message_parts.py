@@ -35,6 +35,8 @@ from pingpong.server import OpenAIClient
 logger = logging.getLogger(__name__)
 
 LOCAL_BATCH_SIZE = 100
+CONTENT_TYPE_SNIFF_BYTES = 1024
+GENERIC_CONTENT_TYPES = {"application/octet-stream", "text/plain"}
 
 
 @dataclass(frozen=True)
@@ -565,7 +567,10 @@ async def _create_annotation_data_and_persist_file(
             }
         )
 
-        if _is_ci_supported(local_file.content_type):
+        if _is_confident_ci_content_type(
+            local_file.content_type,
+            local_file.name,
+        ):
             await models.Thread.add_code_interpreter_files(
                 session=session,
                 thread_id=local_thread.id,
@@ -831,10 +836,13 @@ async def _sniff_content_type_from_store(
     head = b""
     async for chunk in config.file_store.store.get(name=s3_file.key):
         head += chunk
-        if len(head) >= 16:
+        if len(head) >= CONTENT_TYPE_SNIFF_BYTES:
             break
 
-    content_type = _detect_content_type(head, local_file.name)
+    content_type = _detect_content_type(
+        head[:CONTENT_TYPE_SNIFF_BYTES],
+        local_file.name,
+    )
     local_file.content_type = content_type
     session.add(local_file)
     logger.info(
@@ -868,6 +876,10 @@ def _detect_content_type(content: bytes, filename: str | None) -> str:
     if head.startswith(b"<svg") or (head.startswith(b"<?xml") and b"<svg" in head):
         return "image/svg+xml"
 
+    inferred_content_type = file_extension_to_mime_type(Path(filename or "").suffix)
+    if inferred_content_type:
+        return inferred_content_type
+
     if content and b"\x00" not in content[:1024]:
         try:
             content[:1024].decode("utf-8")
@@ -881,6 +893,23 @@ def _detect_content_type(content: bytes, filename: str | None) -> str:
         return guessed_type
 
     return "application/octet-stream"
+
+
+def _is_confident_ci_content_type(
+    content_type: str | None,
+    filename: str | None,
+) -> bool:
+    if not content_type or not _is_ci_supported(content_type):
+        return False
+
+    if content_type not in GENERIC_CONTENT_TYPES:
+        return True
+
+    # Generic types can be inferred from an arbitrary UTF-8 prefix or used as a
+    # fallback for unknown binary data. Only treat them as CI inputs when the
+    # filename independently identifies a known type such as .txt or .pkl.
+    inferred_content_type = file_extension_to_mime_type(Path(filename or "").suffix)
+    return inferred_content_type == content_type
 
 
 def _get_annotations_for_content(content: MessageContent) -> list[OpenAIAnnotation]:
