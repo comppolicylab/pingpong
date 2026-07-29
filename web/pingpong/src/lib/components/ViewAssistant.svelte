@@ -48,6 +48,7 @@
 	} from '$lib/assistantHelpers';
 	import { invalidateAll } from '$app/navigation';
 	import { loading, loadingMessage } from '$lib/stores/general';
+	import AssistantAvatar from '$lib/components/AssistantAvatar.svelte';
 
 	export let assistant: Assistant;
 	export let creator: AppUser;
@@ -518,27 +519,30 @@
 		tag="h3"
 		class="flex flex-wrap items-center justify-between gap-x-4 gap-y-0 text-3xl font-normal"
 	>
-		<div class="min-w-0">
-			<span class="mr-2 break-words">{assistant.name}</span>
-			<span class="inline-flex flex-wrap items-center gap-1 align-baseline">
-				{#if !assistant.published}
-					<EyeSlashOutline class="mr-1 inline-block h-5 w-5 text-gray-500" />
-					<Tooltip placement="top" class="text-xs font-light"
-						>This assistant is not currently published.</Tooltip
-					>
-				{:else}
-					<EyeOutline class="mr-1 inline-block h-5 w-5 text-orange" />
-					<Tooltip placement="top" class="text-xs font-light"
-						>This assistant is currently published and available to all members.</Tooltip
-					>
-				{/if}
-				{#if currentlyShared}
-					<GlobeOutline class="mr-1 inline-block h-5 w-5 text-orange" />
-					<Tooltip placement="top" class="text-xs font-light"
-						>One or more sharable links are active for this assistant.</Tooltip
-					>
-				{/if}
-			</span>
+		<div class="flex min-w-0 items-center gap-3">
+			<AssistantAvatar {assistant} size={12} />
+			<div class="min-w-0">
+				<span class="mr-2 break-words">{assistant.name}</span>
+				<span class="inline-flex flex-wrap items-center gap-1 align-baseline">
+					{#if !assistant.published}
+						<EyeSlashOutline class="mr-1 inline-block h-5 w-5 text-gray-500" />
+						<Tooltip placement="top" class="text-xs font-light"
+							>This assistant is not currently published.</Tooltip
+						>
+					{:else}
+						<EyeOutline class="mr-1 inline-block h-5 w-5 text-orange" />
+						<Tooltip placement="top" class="text-xs font-light"
+							>This assistant is currently published and available to all members.</Tooltip
+						>
+					{/if}
+					{#if currentlyShared}
+						<GlobeOutline class="mr-1 inline-block h-5 w-5 text-orange" />
+						<Tooltip placement="top" class="text-xs font-light"
+							>One or more sharable links are active for this assistant.</Tooltip
+						>
+					{/if}
+				</span>
+			</div>
 		</div>
 
 		<div class="flex shrink-0 items-center gap-2">

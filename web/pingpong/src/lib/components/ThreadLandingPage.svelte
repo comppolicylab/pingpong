@@ -41,6 +41,7 @@
 	import { loading, isFirefox } from '$lib/stores/general';
 	import ModeratorsTable from '$lib/components/ModeratorsTable.svelte';
 	import StatusErrors from './StatusErrors.svelte';
+	import AssistantAvatar from '$lib/components/AssistantAvatar.svelte';
 
 	/**
 	 * Application data.
@@ -650,6 +651,7 @@
 			<div class="flex h-full w-full flex-col items-center justify-center gap-4 overflow-auto px-5">
 				<div class="flex w-full flex-col items-center gap-2 text-center md:w-2/3 lg:w-1/2">
 					<div class="flex flex-col items-center justify-center gap-1">
+						<AssistantAvatar {assistant} size={20} extraClass="mb-2 shadow-sm" />
 						<div class="text-xl leading-tight font-medium md:text-4xl">{assistant.name}</div>
 					</div>
 					{#if !(data.isSharedAssistantPage || data.isSharedThreadPage) && assistant.interaction_mode !== 'lecture_video' && assistant.interaction_mode !== 'lecture_slides'}
@@ -707,6 +709,11 @@
 										<div class="flex max-w-full flex-row items-center justify-between gap-5">
 											<div class="flex w-10/12 flex-col gap-1">
 												<div class="text-sm leading-snug">
+													<AssistantAvatar
+														assistant={asst}
+														size={4}
+														extraClass="mr-1 inline-block"
+													/>
 													{#if asst.interaction_mode === 'lecture_slides'}
 														<BookOpenOutline
 															size="sm"
@@ -758,6 +765,7 @@
 									<div class="flex max-w-full flex-row items-center justify-between gap-5">
 										<div class="flex w-10/12 flex-col gap-1">
 											<div class="text-sm leading-snug">
+												<AssistantAvatar assistant={asst} size={4} extraClass="mr-1 inline-block" />
 												{#if asst.interaction_mode === 'voice'}
 													<MicrophoneOutline
 														size="sm"
@@ -815,6 +823,11 @@
 										<div class="flex max-w-full flex-row items-center justify-between gap-5">
 											<div class="flex w-10/12 flex-col gap-1">
 												<div class="text-sm leading-snug">
+													<AssistantAvatar
+														assistant={asst}
+														size={4}
+														extraClass="mr-1 inline-block"
+													/>
 													{#if asst.interaction_mode === 'voice'}
 														<MicrophoneOutline
 															size="sm"
@@ -872,6 +885,11 @@
 										<div class="flex max-w-full flex-row items-center justify-between gap-5">
 											<div class="flex w-10/12 flex-col gap-1">
 												<div class="text-sm leading-snug">
+													<AssistantAvatar
+														assistant={asst}
+														size={4}
+														extraClass="mr-1 inline-block"
+													/>
 													{#if asst.interaction_mode === 'voice'}
 														<MicrophoneOutline
 															size="sm"

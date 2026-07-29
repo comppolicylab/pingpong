@@ -30,6 +30,7 @@
 	import { DoubleBounce } from 'svelte-loading-spinners';
 	import Markdown from '$lib/components/Markdown.svelte';
 	import Logo from '$lib/components/Logo.svelte';
+	import AssistantAvatar from '$lib/components/AssistantAvatar.svelte';
 	import ChatInput, {
 		type ChatInputHandle,
 		type ChatInputMessage
@@ -133,7 +134,16 @@
 	$: threadName = threadMgr.thread?.name || 'Thread';
 	$: groupName = data.class?.name || `Group ${classId}`;
 	$: threadLink = `${$page.url.origin}/group/${classId}/thread/${threadId}`;
-	$: assistantIconSrc = data.disagreementProjectView ? disagreementProjectIcon : '';
+	$: activeAssistant = data.assistants.find(
+		(candidate: api.Assistant) => candidate.id === $assistantId
+	);
+	$: assistantIconSrc = activeAssistant?.avatar_url
+		? api.assistantAvatarUrl(activeAssistant)
+		: expandedThreadData.data?.assistant_avatar_url
+			? api.withMediaAuthQuery(expandedThreadData.data.assistant_avatar_url)
+			: data.disagreementProjectView
+				? disagreementProjectIcon
+				: '';
 	$: lectureVideoSrc = (() => {
 		const base = api.fullPath(`/class/${classId}/thread/${threadId}/video`);
 		const anonymousSessionToken = getAnonymousSessionToken();
@@ -2017,14 +2027,13 @@
 					<div class="shrink-0">
 						{#if message.data.role === 'user'}
 							<Avatar size="sm" src={getImage(message.data)} />
-						{:else if assistantIconSrc}
-							<img
-								src={assistantIconSrc}
-								alt="Disagreement Project"
-								class="size-8 rounded-full object-cover"
-							/>
 						{:else}
-							<Logo size={8} />
+							<AssistantAvatar
+								assistant={activeAssistant}
+								src={assistantIconSrc}
+								size={8}
+								showFallback
+							/>
 						{/if}
 					</div>
 					<div class="w-full max-w-full">

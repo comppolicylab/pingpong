@@ -181,6 +181,7 @@ from .errors import sentry
 from .files import (
     FILE_TYPES,
     FileNotFoundException,
+    _delete_orphaned_s3_files,
     generate_vision_image_descriptions_string,
     handle_create_file,
     handle_delete_file,
@@ -4281,6 +4282,12 @@ async def get_thread(
 
         return {
             "thread": thread,
+            "assistant_avatar_url": (
+                f"/api/v1/class/{thread.class_id}/thread/{thread.id}/assistant-avatar"
+                f"?v={assistant.avatar_file_id}"
+                if assistant and assistant.avatar_file_id is not None
+                else None
+            ),
             "model": assistant.model if assistant else "None",
             "tools_available": thread.tools_available,
             "run": last_run[0] if last_run else None,
@@ -4971,6 +4978,12 @@ async def get_thread(
             )
         return {
             "thread": thread,
+            "assistant_avatar_url": (
+                f"/api/v1/class/{thread.class_id}/thread/{thread.id}/assistant-avatar"
+                f"?v={assistant.avatar_file_id}"
+                if assistant and assistant.avatar_file_id is not None
+                else None
+            ),
             "model": assistant.model if assistant else "None",
             "tools_available": thread.tools_available,
             "run": last_run_db if latest_run else None,
@@ -11328,6 +11341,222 @@ async def list_assistants(class_id: str, request: StateRequest):
     }
 
 
+ASSISTANT_AVATAR_CONTENT_TYPES = {
+    "image/gif": ".gif",
+    "image/jpeg": ".jpg",
+    "image/png": ".png",
+    "image/webp": ".webp",
+}
+
+
+def _assistant_avatar_matches_content_type(content_type: str, header: bytes) -> bool:
+    if content_type == "image/png":
+        return header.startswith(b"\x89PNG\r\n\x1a\n")
+    if content_type == "image/jpeg":
+        return header.startswith(b"\xff\xd8\xff")
+    if content_type == "image/gif":
+        return header.startswith((b"GIF87a", b"GIF89a"))
+    if content_type == "image/webp":
+        return (
+            len(header) >= 12 and header.startswith(b"RIFF") and header[8:12] == b"WEBP"
+        )
+    return False
+
+
+async def _delete_assistant_avatar(
+    session: AsyncSession, assistant: models.Assistant
+) -> None:
+    avatar_file_id = assistant.avatar_file_id
+    if avatar_file_id is None:
+        return
+
+    avatar_file = await models.File.get_by_id_with_download(session, avatar_file_id)
+    assistant.avatar_file_id = None
+    session.add(assistant)
+    await session.flush()
+
+    if avatar_file is None:
+        return
+
+    candidate_s3_file_id = avatar_file.s3_file_id
+    await models.File.delete(session, avatar_file.id)
+    await session.flush()
+    await _delete_orphaned_s3_files(session, [candidate_s3_file_id])
+
+
+@v1.get(
+    "/class/{class_id}/assistant/{assistant_id}/avatar",
+    dependencies=[Depends(Authz("can_view", "assistant:{assistant_id}"))],
+)
+async def get_assistant_avatar(class_id: str, assistant_id: str, request: StateRequest):
+    assistant = await models.Assistant.get_by_id(request.state["db"], int(assistant_id))
+    if (
+        assistant is None
+        or assistant.class_id != int(class_id)
+        or assistant.avatar_file_id is None
+    ):
+        raise HTTPException(404, "Assistant avatar not found.")
+
+    avatar_file = await models.File.get_by_id_with_download(
+        request.state["db"], assistant.avatar_file_id
+    )
+    if avatar_file is None or avatar_file.s3_file is None:
+        raise HTTPException(404, "Assistant avatar not found.")
+
+    return StreamingResponse(
+        config.file_store.store.get(name=avatar_file.s3_file.key),
+        media_type=avatar_file.content_type,
+        headers={
+            "Cache-Control": "private, max-age=300",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
+
+
+@v1.get(
+    "/class/{class_id}/thread/{thread_id}/assistant-avatar",
+    dependencies=[Depends(Authz("can_view", "thread:{thread_id}"))],
+)
+async def get_thread_assistant_avatar(
+    class_id: str, thread_id: str, request: StateRequest
+):
+    thread = await models.Thread.get_by_id(request.state["db"], int(thread_id))
+    if (
+        thread is None
+        or thread.class_id != int(class_id)
+        or thread.assistant_id is None
+    ):
+        raise HTTPException(404, "Assistant avatar not found.")
+
+    assistant = await models.Assistant.get_by_id(
+        request.state["db"], thread.assistant_id
+    )
+    if assistant is None or assistant.avatar_file_id is None:
+        raise HTTPException(404, "Assistant avatar not found.")
+
+    avatar_file = await models.File.get_by_id_with_download(
+        request.state["db"], assistant.avatar_file_id
+    )
+    if avatar_file is None or avatar_file.s3_file is None:
+        raise HTTPException(404, "Assistant avatar not found.")
+
+    return StreamingResponse(
+        config.file_store.store.get(name=avatar_file.s3_file.key),
+        media_type=avatar_file.content_type,
+        headers={
+            "Cache-Control": "private, max-age=300",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
+
+
+@v1.post(
+    "/class/{class_id}/assistant/{assistant_id}/avatar",
+    dependencies=[
+        Depends(Authz("can_edit", "assistant:{assistant_id}")),
+        Depends(ClassNotArchived()),
+    ],
+    response_model=schemas.Assistant,
+)
+async def upload_assistant_avatar(
+    class_id: str,
+    assistant_id: str,
+    request: StateRequest,
+    upload: UploadFile,
+):
+    assistant = await models.Assistant.get_by_id(request.state["db"], int(assistant_id))
+    if assistant is None or assistant.class_id != int(class_id):
+        raise HTTPException(404, "Assistant not found.")
+
+    content_type = (upload.content_type or "").lower().split(";", maxsplit=1)[0]
+    suffix = ASSISTANT_AVATAR_CONTENT_TYPES.get(content_type)
+    if suffix is None:
+        raise HTTPException(415, "Avatar must be a PNG, JPEG, GIF, or WebP image.")
+    upload.file.seek(0, 2)
+    upload_size = upload.file.tell()
+    upload.file.seek(0)
+    if upload_size > config.upload.assistant_avatar_max_size:
+        raise HTTPException(
+            413,
+            "Avatar is too large. "
+            f"Maximum size is {humanize.naturalsize(config.upload.assistant_avatar_max_size)}.",
+        )
+    header = upload.file.read(16)
+    upload.file.seek(0)
+    if not _assistant_avatar_matches_content_type(content_type, header):
+        raise HTTPException(415, "Uploaded file does not match its image type.")
+
+    key = f"assistant_avatar_{uuid.uuid7()}{suffix}"
+    avatar_file = models.File(
+        name=upload.filename or f"avatar{suffix}",
+        content_type=content_type,
+        class_id=assistant.class_id,
+        uploader_id=request.state["session"].user.id,
+        private=False,
+    )
+    request.state["db"].add(avatar_file)
+    await request.state["db"].flush()
+
+    try:
+        await config.file_store.store.put(key, upload.file, content_type)
+        await models.S3File.create(
+            request.state["db"], key=key, file_obj_ids=[avatar_file.id]
+        )
+    except Exception:
+        await models.File.delete(request.state["db"], avatar_file.id)
+        try:
+            await config.file_store.store.delete(key)
+        except Exception:
+            logger.exception("Failed to clean up assistant avatar upload %s", key)
+        raise
+
+    old_avatar_file_id = assistant.avatar_file_id
+    assistant.avatar_file_id = avatar_file.id
+    request.state["db"].add(assistant)
+    await request.state["db"].flush()
+
+    if old_avatar_file_id is not None and old_avatar_file_id != avatar_file.id:
+        old_file = await models.File.get_by_id_with_download(
+            request.state["db"], old_avatar_file_id
+        )
+        if old_file is not None:
+            old_s3_file_id = old_file.s3_file_id
+            await models.File.delete(request.state["db"], old_file.id)
+            await request.state["db"].flush()
+            await _delete_orphaned_s3_files(request.state["db"], [old_s3_file_id])
+
+    loaded_assistant = await models.Assistant.get_by_id_with_lecture_video(
+        request.state["db"], assistant.id
+    )
+    return await assistant_service.assistant_response_from_model(
+        request.state["db"], loaded_assistant or assistant
+    )
+
+
+@v1.delete(
+    "/class/{class_id}/assistant/{assistant_id}/avatar",
+    dependencies=[
+        Depends(Authz("can_edit", "assistant:{assistant_id}")),
+        Depends(ClassNotArchived()),
+    ],
+    response_model=schemas.Assistant,
+)
+async def delete_assistant_avatar(
+    class_id: str, assistant_id: str, request: StateRequest
+):
+    assistant = await models.Assistant.get_by_id(request.state["db"], int(assistant_id))
+    if assistant is None or assistant.class_id != int(class_id):
+        raise HTTPException(404, "Assistant not found.")
+
+    await _delete_assistant_avatar(request.state["db"], assistant)
+    loaded_assistant = await models.Assistant.get_by_id_with_lecture_video(
+        request.state["db"], assistant.id
+    )
+    return await assistant_service.assistant_response_from_model(
+        request.state["db"], loaded_assistant or assistant
+    )
+
+
 @v1.post(
     "/class/{class_id}/assistant",
     dependencies=[
@@ -14488,6 +14717,7 @@ async def delete_assistant(
     vector_store_obj_id = None
     lecture_video_id_to_delete = asst.lecture_video_id
     lecture_slide_deck_id_to_delete = asst.lecture_slide_deck_id
+    await _delete_assistant_avatar(request.state["db"], asst)
     if asst.vector_store_id:
         vector_store_id = asst.vector_store_id
         asst.vector_store_id = None
