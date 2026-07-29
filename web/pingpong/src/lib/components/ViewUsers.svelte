@@ -469,5 +469,10 @@
 		<span class="font-semibold text-gray-900 dark:text-white">{total}</span>
 		{total === 1 ? 'user' : 'users'}
 	</div>
-	<Pagination {pages} on:previous={loadPreviousPage} on:next={loadNextPage} onclick={handleClick} />
+	<Pagination
+		{pages}
+		on:previous={loadPreviousPage}
+		on:next={loadNextPage}
+		on:click={handleClick}
+	/>
 </div>
