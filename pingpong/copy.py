@@ -473,6 +473,21 @@ async def copy_assistant(
     await session.flush()
     await session.refresh(new_assistant)
 
+    if assistant.avatar_file is not None:
+        copied_avatar_file = models.File(
+            name=assistant.avatar_file.name,
+            content_type=assistant.avatar_file.content_type,
+            file_id=assistant.avatar_file.file_id or "",
+            class_id=target_class_id,
+            uploader_id=assistant.avatar_file.uploader_id,
+            private=False,
+            s3_file_id=assistant.avatar_file.s3_file_id,
+        )
+        session.add(copied_avatar_file)
+        await session.flush()
+        new_assistant.avatar_file_id = copied_avatar_file.id
+        session.add(new_assistant)
+
     if assistant.code_interpreter_files:
         await models.Assistant.copy_code_interpreter_files(
             session,

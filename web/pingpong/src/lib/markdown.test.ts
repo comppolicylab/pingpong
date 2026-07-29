@@ -115,6 +115,13 @@ Inline math: $\\frac{1}{2}$
 		expectLatexAnnotations(rendered, ['\\frac{1}{2}']);
 	});
 
+	it('should render invalid inline LaTeX as ordinary escaped text', () => {
+		const rendered = markdown('$Soka & Sorrell, 2022, report$', { latex: true });
+
+		expect(rendered).toBe('<p>Soka &amp; Sorrell, 2022, report</p>\n');
+		expect(rendered).not.toContain('katex-error');
+	});
+
 	it('should render block LaTeX', async () => {
 		const rendered = await markdown(
 			`

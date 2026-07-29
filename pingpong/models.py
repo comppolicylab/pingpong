@@ -5773,6 +5773,16 @@ class Assistant(Base):
     )
     class_id = Column(Integer, ForeignKey("classes.id"))
     class_ = relationship("Class", back_populates="assistants", foreign_keys=[class_id])
+    avatar_file_id = Column(
+        Integer,
+        ForeignKey(
+            "files.id",
+            ondelete="SET NULL",
+            name="fk_assistants_avatar_file_id_files",
+        ),
+        nullable=True,
+    )
+    avatar_file = relationship("File", foreign_keys=[avatar_file_id], uselist=False)
     threads = relationship("Thread", back_populates="assistant")
     code_interpreter_files = relationship(
         "File",
@@ -5824,6 +5834,7 @@ class Assistant(Base):
     @staticmethod
     def _copy_context_loader_options() -> tuple[Load, ...]:
         return (
+            selectinload(Assistant.avatar_file).selectinload(File.s3_file),
             selectinload(Assistant.code_interpreter_files),
             selectinload(Assistant.mcp_server_tools),
             selectinload(Assistant.lecture_video).options(

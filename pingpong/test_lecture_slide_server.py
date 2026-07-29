@@ -339,7 +339,7 @@ def test_lecture_slide_additional_context_file_validation_uses_mime_type():
 @with_institution(11, "Test Institution")
 @with_authz(grants=[("user:123", "can_view", "class:1")])
 async def test_class_upload_info_marks_openai_input_file_mime_types(
-    api, db, institution, valid_user_token
+    api, db, institution, valid_user_token, config
 ):
     async with db.async_session() as session:
         session.add(
@@ -358,6 +358,10 @@ async def test_class_upload_info_marks_openai_input_file_mime_types(
     )
 
     assert response.status_code == 200
+    assert (
+        response.json()["assistant_avatar_max_size"]
+        == config.upload.assistant_avatar_max_size
+    )
     types_by_mime = {
         file_type["mime_type"]: file_type for file_type in response.json()["types"]
     }

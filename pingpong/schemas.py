@@ -1645,6 +1645,7 @@ class Assistant(BaseModel):
     elevenlabs_speed: float | None = None
     class_id: int
     creator_id: int
+    avatar_url: str | None = None
     locked: bool = False
     assistant_should_message_first: bool | None = None
     allow_lesson_timeline_bypass: bool = False
@@ -3681,6 +3682,7 @@ class VoiceModeRecording(BaseModel):
 
 class ThreadWithMeta(BaseModel):
     thread: Thread
+    assistant_avatar_url: str | None = None
     model: str
     tools_available: str
     run: OpenAIRun | None
@@ -3882,6 +3884,7 @@ class FileUploadSupport(BaseModel):
     allow_private: bool
     private_file_max_size: int
     class_file_max_size: int
+    assistant_avatar_max_size: int
 
 
 class GrantQuery(BaseModel):

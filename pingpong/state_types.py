@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Awaitable, Callable
 
 import openai
 from openai.resources.realtime.realtime import AsyncRealtimeConnection
@@ -18,6 +18,7 @@ if TYPE_CHECKING:
 
 
 OpenAIClientType: TypeAlias = openai.AsyncClient | openai.AsyncAzureOpenAI
+DatabaseCallback: TypeAlias = Callable[[], Awaitable[None]]
 
 
 class AppState(TypedDict, total=False):
@@ -42,7 +43,8 @@ class BaseConnectionState(TypedDict):
 
 
 class RequestState(BaseConnectionState):
-    pass
+    after_db_commit: list[DatabaseCallback]
+    after_db_rollback: list[DatabaseCallback]
 
 
 class WebSocketState(BaseConnectionState):

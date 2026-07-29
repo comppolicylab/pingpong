@@ -60,6 +60,18 @@ const escapeRegExp = (str: string) => {
 };
 
 /**
+ * Escape text before returning it as HTML from a Marked renderer.
+ */
+const escapeHtml = (str: string) => {
+	return str
+		.replace(/&/g, '&amp;')
+		.replace(/</g, '&lt;')
+		.replace(/>/g, '&gt;')
+		.replace(/"/g, '&quot;')
+		.replace(/'/g, '&#39;');
+};
+
+/**
  * Create a KaTeX extension for Marked that renders with the given delimiters.
  */
 const markedKatexExtension = (
@@ -154,10 +166,19 @@ const markedKatexExtension = (
 			return undefined;
 		},
 		renderer(token: KatexToken) {
-			return katex.renderToString(token.content, {
-				displayMode: token.display,
-				...options
-			});
+			try {
+				return katex.renderToString(token.content, {
+					displayMode: token.display,
+					...options,
+					throwOnError: true
+				});
+			} catch (error) {
+				if (options.throwOnError) {
+					throw error;
+				}
+
+				return escapeHtml(token.content);
+			}
 		}
 	};
 };
