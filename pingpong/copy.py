@@ -472,6 +472,7 @@ async def copy_assistant(
         copied_avatar_file = models.File(
             name=assistant.avatar_file.name,
             content_type=assistant.avatar_file.content_type,
+            file_id=assistant.avatar_file.file_id or "",
             class_id=target_class_id,
             uploader_id=assistant.avatar_file.uploader_id,
             private=False,

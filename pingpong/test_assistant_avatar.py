@@ -25,7 +25,7 @@ class FakeAvatarStore:
         self.stored_files.pop(key, None)
 
 
-async def _create_assistant(db, institution) -> None:
+async def _create_assistant(db, institution, *, locked: bool = False) -> None:
     async with db.async_session() as session:
         class_ = models.Class(
             id=1,
@@ -47,6 +47,7 @@ async def _create_assistant(db, institution) -> None:
                 creator_id=123,
                 published=None,
                 version=3,
+                locked=locked,
             )
         )
         session.add(
@@ -107,6 +108,10 @@ async def test_assistant_avatar_upload_replace_download_and_delete(
     assert response.status_code == 200
     assert response.json()["avatar_url"].startswith(f"{avatar_url}?v=")
     first_key = next(iter(store.stored_files))
+    async with db.async_session() as session:
+        assistant = await models.Assistant.get_by_id(session, 1)
+        avatar_file = await models.File.get_by_id(session, assistant.avatar_file_id)
+        assert avatar_file.file_id == ""
 
     response = api.get(avatar_url, headers=headers)
     assert response.status_code == 200
@@ -179,6 +184,107 @@ async def test_assistant_avatar_rejects_unsupported_file_types(
 
     assert response.status_code == 415
     assert store.stored_files == {}
+
+
+@with_user(123)
+@with_institution(1, "Test Institution")
+@with_authz(grants=[("user:123", "can_edit", "assistant:1")])
+async def test_replacing_avatar_keeps_previous_object_when_transaction_rolls_back(
+    api, db, institution, valid_user_token, config, monkeypatch
+):
+    await _create_assistant(db, institution)
+    store = FakeAvatarStore()
+    monkeypatch.setattr(config, "file_store", SimpleNamespace(store=store))
+    headers = {"Authorization": f"Bearer {valid_user_token}"}
+    avatar_url = "/api/v1/class/1/assistant/1/avatar"
+
+    response = api.post(
+        avatar_url,
+        headers=headers,
+        files={"upload": ("first.png", b"\x89PNG\r\n\x1a\nfirst", "image/png")},
+    )
+    assert response.status_code == 200
+    first_key = next(iter(store.stored_files))
+
+    async def fail_response_build(*args, **kwargs):
+        raise RuntimeError("response failed")
+
+    monkeypatch.setattr(
+        assistant_service, "assistant_response_from_model", fail_response_build
+    )
+    with pytest.raises(RuntimeError, match="response failed"):
+        api.post(
+            avatar_url,
+            headers=headers,
+            files={
+                "upload": (
+                    "second.webp",
+                    b"RIFF\x0c\x00\x00\x00WEBPsecond",
+                    "image/webp",
+                )
+            },
+        )
+
+    assert set(store.stored_files) == {first_key}
+    assert first_key not in store.deleted_keys
+
+    async with db.async_session() as session:
+        assistant = await models.Assistant.get_by_id(session, 1)
+        avatar_file = await models.File.get_by_id_with_download(
+            session, assistant.avatar_file_id
+        )
+        assert avatar_file.s3_file.key == first_key
+
+
+@with_user(123)
+@with_institution(1, "Test Institution")
+@with_authz(grants=[("user:123", "can_edit", "assistant:1")])
+@pytest.mark.parametrize("method", ["post", "delete"])
+async def test_locked_assistant_rejects_avatar_mutations(
+    api, db, institution, valid_user_token, config, monkeypatch, method
+):
+    await _create_assistant(db, institution, locked=True)
+    store = FakeAvatarStore()
+    monkeypatch.setattr(config, "file_store", SimpleNamespace(store=store))
+    request = getattr(api, method)
+    kwargs = {
+        "headers": {"Authorization": f"Bearer {valid_user_token}"},
+    }
+    if method == "post":
+        kwargs["files"] = {
+            "upload": ("avatar.png", b"\x89PNG\r\n\x1a\nimage", "image/png")
+        }
+
+    response = request("/api/v1/class/1/assistant/1/avatar", **kwargs)
+
+    assert response.status_code == 403
+    assert "locked" in response.json()["detail"]
+    assert store.stored_files == {}
+
+
+@with_user(123)
+@with_institution(1, "Test Institution")
+@with_authz(
+    grants=[
+        ("user:123", "can_edit", "assistant:1"),
+        ("user:123", "admin", "class:1"),
+    ]
+)
+async def test_class_admin_can_upload_avatar_for_locked_assistant(
+    api, db, institution, valid_user_token, config, monkeypatch
+):
+    await _create_assistant(db, institution, locked=True)
+    store = FakeAvatarStore()
+    monkeypatch.setattr(config, "file_store", SimpleNamespace(store=store))
+
+    response = api.post(
+        "/api/v1/class/1/assistant/1/avatar",
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+        files={"upload": ("avatar.png", b"\x89PNG\r\n\x1a\nimage", "image/png")},
+    )
+
+    assert response.status_code == 200
+    assert len(store.stored_files) == 1
 
 
 @with_user(123)

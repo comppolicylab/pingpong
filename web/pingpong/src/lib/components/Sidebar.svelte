@@ -465,7 +465,8 @@
 									<svelte:fragment slot="icon">
 										{#if assistant.avatar_url}
 											<AssistantAvatar {assistant} size={5} />
-										{:else if assistantMetadata[assistant.id].isCourseAssistant}
+										{/if}
+										{#if assistantMetadata[assistant.id].isCourseAssistant}
 											<BadgeCheckOutline size="sm" class="text-white" />
 											<Tooltip>Group assistant</Tooltip>
 										{:else if assistantMetadata[assistant.id].isMyAssistant}

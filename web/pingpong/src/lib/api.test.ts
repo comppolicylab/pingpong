@@ -115,7 +115,8 @@ describe('getClassUploadInfo', () => {
 					],
 					allow_private: true,
 					private_file_max_size: 1,
-					class_file_max_size: 1
+					class_file_max_size: 1,
+					assistant_avatar_max_size: 1
 				}),
 				{ status: 200, headers: { 'content-type': 'application/json' } }
 			)

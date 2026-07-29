@@ -5061,6 +5061,7 @@ export type UploadInfo = {
 	allow_private: boolean;
 	private_file_max_size: number;
 	class_file_max_size: number;
+	assistant_avatar_max_size: number;
 };
 
 type FileContentTypeAcceptFilters = {
@@ -5136,6 +5137,7 @@ export const getClassUploadInfo = async (f: Fetcher, classId: number) => {
 		allow_private: false,
 		private_file_max_size: 0,
 		class_file_max_size: 0,
+		assistant_avatar_max_size: 0,
 		error: infoResponse.error
 	};
 

@@ -502,6 +502,8 @@
 	let removeAvatar = false;
 	$: savedAvatarUrl = assistant ? api.assistantAvatarUrl(assistant) : '';
 	$: displayedAvatarUrl = avatarPreviewUrl || (!removeAvatar ? savedAvatarUrl : '');
+	$: avatarMaxSize = data.uploadInfo.assistant_avatar_max_size;
+	$: avatarMaxSizeLabel = humanSize(avatarMaxSize);
 
 	const revokeAvatarPreview = () => {
 		if (avatarPreviewUrl.startsWith('blob:')) {
@@ -519,8 +521,8 @@
 			sadToast('Avatar must be a PNG, JPEG, GIF, or WebP image.');
 			return;
 		}
-		if (file.size > 2 * 1024 * 1024) {
-			sadToast('Avatar must be 2 MB or smaller.');
+		if (file.size > avatarMaxSize) {
+			sadToast(`Avatar must be ${avatarMaxSizeLabel} or smaller.`);
 			return;
 		}
 		revokeAvatarPreview();
@@ -4398,14 +4400,18 @@
 							: 'Unknown error';
 				}
 			} else if (removeAvatar) {
-				const avatarResult = await api.deleteAssistantAvatar(
-					fetch,
-					data.class.id,
-					savedAssistantId
-				);
-				const expandedAvatarResult = api.expandResponse(avatarResult);
-				if (expandedAvatarResult.error) {
-					avatarError = expandedAvatarResult.error.detail || 'Unknown error';
+				try {
+					const avatarResult = await api.deleteAssistantAvatar(
+						fetch,
+						data.class.id,
+						savedAssistantId
+					);
+					const expandedAvatarResult = api.expandResponse(avatarResult);
+					if (expandedAvatarResult.error) {
+						avatarError = expandedAvatarResult.error.detail || 'Unknown error';
+					}
+				} catch (error) {
+					avatarError = error instanceof Error ? error.message : 'Unknown error';
 				}
 			}
 			if (params.interaction_mode !== 'lecture_video' && lectureVideoDraftIds.size > 0) {
@@ -5238,7 +5244,8 @@
 		<div class="mb-5">
 			<Label class="pb-1" for="avatar">Avatar</Label>
 			<Helper class="pb-2"
-				>Upload a square PNG, JPEG, GIF, or WebP image up to 2 MB. It will be cropped to a circle.</Helper
+				>Upload a square PNG, JPEG, GIF, or WebP image up to {avatarMaxSizeLabel}. It will be
+				cropped to a circle.</Helper
 			>
 			<div class="flex items-center gap-4">
 				<div

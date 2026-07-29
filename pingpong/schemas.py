@@ -3884,6 +3884,7 @@ class FileUploadSupport(BaseModel):
     allow_private: bool
     private_file_max_size: int
     class_file_max_size: int
+    assistant_avatar_max_size: int
 
 
 class GrantQuery(BaseModel):

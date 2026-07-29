@@ -181,7 +181,6 @@ from .errors import sentry
 from .files import (
     FILE_TYPES,
     FileNotFoundException,
-    _delete_orphaned_s3_files,
     generate_vision_image_descriptions_string,
     handle_create_file,
     handle_delete_file,
@@ -788,16 +787,30 @@ async def begin_db_session(request: StateRequest, call_next):
     """Create a database session for the request."""
     async with config.db.driver.async_session_with_args(pool_pre_ping=True)() as db:
         request.state["db"] = db
+        request.state["after_db_commit"] = []
+        request.state["after_db_rollback"] = []
         try:
             result = await call_next(request)
             status_code = getattr(result, "status_code", 0)
             if not status_code or status_code >= 400:
                 await db.rollback()
+                callbacks = request.state["after_db_rollback"]
             else:
                 await db.commit()
+                callbacks = request.state["after_db_commit"]
+            for callback in callbacks:
+                try:
+                    await callback()
+                except Exception:
+                    logger.exception("Database lifecycle callback failed")
             return result
         except Exception as e:
             await db.rollback()
+            for callback in request.state["after_db_rollback"]:
+                try:
+                    await callback()
+                except Exception:
+                    logger.exception("Database rollback callback failed")
             raise e
 
 
@@ -2180,6 +2193,7 @@ async def get_class_upload_info(class_id: str, request: StateRequest):
         "allow_private": True,
         "private_file_max_size": config.upload.private_file_max_size,
         "class_file_max_size": config.upload.class_file_max_size,
+        "assistant_avatar_max_size": config.upload.assistant_avatar_max_size,
     }
 
 
@@ -11363,12 +11377,51 @@ def _assistant_avatar_matches_content_type(content_type: str, header: bytes) -> 
     return False
 
 
+def _schedule_avatar_store_deletion(
+    request: StateRequest, keys: list[str], *, after_commit: bool
+) -> None:
+    if not keys:
+        return
+
+    async def delete_keys() -> None:
+        for key in keys:
+            try:
+                await config.file_store.store.delete(key)
+            except Exception:
+                logger.exception(
+                    "Failed to clean up assistant avatar object %s",
+                    sanitize_for_log(key),
+                )
+
+    callback_key = "after_db_commit" if after_commit else "after_db_rollback"
+    request.state[callback_key].append(delete_keys)
+
+
+async def _delete_avatar_file_record(
+    session: AsyncSession, avatar_file: models.File
+) -> list[str]:
+    candidate_s3_file_id = avatar_file.s3_file_id
+    await models.File.delete(session, avatar_file.id)
+    await session.flush()
+    if candidate_s3_file_id is None:
+        return []
+
+    orphaned_s3_files = await models.S3File.get_orphaned_by_ids(
+        session, [candidate_s3_file_id]
+    )
+    await models.S3File.delete_by_ids(
+        session, [s3_file.id for s3_file in orphaned_s3_files]
+    )
+    await session.flush()
+    return [s3_file.key for s3_file in orphaned_s3_files]
+
+
 async def _delete_assistant_avatar(
     session: AsyncSession, assistant: models.Assistant
-) -> None:
+) -> list[str]:
     avatar_file_id = assistant.avatar_file_id
     if avatar_file_id is None:
-        return
+        return []
 
     avatar_file = await models.File.get_by_id_with_download(session, avatar_file_id)
     assistant.avatar_file_id = None
@@ -11376,12 +11429,27 @@ async def _delete_assistant_avatar(
     await session.flush()
 
     if avatar_file is None:
-        return
+        return []
 
-    candidate_s3_file_id = avatar_file.s3_file_id
-    await models.File.delete(session, avatar_file.id)
-    await session.flush()
-    await _delete_orphaned_s3_files(session, [candidate_s3_file_id])
+    return await _delete_avatar_file_record(session, avatar_file)
+
+
+async def _ensure_assistant_avatar_is_editable(
+    request: StateRequest, assistant: models.Assistant, class_id: str
+) -> None:
+    if not assistant.locked:
+        return
+    if await request.state["authz"].test(
+        f"user:{request.state['session'].user.id}",
+        "admin",
+        f"class:{class_id}",
+    ):
+        return
+    raise HTTPException(
+        403,
+        "This assistant is locked and cannot be edited. "
+        "Please create a new assistant if you need to make changes.",
+    )
 
 
 @v1.get(
@@ -11467,6 +11535,7 @@ async def upload_assistant_avatar(
     assistant = await models.Assistant.get_by_id(request.state["db"], int(assistant_id))
     if assistant is None or assistant.class_id != int(class_id):
         raise HTTPException(404, "Assistant not found.")
+    await _ensure_assistant_avatar_is_editable(request, assistant, class_id)
 
     content_type = (upload.content_type or "").lower().split(";", maxsplit=1)[0]
     suffix = ASSISTANT_AVATAR_CONTENT_TYPES.get(content_type)
@@ -11490,6 +11559,7 @@ async def upload_assistant_avatar(
     avatar_file = models.File(
         name=upload.filename or f"avatar{suffix}",
         content_type=content_type,
+        file_id="",
         class_id=assistant.class_id,
         uploader_id=request.state["session"].user.id,
         private=False,
@@ -11509,6 +11579,7 @@ async def upload_assistant_avatar(
         except Exception:
             logger.exception("Failed to clean up assistant avatar upload %s", key)
         raise
+    _schedule_avatar_store_deletion(request, [key], after_commit=False)
 
     old_avatar_file_id = assistant.avatar_file_id
     assistant.avatar_file_id = avatar_file.id
@@ -11520,10 +11591,10 @@ async def upload_assistant_avatar(
             request.state["db"], old_avatar_file_id
         )
         if old_file is not None:
-            old_s3_file_id = old_file.s3_file_id
-            await models.File.delete(request.state["db"], old_file.id)
-            await request.state["db"].flush()
-            await _delete_orphaned_s3_files(request.state["db"], [old_s3_file_id])
+            old_avatar_keys = await _delete_avatar_file_record(
+                request.state["db"], old_file
+            )
+            _schedule_avatar_store_deletion(request, old_avatar_keys, after_commit=True)
 
     loaded_assistant = await models.Assistant.get_by_id_with_lecture_video(
         request.state["db"], assistant.id
@@ -11547,8 +11618,10 @@ async def delete_assistant_avatar(
     assistant = await models.Assistant.get_by_id(request.state["db"], int(assistant_id))
     if assistant is None or assistant.class_id != int(class_id):
         raise HTTPException(404, "Assistant not found.")
+    await _ensure_assistant_avatar_is_editable(request, assistant, class_id)
 
-    await _delete_assistant_avatar(request.state["db"], assistant)
+    old_avatar_keys = await _delete_assistant_avatar(request.state["db"], assistant)
+    _schedule_avatar_store_deletion(request, old_avatar_keys, after_commit=True)
     loaded_assistant = await models.Assistant.get_by_id_with_lecture_video(
         request.state["db"], assistant.id
     )
@@ -14717,7 +14790,8 @@ async def delete_assistant(
     vector_store_obj_id = None
     lecture_video_id_to_delete = asst.lecture_video_id
     lecture_slide_deck_id_to_delete = asst.lecture_slide_deck_id
-    await _delete_assistant_avatar(request.state["db"], asst)
+    old_avatar_keys = await _delete_assistant_avatar(request.state["db"], asst)
+    _schedule_avatar_store_deletion(request, old_avatar_keys, after_commit=True)
     if asst.vector_store_id:
         vector_store_id = asst.vector_store_id
         asst.vector_store_id = None
