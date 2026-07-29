@@ -2937,6 +2937,7 @@ export type Assistant = {
 	tools: string;
 	class_id: number;
 	creator_id: number;
+	avatar_url: string | null;
 	published: string | null;
 	use_latex: boolean | null;
 	use_image_descriptions: boolean | null;
@@ -3223,6 +3224,25 @@ export const updateAssistant = async (
 ) => {
 	const url = `class/${classId}/assistant/${assistantId}`;
 	return await PUT<UpdateAssistantRequest, Assistant>(f, url, data);
+};
+
+export const assistantAvatarUrl = (assistant: Pick<Assistant, 'avatar_url'>): string => {
+	return assistant.avatar_url ? withMediaAuthQuery(assistant.avatar_url) : '';
+};
+
+export const uploadAssistantAvatar = (
+	classId: number,
+	assistantId: number,
+	file: File,
+	opts?: UploadOptions
+) => {
+	const url = fullPath(`class/${classId}/assistant/${assistantId}/avatar`);
+	return _doUpload<Assistant>(url, file, opts);
+};
+
+export const deleteAssistantAvatar = async (f: Fetcher, classId: number, assistantId: number) => {
+	const url = `class/${classId}/assistant/${assistantId}/avatar`;
+	return await DELETE<never, Assistant>(f, url);
 };
 
 /**
@@ -4189,6 +4209,7 @@ export type ThreadParticipants = {
  */
 export type ThreadWithMeta = {
 	thread: Thread;
+	assistant_avatar_url?: string | null;
 	model: string;
 	tools_available: string;
 	run: OpenAIRun | null;
@@ -5040,6 +5061,7 @@ export type UploadInfo = {
 	allow_private: boolean;
 	private_file_max_size: number;
 	class_file_max_size: number;
+	assistant_avatar_max_size: number;
 };
 
 type FileContentTypeAcceptFilters = {
@@ -5115,6 +5137,7 @@ export const getClassUploadInfo = async (f: Fetcher, classId: number) => {
 		allow_private: false,
 		private_file_max_size: 0,
 		class_file_max_size: 0,
+		assistant_avatar_max_size: 0,
 		error: infoResponse.error
 	};
 

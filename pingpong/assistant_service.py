@@ -6,7 +6,7 @@ from .lecture_slide_service import lecture_slide_summary_from_model
 from .lecture_video_service import lecture_video_summary_from_model
 
 _ASSISTANT_RESPONSE_FIELDS_EXCLUDED_FROM_MODEL = frozenset(
-    {"lecture_video", "lecture_slide_deck", "share_links", "endorsed"}
+    {"avatar_url", "lecture_video", "lecture_slide_deck", "share_links", "endorsed"}
 )
 
 
@@ -23,5 +23,11 @@ async def assistant_response_from_model(
     )
     data["lecture_slide_deck"] = await lecture_slide_summary_from_model(
         asst.lecture_slide_deck
+    )
+    data["avatar_url"] = (
+        f"/api/v1/class/{asst.class_id}/assistant/{asst.id}/avatar"
+        f"?v={asst.avatar_file_id}"
+        if asst.avatar_file_id is not None
+        else None
     )
     return schemas.Assistant.model_validate(data)

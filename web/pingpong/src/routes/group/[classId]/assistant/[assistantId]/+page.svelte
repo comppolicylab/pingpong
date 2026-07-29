@@ -497,6 +497,45 @@
 	$: preventEdits = !!assistant?.locked || groupArchived;
 	$: canPublish = data.grants.canPublishAssistants;
 	$: isClassPrivate = data.class?.private || false;
+	let avatarFile: File | null = null;
+	let avatarPreviewUrl = '';
+	let removeAvatar = false;
+	$: savedAvatarUrl = assistant ? api.assistantAvatarUrl(assistant) : '';
+	$: displayedAvatarUrl = avatarPreviewUrl || (!removeAvatar ? savedAvatarUrl : '');
+	$: avatarMaxSize = data.uploadInfo.assistant_avatar_max_size;
+	$: avatarMaxSizeLabel = humanSize(avatarMaxSize);
+
+	const revokeAvatarPreview = () => {
+		if (avatarPreviewUrl.startsWith('blob:')) {
+			URL.revokeObjectURL(avatarPreviewUrl);
+		}
+		avatarPreviewUrl = '';
+	};
+
+	const handleAvatarChange = (event: Event) => {
+		const input = event.target as HTMLInputElement;
+		const file = input.files?.[0] ?? null;
+		input.value = '';
+		if (!file) return;
+		if (!['image/png', 'image/jpeg', 'image/gif', 'image/webp'].includes(file.type)) {
+			sadToast('Avatar must be a PNG, JPEG, GIF, or WebP image.');
+			return;
+		}
+		if (file.size > avatarMaxSize) {
+			sadToast(`Avatar must be ${avatarMaxSizeLabel} or smaller.`);
+			return;
+		}
+		revokeAvatarPreview();
+		avatarFile = file;
+		avatarPreviewUrl = URL.createObjectURL(file);
+		removeAvatar = false;
+	};
+
+	const clearAvatar = () => {
+		revokeAvatarPreview();
+		avatarFile = null;
+		removeAvatar = !!assistant?.avatar_url;
+	};
 
 	let assistantName = '';
 	let hasSetAssistantName = false;
@@ -747,6 +786,7 @@
 		for (const sample of Object.values(voiceSampleCache)) {
 			revokeVoiceSampleAudioSrc(sample.audioSrc);
 		}
+		revokeAvatarPreview();
 	});
 	let currentLectureVideoManifestNormalized = '';
 	const decodeHtmlEntities = (value: string) => {
@@ -2969,6 +3009,9 @@
 		if (!areMcpServersEqual(mcpServersLocal, data.mcpServers || [])) {
 			modifiedFields.push('mcp servers');
 		}
+		if (avatarFile || removeAvatar) {
+			modifiedFields.push('avatar');
+		}
 		if (convertToNextGen !== null) {
 			modifiedFields.push('assistant version');
 		}
@@ -4344,13 +4387,44 @@
 			$loadingMessage = '';
 			sadToast(`Could not save your response:\n${expanded.error.detail || 'Unknown error'}`);
 		} else {
+			const savedAssistantId = expanded.data.id;
+			let avatarError = '';
+			if (avatarFile) {
+				try {
+					await api.uploadAssistantAvatar(data.class.id, savedAssistantId, avatarFile).promise;
+				} catch (error) {
+					avatarError = api.isFileUploadFailure(error)
+						? error.error.detail
+						: error instanceof Error
+							? error.message
+							: 'Unknown error';
+				}
+			} else if (removeAvatar) {
+				try {
+					const avatarResult = await api.deleteAssistantAvatar(
+						fetch,
+						data.class.id,
+						savedAssistantId
+					);
+					const expandedAvatarResult = api.expandResponse(avatarResult);
+					if (expandedAvatarResult.error) {
+						avatarError = expandedAvatarResult.error.detail || 'Unknown error';
+					}
+				} catch (error) {
+					avatarError = error instanceof Error ? error.message : 'Unknown error';
+				}
+			}
 			if (params.interaction_mode !== 'lecture_video' && lectureVideoDraftIds.size > 0) {
 				await cleanupLectureVideoDrafts();
 				selectedLectureVideo = data.isCreating ? null : currentLectureVideo;
 			}
 			$loading = false;
 			$loadingMessage = '';
-			happyToast('Assistant saved');
+			if (avatarError) {
+				sadToast(`Assistant saved, but the avatar could not be updated:\n${avatarError}`);
+			} else {
+				happyToast('Assistant saved');
+			}
 			checkForChanges = false;
 			await invalidate(`/group/${$page.params.classId}`);
 			await goto(resolve(`/group/${data.class.id}/assistant`));
@@ -5166,6 +5240,48 @@
 		<div class="mb-4">
 			<Label class="pb-1" for="name">Name</Label>
 			<Input id="name" name="name" bind:value={assistantName} disabled={preventEdits} />
+		</div>
+		<div class="mb-5">
+			<Label class="pb-1" for="avatar">Avatar</Label>
+			<Helper class="pb-2"
+				>Upload a square PNG, JPEG, GIF, or WebP image up to {avatarMaxSizeLabel}. It will be
+				cropped to a circle.</Helper
+			>
+			<div class="flex items-center gap-4">
+				<div
+					class="flex size-16 shrink-0 items-center justify-center overflow-hidden rounded-full bg-blue-light-30 text-blue-dark-40"
+				>
+					{#if displayedAvatarUrl}
+						<img
+							src={displayedAvatarUrl}
+							alt={`${assistantName || 'Assistant'} avatar`}
+							class="size-full object-cover"
+						/>
+					{:else}
+						<ImageOutline class="size-7" />
+					{/if}
+				</div>
+				{#if !preventEdits}
+					<div class="flex flex-wrap gap-2">
+						<label
+							for="avatar"
+							class="cursor-pointer rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-blue-dark-50 hover:bg-gray-50"
+						>
+							{displayedAvatarUrl ? 'Replace image' : 'Upload image'}
+						</label>
+						<input
+							id="avatar"
+							type="file"
+							accept="image/png,image/jpeg,image/gif,image/webp"
+							class="sr-only"
+							onchange={handleAvatarChange}
+						/>
+						{#if displayedAvatarUrl}
+							<Button type="button" color="light" size="sm" onclick={clearAvatar}>Remove</Button>
+						{/if}
+					</div>
+				{/if}
+			</div>
 		</div>
 		<div class="mb-4">
 			<Label for="interactionMode">Interaction Mode</Label>

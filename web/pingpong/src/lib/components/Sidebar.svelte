@@ -37,6 +37,7 @@
 		Tooltip,
 		Button
 	} from 'flowbite-svelte';
+	import AssistantAvatar from '$lib/components/AssistantAvatar.svelte';
 	import PingPongLogo from '$lib/components/PingPongLogo.svelte';
 	import dayjs from '$lib/time';
 	import * as api from '$lib/api';
@@ -462,6 +463,9 @@
 									label={assistant.name || 'Unknown Assistant'}
 								>
 									<svelte:fragment slot="icon">
+										{#if assistant.avatar_url}
+											<AssistantAvatar {assistant} size={5} />
+										{/if}
 										{#if assistantMetadata[assistant.id].isCourseAssistant}
 											<BadgeCheckOutline size="sm" class="text-white" />
 											<Tooltip>Group assistant</Tooltip>

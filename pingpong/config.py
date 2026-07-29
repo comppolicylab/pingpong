@@ -226,6 +226,7 @@ class UploadSettings(BaseSettings):
     private_file_max_size: int = Field(512 * 1024 * 1024)  # 512 MB
     class_file_max_size: int = Field(512 * 1024 * 1024)  # 512 MB
     lecture_video_max_size: int = Field(512 * 1024 * 1024)  # 512 MB
+    assistant_avatar_max_size: int = Field(2 * 1024 * 1024)  # 2 MB
 
 
 class S3StoreSettings(BaseSettings):

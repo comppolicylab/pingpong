@@ -28,6 +28,8 @@ server_module = importlib.import_module("pingpong.server")
         "/api/v1/class/1/thread/109/lecture-slides/7/image",
         "/api/v1/class/1/assistant/3/lecture-video/poster",
         "/api/v1/class/1/assistant/3/lecture-slides/thumbnail",
+        "/api/v1/class/1/assistant/3/avatar",
+        "/api/v1/class/1/thread/109/assistant-avatar",
     ],
 )
 def test_shared_media_routes_allow_query_parameter_auth(path):
@@ -1875,9 +1877,21 @@ async def test_copy_assistant_within_class(
             version=3,
             allow_lesson_timeline_bypass=True,
         )
-        session.add_all([class_, assistant])
+        stored_avatar = models.S3File(key="assistant-avatar.png")
+        avatar_file = models.File(
+            name="avatar.png",
+            content_type="image/png",
+            file_id="",
+            class_id=class_.id,
+            uploader_id=123,
+            private=False,
+            s3_file=stored_avatar,
+        )
+        assistant.avatar_file = avatar_file
+        session.add_all([class_, assistant, avatar_file, stored_avatar])
         await session.commit()
         class_id, assistant_id = class_.id, assistant.id
+        original_avatar_file_id = assistant.avatar_file_id
         original_instructions = assistant.instructions
         creator_id = assistant.creator_id
 
@@ -1900,6 +1914,12 @@ async def test_copy_assistant_within_class(
         assert saved.instructions == original_instructions
         assert saved.creator_id == creator_id
         assert saved.allow_lesson_timeline_bypass is True
+        assert saved.avatar_file_id != original_avatar_file_id
+        copied_avatar = await models.File.get_by_id_with_download(
+            session, saved.avatar_file_id
+        )
+        assert copied_avatar.file_id == ""
+        assert copied_avatar.s3_file.key == "assistant-avatar.png"
 
     assert await authz.get_all_calls() == [
         ("grant", f"class:{class_id}", "parent", f"assistant:{data['id']}"),

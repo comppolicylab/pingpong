@@ -11,7 +11,7 @@
 		PlaySolid,
 		ReplyOutline
 	} from 'flowbite-svelte-icons';
-	import Logo from '$lib/components/Logo.svelte';
+	import AssistantAvatar from '$lib/components/AssistantAvatar.svelte';
 	import Markdown from '$lib/components/Markdown.svelte';
 	import ChatInput, {
 		type ChatInputHandle,
@@ -417,14 +417,8 @@
 				<div class="shrink-0">
 					{#if message.data.role === 'user'}
 						<Avatar size="sm" src={getImage(message.data)} />
-					{:else if assistantIconSrc}
-						<img
-							src={assistantIconSrc}
-							alt="Disagreement Project"
-							class="size-8 rounded-full object-cover"
-						/>
 					{:else}
-						<Logo size={8} />
+						<AssistantAvatar src={assistantIconSrc} size={8} showFallback />
 					{/if}
 				</div>
 				<div class="w-full max-w-full">

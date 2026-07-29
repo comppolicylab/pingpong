@@ -3,6 +3,7 @@
 	import * as api from '$lib/api';
 	import type { Assistant } from '$lib/api';
 	import ViewAssistant from '$lib/components/ViewAssistant.svelte';
+	import AssistantAvatar from '$lib/components/AssistantAvatar.svelte';
 	import {
 		Heading,
 		Button,
@@ -330,7 +331,12 @@
 				<TableBody>
 					{#each otherAssistants as assistant (assistant.id)}
 						<TableBodyRow>
-							<TableBodyCell class="font-light">{assistant.name}</TableBodyCell>
+							<TableBodyCell class="font-light">
+								<div class="flex items-center gap-2">
+									<AssistantAvatar {assistant} size={8} />
+									<span>{assistant.name}</span>
+								</div>
+							</TableBodyCell>
 							<TableBodyCell class="font-light"
 								>{creators[assistant.creator_id]?.name || 'unknown'}</TableBodyCell
 							>
