@@ -480,11 +480,11 @@ async def copy_assistant(
             new_assistant.id,
         )
 
-        ci_file_ids = [file.id for file in assistant.code_interpreter_files]
+        ci_file_ids = [f.id for f in assistant.code_interpreter_files]
         await models.File.add_files_to_class(session, target_class_id, ci_file_ids)
         ci_grants: list[Relation] = []
-        for file in assistant.code_interpreter_files:
-            ci_grants.extend(_file_grants(file, target_class_id))
+        for f in assistant.code_interpreter_files:
+            ci_grants.extend(_file_grants(f, target_class_id))
         await client.write_safe(grant=ci_grants)
 
     if assistant.mcp_server_tools:
