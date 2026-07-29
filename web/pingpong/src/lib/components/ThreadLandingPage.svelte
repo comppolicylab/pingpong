@@ -708,12 +708,8 @@
 									>
 										<div class="flex max-w-full flex-row items-center justify-between gap-5">
 											<div class="flex w-10/12 flex-col gap-1">
-												<div class="text-sm leading-snug">
-													<AssistantAvatar
-														assistant={asst}
-														size={4}
-														extraClass="mr-1 inline-block"
-													/>
+												<div class="flex items-center gap-1 text-sm leading-snug">
+													<AssistantAvatar assistant={asst} size={4} />
 													{#if asst.interaction_mode === 'lecture_slides'}
 														<BookOpenOutline
 															size="sm"
@@ -764,8 +760,8 @@
 								>
 									<div class="flex max-w-full flex-row items-center justify-between gap-5">
 										<div class="flex w-10/12 flex-col gap-1">
-											<div class="text-sm leading-snug">
-												<AssistantAvatar assistant={asst} size={4} extraClass="mr-1 inline-block" />
+											<div class="flex items-center gap-1 text-sm leading-snug">
+												<AssistantAvatar assistant={asst} size={4} />
 												{#if asst.interaction_mode === 'voice'}
 													<MicrophoneOutline
 														size="sm"
@@ -822,12 +818,8 @@
 									>
 										<div class="flex max-w-full flex-row items-center justify-between gap-5">
 											<div class="flex w-10/12 flex-col gap-1">
-												<div class="text-sm leading-snug">
-													<AssistantAvatar
-														assistant={asst}
-														size={4}
-														extraClass="mr-1 inline-block"
-													/>
+												<div class="flex items-center gap-1 text-sm leading-snug">
+													<AssistantAvatar assistant={asst} size={4} />
 													{#if asst.interaction_mode === 'voice'}
 														<MicrophoneOutline
 															size="sm"
@@ -884,12 +876,8 @@
 									>
 										<div class="flex max-w-full flex-row items-center justify-between gap-5">
 											<div class="flex w-10/12 flex-col gap-1">
-												<div class="text-sm leading-snug">
-													<AssistantAvatar
-														assistant={asst}
-														size={4}
-														extraClass="mr-1 inline-block"
-													/>
+												<div class="flex items-center gap-1 text-sm leading-snug">
+													<AssistantAvatar assistant={asst} size={4} />
 													{#if asst.interaction_mode === 'voice'}
 														<MicrophoneOutline
 															size="sm"
