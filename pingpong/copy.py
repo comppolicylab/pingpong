@@ -1,7 +1,12 @@
 import json
 import logging
+from tempfile import SpooledTemporaryFile
+
 import openai
 from openai.types.beta.assistant_create_params import ToolResources
+from sqlalchemy import insert
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from pingpong import models
 from pingpong.ai import (
     format_instructions,
@@ -24,7 +29,6 @@ from pingpong.schemas import (
     VectorStoreType,
 )
 from pingpong.vector_stores import create_vector_store
-from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
 
@@ -348,8 +352,11 @@ async def copy_vector_store(
     cli: openai.AsyncClient,
     target_class_id: int,
     old_vector_store_id: int,
+    file_copies: dict[int, models.File] | None = None,
 ) -> tuple[str, int]:
     files = await models.VectorStore.get_files_by_id(session, old_vector_store_id)
+    if file_copies:
+        files = [file_copies.get(file.id, file) for file in files]
     vector_store_obj_id, vector_store_id = await create_vector_store(
         session,
         cli,
@@ -372,6 +379,96 @@ async def copy_vector_store(
     return vector_store_obj_id, vector_store_id
 
 
+async def _copy_private_file(
+    session: AsyncSession,
+    client: OpenFgaAuthzClient,
+    cli: openai.AsyncClient,
+    target_class_id: int,
+    file: models.File,
+    creator_id: int,
+) -> models.File:
+    source_file = await models.File.get_by_id_with_download(session, file.id)
+    if not source_file or not source_file.s3_file or not config.file_store:
+        raise ValueError(
+            f"Cannot copy private file {file.name}: source data is missing."
+        )
+
+    with SpooledTemporaryFile(max_size=8 * 1024 * 1024) as content:
+        async for chunk in config.file_store.store.get(name=source_file.s3_file.key):
+            content.write(chunk)
+        content.seek(0)
+        uploaded_file = await cli.files.create(
+            file=(source_file.name.lower(), content, source_file.content_type),
+            purpose=(
+                "assistants"
+                if isinstance(cli, openai.AsyncAzureOpenAI)
+                else "user_data"
+            ),
+        )
+
+    try:
+        copied_file = await models.File.create(
+            session,
+            {
+                "name": source_file.name,
+                "content_type": source_file.content_type,
+                "file_id": uploaded_file.id,
+                "class_id": target_class_id,
+                "uploader_id": creator_id,
+                "private": True,
+                "s3_file_id": source_file.s3_file_id,
+            },
+            class_id=target_class_id,
+        )
+        await client.write_safe(
+            grant=_file_grants(
+                copied_file,
+                target_class_id,
+                user_auth=f"user:{creator_id}",
+            )
+        )
+    except Exception:
+        await cli.files.delete(uploaded_file.id)
+        raise
+
+    return copied_file
+
+
+async def _copy_private_assistant_files(
+    session: AsyncSession,
+    client: OpenFgaAuthzClient,
+    cli: openai.AsyncClient,
+    target_class_id: int,
+    assistant: models.Assistant,
+    creator_id: int,
+) -> dict[int, models.File]:
+    files: dict[int, models.File] = {
+        file.id: file for file in assistant.code_interpreter_files
+    }
+    if assistant.vector_store_id:
+        files.update(
+            {
+                file.id: file
+                for file in await models.VectorStore.get_files_by_id(
+                    session, assistant.vector_store_id
+                )
+            }
+        )
+
+    return {
+        file.id: await _copy_private_file(
+            session,
+            client,
+            cli,
+            target_class_id,
+            file,
+            creator_id,
+        )
+        for file in files.values()
+        if file.private
+    }
+
+
 async def copy_assistant(
     session: AsyncSession,
     client: OpenFgaAuthzClient,
@@ -382,6 +479,8 @@ async def copy_assistant(
     new_name: str | None = None,
     require_published: bool = True,
     force_private: bool = False,
+    creator_id: int | None = None,
+    copy_private_files: bool = False,
 ) -> models.Assistant | None:
     """
     Copy an assistant to the target class.
@@ -399,10 +498,29 @@ async def copy_assistant(
             session, assistant.class_id, target_class_id
         )
 
+    copied_creator_id = creator_id if creator_id is not None else assistant.creator_id
+    file_copies = (
+        await _copy_private_assistant_files(
+            session,
+            client,
+            cli,
+            target_class_id,
+            assistant,
+            copied_creator_id,
+        )
+        if copy_private_files
+        else {}
+    )
+
     new_vector_store_id, new_vector_store_obj_id = None, None
     if assistant.vector_store_id:
         new_vector_store_obj_id, new_vector_store_id = await copy_vector_store(
-            session, client, cli, target_class_id, assistant.vector_store_id
+            session,
+            client,
+            cli,
+            target_class_id,
+            assistant.vector_store_id,
+            file_copies,
         )
 
     new_lecture_video_id = None
@@ -447,7 +565,7 @@ async def copy_assistant(
         class_id=target_class_id,
         vector_store_id=new_vector_store_id,
         lecture_video_id=new_lecture_video_id,
-        creator_id=assistant.creator_id,
+        creator_id=copied_creator_id,
         published=None if force_private else assistant.published,
         should_record_user_information=assistant.should_record_user_information,
         disable_prompt_randomization=assistant.disable_prompt_randomization,
@@ -469,17 +587,38 @@ async def copy_assistant(
     await session.refresh(new_assistant)
 
     if assistant.code_interpreter_files:
-        await models.Assistant.copy_code_interpreter_files(
-            session,
-            assistant.id,
-            new_assistant.id,
-        )
+        copied_ci_files = [
+            file_copies.get(file.id, file) for file in assistant.code_interpreter_files
+        ]
+        if file_copies:
+            await session.execute(
+                insert(models.code_interpreter_file_assistant_association).values(
+                    [
+                        {"assistant_id": new_assistant.id, "file_id": file.id}
+                        for file in copied_ci_files
+                    ]
+                )
+            )
+        else:
+            await models.Assistant.copy_code_interpreter_files(
+                session,
+                assistant.id,
+                new_assistant.id,
+            )
 
-        ci_file_ids = [f.id for f in assistant.code_interpreter_files]
+        ci_file_ids = [file.id for file in copied_ci_files]
         await models.File.add_files_to_class(session, target_class_id, ci_file_ids)
         ci_grants: list[Relation] = []
-        for f in assistant.code_interpreter_files:
-            ci_grants.extend(_file_grants(f, target_class_id))
+        for file in copied_ci_files:
+            ci_grants.extend(
+                _file_grants(
+                    file,
+                    target_class_id,
+                    user_auth=(
+                        f"user:{copied_creator_id}" if copy_private_files else None
+                    ),
+                )
+            )
         await client.write_safe(grant=ci_grants)
 
     if assistant.mcp_server_tools:
@@ -494,7 +633,11 @@ async def copy_assistant(
                     "authorization_token": mcp_tool.authorization_token,
                     "description": mcp_tool.description,
                     "enabled": mcp_tool.enabled,
-                    "created_by_user_id": mcp_tool.created_by_user_id,
+                    "created_by_user_id": (
+                        copied_creator_id
+                        if creator_id is not None
+                        else mcp_tool.created_by_user_id
+                    ),
                 },
             )
             new_mcp_servers.append(new_tool)
@@ -535,7 +678,7 @@ async def copy_assistant(
             temperature=assistant.temperature,
             metadata={
                 "class_id": str(target_class_id),
-                "creator_id": str(assistant.creator_id),
+                "creator_id": str(copied_creator_id),
             },
             tool_resources=tool_resources,
         )
@@ -546,7 +689,7 @@ async def copy_assistant(
 
     grants = [
         (f"class:{target_class_id}", "parent", f"assistant:{new_assistant.id}"),
-        (f"user:{assistant.creator_id}", "owner", f"assistant:{new_assistant.id}"),
+        (f"user:{copied_creator_id}", "owner", f"assistant:{new_assistant.id}"),
     ]
 
     if assistant.published and not force_private:

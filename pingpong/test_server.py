@@ -1856,6 +1856,7 @@ async def test_copy_assistant_within_class(
     api, db, institution, valid_user_token, authz
 ):
     async with db.async_session() as session:
+        source_creator = models.User(id=456, email="source@example.com")
         class_ = models.Class(
             id=1, name="Test Class", institution_id=institution.id, api_key="test-key"
         )
@@ -1870,16 +1871,15 @@ async def test_copy_assistant_within_class(
             temperature=0.2,
             class_id=class_.id,
             tools="[]",
-            creator_id=123,
+            creator_id=source_creator.id,
             published=None,
             version=3,
             allow_lesson_timeline_bypass=True,
         )
-        session.add_all([class_, assistant])
+        session.add_all([source_creator, class_, assistant])
         await session.commit()
         class_id, assistant_id = class_.id, assistant.id
         original_instructions = assistant.instructions
-        creator_id = assistant.creator_id
 
     response = api.post(
         f"/api/v1/class/{class_id}/assistant/{assistant_id}/copy",
@@ -1898,13 +1898,121 @@ async def test_copy_assistant_within_class(
     async with db.async_session() as session:
         saved = await models.Assistant.get_by_id(session, data["id"])
         assert saved.instructions == original_instructions
-        assert saved.creator_id == creator_id
+        assert saved.creator_id == 123
         assert saved.allow_lesson_timeline_bypass is True
 
     assert await authz.get_all_calls() == [
         ("grant", f"class:{class_id}", "parent", f"assistant:{data['id']}"),
-        ("grant", f"user:{creator_id}", "owner", f"assistant:{data['id']}"),
+        ("grant", "user:123", "owner", f"assistant:{data['id']}"),
     ]
+
+
+@pytest.mark.asyncio
+async def test_copy_assistant_duplicates_private_files_for_new_owner(
+    db, config, monkeypatch
+):
+    class StoredFiles:
+        async def get(self, name: str):
+            assert name == "uploads/source.docx"
+            yield b"source contents"
+
+    monkeypatch.setattr(config, "file_store", SimpleNamespace(store=StoredFiles()))
+    authz = AsyncMock()
+    openai_client = AsyncMock()
+    openai_client.files.create.return_value = SimpleNamespace(id="file-copy")
+    openai_client.vector_stores.create.return_value = SimpleNamespace(id="vs-copy")
+
+    async with db.async_session() as session:
+        source_creator = models.User(id=123, email="source@example.com")
+        copied_creator = models.User(id=456, email="copier@example.com")
+        class_ = models.Class(id=1, name="Test Class", api_key="test-key")
+        stored_file = models.S3File(key="uploads/source.docx")
+        session.add_all([source_creator, copied_creator, class_, stored_file])
+        await session.flush()
+        source_file = await models.File.create(
+            session,
+            {
+                "name": "Source.docx",
+                "content_type": (
+                    "application/vnd.openxmlformats-officedocument."
+                    "wordprocessingml.document"
+                ),
+                "file_id": "file-source",
+                "class_id": class_.id,
+                "uploader_id": source_creator.id,
+                "private": True,
+                "s3_file_id": stored_file.id,
+            },
+            class_id=class_.id,
+        )
+        vector_store_id = await models.VectorStore.create(
+            session,
+            {
+                "type": schemas.VectorStoreType.ASSISTANT,
+                "class_id": class_.id,
+                "version": 2,
+                "vector_store_id": "vs-source",
+            },
+            [source_file.file_id],
+        )
+        assistant = models.Assistant(
+            name="Source",
+            instructions="Be helpful",
+            interaction_mode=schemas.InteractionMode.CHAT,
+            model="gpt-4o-mini",
+            class_id=class_.id,
+            tools="[]",
+            creator_id=source_creator.id,
+            vector_store_id=vector_store_id,
+            version=3,
+        )
+        session.add(assistant)
+        await session.flush()
+        await session.execute(
+            models.code_interpreter_file_assistant_association.insert().values(
+                assistant_id=assistant.id,
+                file_id=source_file.id,
+            )
+        )
+
+        loaded = await models.Assistant.get_by_id_with_copy_context(
+            session, assistant.id
+        )
+        copied = await copy_module.copy_assistant(
+            session,
+            authz,
+            openai_client,
+            class_.id,
+            loaded,
+            require_published=False,
+            force_private=True,
+            creator_id=copied_creator.id,
+            copy_private_files=True,
+        )
+
+        assert copied is not None
+        assert copied.creator_id == copied_creator.id
+        copied_files = await models.VectorStore.get_files_by_id(
+            session, copied.vector_store_id
+        )
+        assert len(copied_files) == 1
+        assert copied_files[0].id != source_file.id
+        assert copied_files[0].file_id == "file-copy"
+        assert copied_files[0].uploader_id == copied_creator.id
+        assert copied_files[0].s3_file_id == source_file.s3_file_id
+        copied_with_ci_files = await models.Assistant.get_by_id_with_ci_files(
+            session, copied.id
+        )
+        assert [file.id for file in copied_with_ci_files.code_interpreter_files] == [
+            copied_files[0].id
+        ]
+
+    openai_client.files.create.assert_awaited_once()
+    assert (
+        "user:456",
+        "owner",
+        f"user_file:{copied_files[0].id}",
+    ) in authz.write_safe.await_args_list[0].kwargs["grant"]
 
 
 @with_user(123)

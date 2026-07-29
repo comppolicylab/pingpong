@@ -12239,6 +12239,8 @@ async def copy_assistant(
         new_name=requested_name or _default_copy_name(assistant.name),
         require_published=False,
         force_private=True,
+        creator_id=request.state["session"].user.id,
+        copy_private_files=True,
     )
     if not new_assistant:
         raise HTTPException(status_code=400, detail="Assistant could not be copied.")
