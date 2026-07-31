@@ -19,7 +19,6 @@ async def test_institution_admin_can_manage_lecture_lesson_access(
             [
                 models.User(id=456, email="existing@example.edu"),
                 models.User(id=789, email="ungranted@example.edu"),
-                models.User(id=999, email="also-ungranted@example.edu"),
             ]
         )
         await session.commit()

@@ -2695,20 +2695,8 @@ class InstitutionAdminResponse(BaseModel):
     added_admin: bool
 
 
-class LectureLessonAccessUser(BaseModel, UserNameMixin):
-    id: int
-
-    model_config = ConfigDict(
-        from_attributes=True,
-    )
-
-
 class LectureLessonAccessUsers(BaseModel):
-    users: list[LectureLessonAccessUser] = Field(default_factory=list)
-
-
-class AddLectureLessonAccessRequest(BaseModel):
-    email: str = Field(..., min_length=3, max_length=100)
+    users: list[InstitutionAdmin] = Field(default_factory=list)
 
 
 class LectureLessonAccessResponse(BaseModel):

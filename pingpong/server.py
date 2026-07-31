@@ -1761,7 +1761,7 @@ async def list_lecture_lesson_access_users(request: StateRequest):
     users.sort(key=lambda user: (user.email or "").casefold())
     return schemas.LectureLessonAccessUsers(
         users=[
-            schemas.LectureLessonAccessUser.model_validate(user, from_attributes=True)
+            schemas.InstitutionAdmin.model_validate(user, from_attributes=True)
             for user in users
         ]
     )
@@ -1773,7 +1773,7 @@ async def list_lecture_lesson_access_users(request: StateRequest):
     response_model=schemas.LectureLessonAccessResponse,
 )
 async def add_lecture_lesson_access(
-    data: schemas.AddLectureLessonAccessRequest, request: StateRequest
+    data: schemas.AddInstitutionAdminRequest, request: StateRequest
 ):
     try:
         normalized_email = validate_email(
@@ -11888,7 +11888,6 @@ async def create_assistant(
                 detail=f"Model {req.model} is not available for use.",
             )
 
-    # Only class admins or explicitly authorized users can create lecture lessons.
     if req.interaction_mode in {
         schemas.InteractionMode.LECTURE_VIDEO,
         schemas.InteractionMode.LECTURE_SLIDES,

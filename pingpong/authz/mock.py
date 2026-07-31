@@ -166,30 +166,21 @@ class _MockFgaAuthzServer:
 
     async def _api_read(self, request: Request):
         body = await request.json()
-        tuple_key = body.get("tuple_key") or {}
+        tuple_key = body.get("tuple_key")
+        if not tuple_key:
+            raise ValueError("Missing tuple_key")
 
         user = tuple_key.get("user")
         relation = tuple_key.get("relation")
         obj = tuple_key.get("object")
 
-        # Mirror the real server: a tuple key must name an object type, and a
-        # type-only object is allowed only when a user is also given. Anything
-        # else would make OpenFGA scan the whole store.
-        if tuple_key:
-            obj_type, _, obj_id = (obj or "").partition(":")
-            if not obj_type or (not obj_id and not user):
-                raise ValueError(
-                    "the 'tuple_key' field was provided but the object type field "
-                    "is required and both the object id and user cannot be empty"
-                )
+        if not relation or not obj:
+            raise ValueError("Missing relation or object")
 
         tuples = []
         now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
         for u, rel, o in self._all_grants:
-            if relation and rel != relation:
-                continue
-            # A type-only object (`user:`) matches every object of that type.
-            if obj and (not o.startswith(obj) if obj.endswith(":") else o != obj):
+            if rel != relation or o != obj:
                 continue
             if user and u != user:
                 continue

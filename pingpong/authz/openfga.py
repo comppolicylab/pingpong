@@ -127,10 +127,6 @@ class OpenFgaAuthzClient(AuthzClient):
     async def read_tuples(
         self, relation: str, obj: str, user: str | None = None
     ) -> List[Relation]:
-        # NOTE: `obj` is required. OpenFGA rejects a tuple key without an object
-        # type, so a relation-only read would have to fetch every tuple in the
-        # store and filter locally. Anchor relations on a queryable object (e.g.
-        # `root`) instead of asking for one here.
         key = ReadRequestTupleKey(
             user=user,
             relation=relation,

@@ -39,22 +39,13 @@
 		});
 	}
 
-	const sortUsers = (items: api.LectureLessonAccessUser[]) =>
-		[...items].sort((a, b) =>
-			(a.name || a.email || '').localeCompare(b.name || b.email || '', undefined, {
-				sensitivity: 'base'
-			})
-		);
-
-	users = sortUsers(users);
-
 	const refresh = async () => {
 		const response = await api.getLectureLessonAccessUsers(fetch).then(api.expandResponse);
 		if (response.error || !response.data) {
 			sadToast(response.error?.detail || 'Unable to refresh lecture lesson access');
 			return;
 		}
-		users = sortUsers(response.data.users);
+		users = response.data.users;
 	};
 
 	const addUser = async () => {
