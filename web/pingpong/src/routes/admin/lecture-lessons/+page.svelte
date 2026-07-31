@@ -21,7 +21,7 @@
 
 	export let data;
 
-	let users: api.LectureLessonAccessUser[] = data.users;
+	let users: api.InstitutionAdmin[] = data.users;
 	let newUserEmail = '';
 	let addingUser = false;
 	let removingUsers: Record<number, boolean> = {};

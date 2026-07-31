@@ -937,14 +937,8 @@ export const removeInstitutionAdmin = async (f: Fetcher, instId: number, userId:
 	return await DELETE<never, GenericStatus>(f, `institution/${instId}/admin/${userId}`);
 };
 
-export type LectureLessonAccessUser = InstitutionAdmin;
-
 export type LectureLessonAccessUsers = {
-	users: LectureLessonAccessUser[];
-};
-
-export type AddLectureLessonAccessRequest = {
-	email: string;
+	users: InstitutionAdmin[];
 };
 
 export type LectureLessonAccessResponse = {
@@ -957,8 +951,8 @@ export const getLectureLessonAccessUsers = async (f: Fetcher) => {
 	return await GET<never, LectureLessonAccessUsers>(f, 'admin/lecture-lessons/access');
 };
 
-export const addLectureLessonAccess = async (f: Fetcher, data: AddLectureLessonAccessRequest) => {
-	return await POST<AddLectureLessonAccessRequest, LectureLessonAccessResponse>(
+export const addLectureLessonAccess = async (f: Fetcher, data: AddInstitutionAdminRequest) => {
+	return await POST<AddInstitutionAdminRequest, LectureLessonAccessResponse>(
 		f,
 		'admin/lecture-lessons/access',
 		data
