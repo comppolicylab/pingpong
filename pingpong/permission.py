@@ -209,6 +209,27 @@ class ClassInstitutionAdmin(Expression):
         return "ClassInstitutionAdmin()"
 
 
+class CanCreateLectureLessons(Expression):
+    async def test(self, request: StateRequest) -> bool:
+        user = request.state["auth_user"]
+        class_id = request.path_params.get("class_id")
+        if not user or not class_id:
+            return False
+
+        try:
+            return await request.state["authz"].test(
+                user, "admin", f"class:{class_id}"
+            ) or await request.state["authz"].test(
+                user, "can_create_lecture_lessons", request.state["authz"].root
+            )
+        except Exception as e:
+            logger.exception("Error evaluating expression %s: %s", self, e)
+            raise HTTPException(status_code=500, detail=str(e))
+
+    def __str__(self):
+        return "CanCreateLectureLessons()"
+
+
 ARCHIVED_DETAIL = (
     "This group is archived and read-only. New content and edits are unavailable."
 )

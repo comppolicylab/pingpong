@@ -199,6 +199,7 @@ from .permission import (
     ARCHIVED_DETAIL,
     And,
     Authz,
+    CanCreateLectureLessons,
     ClassInstitutionAdmin,
     ClassNotArchived,
     InstitutionAdmin,
@@ -1736,6 +1737,90 @@ async def remove_institution_admin(
 
     await request.state["authz"].write_safe(
         revoke=[(f"user:{user_id}", "admin", f"institution:{institution_id}")]
+    )
+    return {"status": "ok"}
+
+
+@v1.get(
+    "/admin/lecture-lessons/access",
+    dependencies=[Depends(Authz("admin") | InstitutionAdmin())],
+    response_model=schemas.LectureLessonAccessUsers,
+)
+async def list_lecture_lesson_access_users(request: StateRequest):
+    tuples = await request.state["authz"].read_tuples(
+        "can_create_lecture_lessons", request.state["authz"].root
+    )
+    user_ids: set[int] = set()
+    for user, _, _ in tuples:
+        user_type, _, user_id = user.partition(":")
+        if user_type != "user" or not user_id.isdigit():
+            continue
+        user_ids.add(int(user_id))
+
+    users = await models.User.get_all_by_id(request.state["db"], list(user_ids))
+    users.sort(key=lambda user: (user.email or "").casefold())
+    return schemas.LectureLessonAccessUsers(
+        users=[
+            schemas.InstitutionAdmin.model_validate(user, from_attributes=True)
+            for user in users
+        ]
+    )
+
+
+@v1.post(
+    "/admin/lecture-lessons/access",
+    dependencies=[Depends(Authz("admin") | InstitutionAdmin())],
+    response_model=schemas.LectureLessonAccessResponse,
+)
+async def add_lecture_lesson_access(
+    data: schemas.AddInstitutionAdminRequest, request: StateRequest
+):
+    try:
+        normalized_email = validate_email(
+            data.email, check_deliverability=False
+        ).normalized
+    except EmailSyntaxError as e:
+        raise HTTPException(status_code=400, detail=f"Invalid email: {str(e)}")
+
+    user = await models.User.get_or_create_by_email(
+        request.state["db"],
+        normalized_email,
+        initial_state=schemas.UserState.UNVERIFIED,
+    )
+    relation = (
+        f"user:{user.id}",
+        "can_create_lecture_lessons",
+        request.state["authz"].root,
+    )
+    already_has_access = bool(
+        await request.state["authz"].read_tuples(
+            relation[1], relation[2], user=relation[0]
+        )
+    )
+    if not already_has_access:
+        await request.state["authz"].write_safe(grant=[relation])
+
+    return schemas.LectureLessonAccessResponse(
+        user_id=user.id,
+        email=user.email,
+        added_access=not already_has_access,
+    )
+
+
+@v1.delete(
+    "/admin/lecture-lessons/access/{user_id}",
+    dependencies=[Depends(Authz("admin") | InstitutionAdmin())],
+    response_model=schemas.GenericStatus,
+)
+async def remove_lecture_lesson_access(user_id: int, request: StateRequest):
+    await request.state["authz"].write_safe(
+        revoke=[
+            (
+                f"user:{user_id}",
+                "can_create_lecture_lessons",
+                request.state["authz"].root,
+            )
+        ]
     )
     return {"status": "ok"}
 
@@ -3422,12 +3507,8 @@ async def _get_lecture_video_editor_policy(
     request: StateRequest,
     class_id: int,
 ) -> schemas.LectureVideoAssistantEditorPolicy:
-    show_mode_in_assistant_editor = bool(
-        request.state["auth_user"]
-    ) and await request.state["authz"].test(
-        request.state["auth_user"],
-        "admin",
-        f"class:{class_id}",
+    show_mode_in_assistant_editor = await CanCreateLectureLessons().test_with_cache(
+        request
     )
 
     if not show_mode_in_assistant_editor:
@@ -10027,7 +10108,7 @@ async def create_user_file(
 @v1.post(
     "/class/{class_id}/lecture-video",
     dependencies=[
-        Depends(Authz("admin", "class:{class_id}")),
+        Depends(CanCreateLectureLessons()),
         Depends(ClassNotArchived()),
     ],
     response_model=schemas.LectureVideoSummary,
@@ -10086,7 +10167,7 @@ async def upload_lecture_video_for_assistant(
 @v1.post(
     "/class/{class_id}/lecture-slides",
     dependencies=[
-        Depends(Authz("admin", "class:{class_id}")),
+        Depends(CanCreateLectureLessons()),
         Depends(ClassNotArchived()),
     ],
     response_model=schemas.LectureSlideSummary,
@@ -10146,7 +10227,7 @@ async def _create_lecture_slide_media_response(
 @v1.post(
     "/class/{class_id}/lecture-slides/media",
     dependencies=[
-        Depends(Authz("admin", "class:{class_id}")),
+        Depends(CanCreateLectureLessons()),
         Depends(ClassNotArchived()),
     ],
     response_model=schemas.LectureSlideMediaUpload,
@@ -10188,7 +10269,7 @@ async def _delete_unattached_lecture_slide_media_response(
 
 @v1.delete(
     "/class/{class_id}/lecture-slides/media/{media_id}",
-    dependencies=[Depends(Authz("admin", "class:{class_id}"))],
+    dependencies=[Depends(CanCreateLectureLessons())],
     response_model=schemas.GenericStatus,
 )
 async def delete_lecture_slide_media(
@@ -10221,7 +10302,7 @@ async def delete_lecture_slide_media_for_assistant(
 @v1.post(
     "/class/{class_id}/lecture-slides/additional-context",
     dependencies=[
-        Depends(Authz("admin", "class:{class_id}")),
+        Depends(CanCreateLectureLessons()),
         Depends(ClassNotArchived()),
     ],
     response_model=schemas.LectureSlideAdditionalContextFileSummary,
@@ -10534,7 +10615,7 @@ async def get_assistant_lecture_video_poster(
     dependencies=[
         Depends(
             And(
-                Authz("admin", "class:{class_id}"),
+                CanCreateLectureLessons(),
                 Authz("can_delete", "lecture_video:{lecture_video_id}"),
             )
         )
@@ -11176,7 +11257,7 @@ async def retry_assistant_lecture_slide_processing(
     "/class/{class_id}/lecture-video/voice/validate",
     dependencies=[
         Depends(Authz("can_create_assistants", "class:{class_id}")),
-        Depends(Authz("admin", "class:{class_id}")),
+        Depends(CanCreateLectureLessons()),
     ],
     responses={
         200: {
@@ -11807,19 +11888,14 @@ async def create_assistant(
                 detail=f"Model {req.model} is not available for use.",
             )
 
-    # Only admins can create assistants in lecture lesson modes.
     if req.interaction_mode in {
         schemas.InteractionMode.LECTURE_VIDEO,
         schemas.InteractionMode.LECTURE_SLIDES,
     }:
-        if not await request.state["authz"].test(
-            f"user:{creator_id}",
-            "admin",
-            f"class:{class_id}",
-        ):
+        if not await CanCreateLectureLessons().test_with_cache(request):
             raise HTTPException(
                 status_code=403,
-                detail="Only class administrators can create assistants in lecture lesson modes.",
+                detail="You lack permission to create assistants in lecture lesson modes.",
             )
     if req.published:
         if not await request.state["authz"].test(

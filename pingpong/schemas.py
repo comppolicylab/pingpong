@@ -2695,6 +2695,16 @@ class InstitutionAdminResponse(BaseModel):
     added_admin: bool
 
 
+class LectureLessonAccessUsers(BaseModel):
+    users: list[InstitutionAdmin] = Field(default_factory=list)
+
+
+class LectureLessonAccessResponse(BaseModel):
+    user_id: int
+    email: str
+    added_access: bool
+
+
 class LMSPlatform(StrEnum):
     CANVAS = "canvas"
     HARVARD_LXP = "harvard_lxp"

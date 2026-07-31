@@ -11,6 +11,7 @@ type root
     define admin: [user]
     define can_create_institution: [user] or admin
     define can_do_reckless_things: [user]
+    define can_create_lecture_lessons: [user]
 
 type institution
   relations

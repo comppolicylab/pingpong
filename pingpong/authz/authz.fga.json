@@ -38,6 +38,9 @@
         },
         "can_do_reckless_things": {
           "this": {}
+        },
+        "can_create_lecture_lessons": {
+          "this": {}
         }
       },
       "metadata": {
@@ -57,6 +60,13 @@
             ]
           },
           "can_do_reckless_things": {
+            "directly_related_user_types": [
+              {
+                "type": "user"
+              }
+            ]
+          },
+          "can_create_lecture_lessons": {
             "directly_related_user_types": [
               {
                 "type": "user"

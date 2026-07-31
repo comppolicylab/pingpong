@@ -937,6 +937,32 @@ export const removeInstitutionAdmin = async (f: Fetcher, instId: number, userId:
 	return await DELETE<never, GenericStatus>(f, `institution/${instId}/admin/${userId}`);
 };
 
+export type LectureLessonAccessUsers = {
+	users: InstitutionAdmin[];
+};
+
+export type LectureLessonAccessResponse = {
+	user_id: number;
+	email: string;
+	added_access: boolean;
+};
+
+export const getLectureLessonAccessUsers = async (f: Fetcher) => {
+	return await GET<never, LectureLessonAccessUsers>(f, 'admin/lecture-lessons/access');
+};
+
+export const addLectureLessonAccess = async (f: Fetcher, data: AddInstitutionAdminRequest) => {
+	return await POST<AddInstitutionAdminRequest, LectureLessonAccessResponse>(
+		f,
+		'admin/lecture-lessons/access',
+		data
+	);
+};
+
+export const removeLectureLessonAccess = async (f: Fetcher, userId: number) => {
+	return await DELETE<never, GenericStatus>(f, `admin/lecture-lessons/access/${userId}`);
+};
+
 export type LTIRegistrationReviewStatus = 'pending' | 'approved' | 'rejected';
 
 export type LTIRegistrationInstitution = {
