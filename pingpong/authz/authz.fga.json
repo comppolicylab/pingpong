@@ -3,22 +3,8 @@
   "type_definitions": [
     {
       "type": "user",
-      "relations": {
-        "can_create_lecture_lessons": {
-          "this": {}
-        }
-      },
-      "metadata": {
-        "relations": {
-          "can_create_lecture_lessons": {
-            "directly_related_user_types": [
-              {
-                "type": "user"
-              }
-            ]
-          }
-        }
-      }
+      "relations": {},
+      "metadata": null
     },
     {
       "type": "anonymous_user",
@@ -52,6 +38,9 @@
         },
         "can_do_reckless_things": {
           "this": {}
+        },
+        "can_create_lecture_lessons": {
+          "this": {}
         }
       },
       "metadata": {
@@ -71,6 +60,13 @@
             ]
           },
           "can_do_reckless_things": {
+            "directly_related_user_types": [
+              {
+                "type": "user"
+              }
+            ]
+          },
+          "can_create_lecture_lessons": {
             "directly_related_user_types": [
               {
                 "type": "user"

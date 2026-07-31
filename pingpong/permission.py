@@ -220,7 +220,7 @@ class CanCreateLectureLessons(Expression):
             return await request.state["authz"].test(
                 user, "admin", f"class:{class_id}"
             ) or await request.state["authz"].test(
-                user, "can_create_lecture_lessons", user
+                user, "can_create_lecture_lessons", request.state["authz"].root
             )
         except Exception as e:
             logger.exception("Error evaluating expression %s: %s", self, e)

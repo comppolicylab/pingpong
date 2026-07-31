@@ -43,7 +43,7 @@ class AuthzClient(Protocol):
 
     @abstractmethod
     async def read_tuples(
-        self, relation: str, obj: str | None = None, user: str | None = None
+        self, relation: str, obj: str, user: str | None = None
     ) -> List[Relation]:
         pass
 

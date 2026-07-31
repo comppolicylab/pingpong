@@ -1747,17 +1747,13 @@ async def remove_institution_admin(
     response_model=schemas.LectureLessonAccessUsers,
 )
 async def list_lecture_lesson_access_users(request: StateRequest):
-    tuples = await request.state["authz"].read_tuples("can_create_lecture_lessons")
+    tuples = await request.state["authz"].read_tuples(
+        "can_create_lecture_lessons", request.state["authz"].root
+    )
     user_ids: set[int] = set()
-    for user, _, target in tuples:
+    for user, _, _ in tuples:
         user_type, _, user_id = user.partition(":")
-        target_type, _, target_id = target.partition(":")
-        if (
-            user_type != "user"
-            or target_type != "user"
-            or not user_id.isdigit()
-            or user_id != target_id
-        ):
+        if user_type != "user" or not user_id.isdigit():
             continue
         user_ids.add(int(user_id))
 
@@ -1794,7 +1790,7 @@ async def add_lecture_lesson_access(
     relation = (
         f"user:{user.id}",
         "can_create_lecture_lessons",
-        f"user:{user.id}",
+        request.state["authz"].root,
     )
     already_has_access = bool(
         await request.state["authz"].read_tuples(
@@ -1822,7 +1818,7 @@ async def remove_lecture_lesson_access(user_id: int, request: StateRequest):
             (
                 f"user:{user_id}",
                 "can_create_lecture_lessons",
-                f"user:{user_id}",
+                request.state["authz"].root,
             )
         ]
     )

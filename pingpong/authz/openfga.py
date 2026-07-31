@@ -125,24 +125,19 @@ class OpenFgaAuthzClient(AuthzClient):
         return client_tuples
 
     async def read_tuples(
-        self, relation: str, obj: str | None = None, user: str | None = None
+        self, relation: str, obj: str, user: str | None = None
     ) -> List[Relation]:
-        # OpenFGA rejects a tuple key that contains only a relation. Omit the
-        # tuple key for relation-only reads, then filter the paginated result
-        # locally.
-        key = (
-            ReadRequestTupleKey()
-            if obj is None and user is None
-            else ReadRequestTupleKey(
-                user=user,
-                relation=relation,
-                object=obj,
-            )
+        # NOTE: `obj` is required. OpenFGA rejects a tuple key without an object
+        # type, so a relation-only read would have to fetch every tuple in the
+        # store and filter locally. Anchor relations on a queryable object (e.g.
+        # `root`) instead of asking for one here.
+        key = ReadRequestTupleKey(
+            user=user,
+            relation=relation,
+            object=obj,
         )
         tuples = await self.read(key)
-        return [
-            (t.user, t.relation, t.object) for t in tuples if t.relation == relation
-        ]
+        return [(t.user, t.relation, t.object) for t in tuples]
 
     async def expand(
         self, entity: str, relation: str, max_depth: int = 1

@@ -4939,7 +4939,7 @@ async def test_lecture_endpoint_rejects_non_lecture_video_assistant(
 
 @with_user(123)
 @with_institution(11, "Test Institution")
-@with_authz(grants=[("user:123", "can_create_lecture_lessons", "user:123")])
+@with_authz(grants=[("user:123", "can_create_lecture_lessons", "root:0")])
 async def test_uploading_same_video_twice_creates_distinct_rows(
     api, authz, db, institution, valid_user_token, config, monkeypatch, tmp_path
 ):
@@ -5012,7 +5012,7 @@ async def test_uploading_same_video_twice_creates_distinct_rows(
 @with_authz(
     grants=[
         ("user:123", "can_view", "class:1"),
-        ("user:123", "can_create_lecture_lessons", "user:123"),
+        ("user:123", "can_create_lecture_lessons", "root:0"),
     ]
 )
 async def test_lecture_video_editor_policy_allows_explicit_user_permission(
@@ -6035,7 +6035,7 @@ async def test_delete_assistant_lecture_video_endpoint_requires_uploader(
 @with_institution(11, "Test Institution")
 @with_authz(
     grants=[
-        ("user:123", "can_create_lecture_lessons", "user:123"),
+        ("user:123", "can_create_lecture_lessons", "root:0"),
         ("user:123", "can_create_assistants", "class:1"),
     ]
 )
@@ -7894,7 +7894,7 @@ async def test_get_assistant_lecture_video_config_returns_409_for_invalid_stored
 @with_institution(11, "Test Institution")
 @with_authz(
     grants=[
-        ("user:123", "can_create_lecture_lessons", "user:123"),
+        ("user:123", "can_create_lecture_lessons", "root:0"),
         ("user:123", "can_create_assistants", "class:1"),
     ]
 )

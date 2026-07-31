@@ -8,8 +8,7 @@ from .testutil import with_authz, with_institution, with_user
 @with_authz(
     grants=[
         ("user:123", "admin", "institution:11"),
-        ("user:456", "can_create_lecture_lessons", "user:456"),
-        ("user:789", "can_create_lecture_lessons", "user:999"),
+        ("user:456", "can_create_lecture_lessons", "root:0"),
     ]
 )
 async def test_institution_admin_can_manage_lecture_lesson_access(
@@ -19,8 +18,8 @@ async def test_institution_admin_can_manage_lecture_lesson_access(
         session.add_all(
             [
                 models.User(id=456, email="existing@example.edu"),
-                models.User(id=789, email="ineffective@example.edu"),
-                models.User(id=999, email="target@example.edu"),
+                models.User(id=789, email="ungranted@example.edu"),
+                models.User(id=999, email="also-ungranted@example.edu"),
             ]
         )
         await session.commit()
@@ -92,21 +91,16 @@ async def test_institution_admin_can_manage_lecture_lesson_access(
 async def test_lecture_lesson_access_management_requires_admin(api, valid_user_token):
     headers = {"Authorization": f"Bearer {valid_user_token}"}
 
-    assert (
-        api.get("/api/v1/admin/lecture-lessons/access", headers=headers).status_code
-        == 403
+    list_response = api.get("/api/v1/admin/lecture-lessons/access", headers=headers)
+    add_response = api.post(
+        "/api/v1/admin/lecture-lessons/access",
+        headers=headers,
+        json={"email": "user@example.edu"},
     )
-    assert (
-        api.post(
-            "/api/v1/admin/lecture-lessons/access",
-            headers=headers,
-            json={"email": "user@example.edu"},
-        ).status_code
-        == 403
+    remove_response = api.delete(
+        "/api/v1/admin/lecture-lessons/access/456", headers=headers
     )
-    assert (
-        api.delete(
-            "/api/v1/admin/lecture-lessons/access/456", headers=headers
-        ).status_code
-        == 403
-    )
+
+    assert list_response.status_code == 403
+    assert add_response.status_code == 403
+    assert remove_response.status_code == 403
