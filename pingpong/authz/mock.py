@@ -166,21 +166,16 @@ class _MockFgaAuthzServer:
 
     async def _api_read(self, request: Request):
         body = await request.json()
-        tuple_key = body.get("tuple_key")
-        if not tuple_key:
-            raise ValueError("Missing tuple_key")
+        tuple_key = body.get("tuple_key") or {}
 
         user = tuple_key.get("user")
         relation = tuple_key.get("relation")
         obj = tuple_key.get("object")
 
-        if not relation or not obj:
-            raise ValueError("Missing relation or object")
-
         tuples = []
         now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
         for u, rel, o in self._all_grants:
-            if rel != relation or o != obj:
+            if (relation and rel != relation) or (obj and o != obj):
                 continue
             if user and u != user:
                 continue

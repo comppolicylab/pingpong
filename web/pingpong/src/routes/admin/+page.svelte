@@ -138,6 +138,10 @@
 					class="rounded-full bg-orange text-white hover:bg-orange-dark"
 					href="/admin/providers">Manage External Login Providers</Button
 				>
+				<Button
+					class="rounded-full bg-orange text-white hover:bg-orange-dark"
+					href="/admin/lecture-lessons">Manage Lecture Lesson Access</Button
+				>
 				{#if data.admin?.isRootAdmin}
 					<Button
 						class="rounded-full bg-orange text-white hover:bg-orange-dark"

@@ -3,8 +3,22 @@
   "type_definitions": [
     {
       "type": "user",
-      "relations": {},
-      "metadata": null
+      "relations": {
+        "can_create_lecture_lessons": {
+          "this": {}
+        }
+      },
+      "metadata": {
+        "relations": {
+          "can_create_lecture_lessons": {
+            "directly_related_user_types": [
+              {
+                "type": "user"
+              }
+            ]
+          }
+        }
+      }
     },
     {
       "type": "anonymous_user",

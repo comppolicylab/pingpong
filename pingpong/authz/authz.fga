@@ -2,6 +2,8 @@ model
   schema 1.1
 
 type user
+  relations
+    define can_create_lecture_lessons: [user]
 
 type anonymous_user
 type anonymous_link

@@ -2695,6 +2695,28 @@ class InstitutionAdminResponse(BaseModel):
     added_admin: bool
 
 
+class LectureLessonAccessUser(BaseModel, UserNameMixin):
+    id: int
+
+    model_config = ConfigDict(
+        from_attributes=True,
+    )
+
+
+class LectureLessonAccessUsers(BaseModel):
+    users: list[LectureLessonAccessUser] = Field(default_factory=list)
+
+
+class AddLectureLessonAccessRequest(BaseModel):
+    email: str = Field(..., min_length=3, max_length=100)
+
+
+class LectureLessonAccessResponse(BaseModel):
+    user_id: int
+    email: str
+    added_access: bool
+
+
 class LMSPlatform(StrEnum):
     CANVAS = "canvas"
     HARVARD_LXP = "harvard_lxp"
