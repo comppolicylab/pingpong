@@ -1,7 +1,8 @@
 <script lang="ts">
-	import { afterNavigate, goto } from '$app/navigation';
+	import { afterNavigate, goto, replaceState } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { navigating, page } from '$app/stores';
+	import { onDestroy } from 'svelte';
 	import ChatInput, {
 		type ChatInputHandle,
 		type ChatInputMessage
@@ -99,6 +100,16 @@
 				});
 			}
 		}
+		const requestedLanguage = $page.url.searchParams.get('language') || 'original';
+		if (
+			assistant.interaction_mode === 'lecture_slides' &&
+			requestedLanguage !== selectedLectureLanguageCode &&
+			lectureSlideLanguages.some((language) => language.code === requestedLanguage)
+		) {
+			selectedLectureLanguageCode = requestedLanguage;
+			const generation = ++translationRequestGeneration;
+			await refreshLectureTranslationStatus(assistant.id, requestedLanguage, generation);
+		}
 	});
 
 	// Get info about assistant provenance
@@ -173,6 +184,135 @@
 	let lessonThumbnailLoaded = false;
 	let lessonThumbnailAspectRatio = '';
 	let lessonThumbnailAssistantId: number | undefined;
+	let translationAssistantId: number | undefined;
+	let lectureSlideLanguages: api.LectureSlideLanguage[] = [{ code: 'original', name: 'Original' }];
+	let selectedLectureLanguageCode = 'original';
+	let lectureTranslationStatus: api.LectureSlideTranslationStatusResponse | null = null;
+	let lectureLanguageError: string | null = null;
+	let preparingLectureTranslation = false;
+	let translationPollTimer: ReturnType<typeof setTimeout> | null = null;
+	let translationRequestGeneration = 0;
+	$: selectedLectureLanguage =
+		lectureSlideLanguages.find((language) => language.code === selectedLectureLanguageCode) ??
+		lectureSlideLanguages[0];
+	$: lectureTranslationReady =
+		selectedLectureLanguageCode === 'original' || lectureTranslationStatus?.status === 'ready';
+
+	const stopTranslationPolling = () => {
+		if (translationPollTimer !== null) {
+			clearTimeout(translationPollTimer);
+			translationPollTimer = null;
+		}
+	};
+
+	const refreshLectureTranslationStatus = async (
+		assistantId: number,
+		languageCode: string,
+		generation = translationRequestGeneration
+	) => {
+		stopTranslationPolling();
+		if (languageCode === 'original') {
+			lectureTranslationStatus = null;
+			return;
+		}
+		try {
+			const status = api.explodeResponse(
+				await api.getLectureSlideTranslationStatus(fetch, data.class.id, assistantId, languageCode)
+			);
+			if (
+				generation !== translationRequestGeneration ||
+				assistant.id !== assistantId ||
+				selectedLectureLanguageCode !== languageCode
+			) {
+				return;
+			}
+			lectureTranslationStatus = status;
+			lectureLanguageError = null;
+			if (status.status === 'queued' || status.status === 'processing') {
+				translationPollTimer = setTimeout(
+					() => void refreshLectureTranslationStatus(assistantId, languageCode, generation),
+					2000
+				);
+			}
+		} catch (error) {
+			if (
+				generation === translationRequestGeneration &&
+				assistant.id === assistantId &&
+				selectedLectureLanguageCode === languageCode
+			) {
+				lectureLanguageError = errorMessage(error, 'Unable to check translation progress.');
+				translationPollTimer = setTimeout(
+					() => void refreshLectureTranslationStatus(assistantId, languageCode, generation),
+					5000
+				);
+			}
+		}
+	};
+
+	const loadLectureSlideLanguages = async (assistantId: number) => {
+		const generation = ++translationRequestGeneration;
+		stopTranslationPolling();
+		lectureSlideLanguages = [{ code: 'original', name: 'Original' }];
+		lectureTranslationStatus = null;
+		lectureLanguageError = null;
+		try {
+			const result = api.explodeResponse(
+				await api.getLectureSlideLanguages(fetch, data.class.id, assistantId)
+			);
+			if (generation !== translationRequestGeneration || assistant.id !== assistantId) return;
+			lectureSlideLanguages = result.languages;
+			const requestedLanguage = $page.url.searchParams.get('language') || 'original';
+			selectedLectureLanguageCode = result.languages.some(
+				(language) => language.code === requestedLanguage
+			)
+				? requestedLanguage
+				: 'original';
+			await refreshLectureTranslationStatus(assistantId, selectedLectureLanguageCode, generation);
+		} catch (error) {
+			if (generation === translationRequestGeneration) {
+				lectureLanguageError = errorMessage(error, 'Unable to load translation languages.');
+				selectedLectureLanguageCode = 'original';
+			}
+		}
+	};
+
+	const handleLectureLanguageChange = async (event: Event) => {
+		const languageCode = (event.currentTarget as HTMLSelectElement).value;
+		selectedLectureLanguageCode = languageCode;
+		lectureTranslationStatus = null;
+		const url = new URL($page.url);
+		if (languageCode === 'original') url.searchParams.delete('language');
+		else url.searchParams.set('language', languageCode);
+		// The current pathname may be a class, shared-assistant, or shared-thread route.
+		// eslint-disable-next-line svelte/no-navigation-without-resolve
+		replaceState(`${url.pathname}${url.search}`, $page.state);
+		const generation = ++translationRequestGeneration;
+		await refreshLectureTranslationStatus(assistant.id, languageCode, generation);
+	};
+
+	const prepareLectureTranslation = async () => {
+		if (groupArchived || selectedLectureLanguageCode === 'original' || preparingLectureTranslation)
+			return;
+		preparingLectureTranslation = true;
+		const assistantId = assistant.id;
+		const languageCode = selectedLectureLanguageCode;
+		const generation = ++translationRequestGeneration;
+		try {
+			const status = api.explodeResponse(
+				await api.prepareLectureSlideTranslation(fetch, data.class.id, assistantId, languageCode)
+			);
+			if (generation === translationRequestGeneration) {
+				lectureTranslationStatus = status;
+				await refreshLectureTranslationStatus(assistantId, languageCode, generation);
+			}
+		} catch (error) {
+			sadToast(errorMessage(error, 'Unable to prepare this language.'));
+		} finally {
+			preparingLectureTranslation = false;
+		}
+	};
+
+	onDestroy(stopTranslationPolling);
 	$: lessonThumbnailUrl =
 		assistant.interaction_mode === 'lecture_video' && data?.class?.id && assistant.id
 			? api.withMediaAuthQuery(
@@ -190,6 +330,23 @@
 			lessonThumbnailFailed = false;
 			lessonThumbnailLoaded = false;
 			lessonThumbnailAspectRatio = '';
+		}
+	}
+	$: {
+		if (
+			assistant.interaction_mode === 'lecture_slides' &&
+			assistant.id &&
+			translationAssistantId !== assistant.id
+		) {
+			translationAssistantId = assistant.id;
+			void loadLectureSlideLanguages(assistant.id);
+		} else if (
+			assistant.interaction_mode !== 'lecture_slides' &&
+			translationAssistantId !== undefined
+		) {
+			translationAssistantId = undefined;
+			translationRequestGeneration += 1;
+			stopTranslationPolling();
 		}
 	}
 	function handleLessonThumbnailLoad(event: Event, expectedThumbnailUrl: string) {
@@ -470,6 +627,10 @@
 					assistant_id: assistant.id,
 					parties: partyIds,
 					timezone: userTimezone,
+					language_code:
+						assistant.interaction_mode === 'lecture_slides'
+							? selectedLectureLanguageCode
+							: 'original',
 					conversation_id:
 						data.isSharedAssistantPage || data.isSharedThreadPage ? conversationId : null
 				})
@@ -1027,6 +1188,41 @@
 								: 'Watch a video and ask and answer questions as you go.'}
 						</p>
 					</div>
+					{#if assistant.interaction_mode === 'lecture_slides'}
+						<div class="flex w-full max-w-sm flex-col gap-2">
+							<label for="lecture-language" class="text-sm font-medium text-blue-dark-40">
+								Lesson language
+							</label>
+							<select
+								id="lecture-language"
+								class="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-blue-dark-40 focus:ring-blue-dark-40"
+								value={selectedLectureLanguageCode}
+								onchange={handleLectureLanguageChange}
+								disabled={preparingLectureTranslation}
+							>
+								{#each lectureSlideLanguages as language (language.code)}
+									<option value={language.code}>{language.name}</option>
+								{/each}
+							</select>
+							{#if lectureLanguageError}
+								<p class="text-xs text-amber-700">{lectureLanguageError}</p>
+							{/if}
+							{#if selectedLectureLanguageCode !== 'original' && lectureTranslationStatus}
+								{#if lectureTranslationStatus.status === 'queued' || lectureTranslationStatus.status === 'processing'}
+									<p class="text-center text-sm text-gray-600" aria-live="polite">
+										Preparing {selectedLectureLanguage?.name ?? 'lesson'}…
+										{lectureTranslationStatus.completed_parts}/{lectureTranslationStatus.total_parts}
+										parts
+									</p>
+								{:else if lectureTranslationStatus.status === 'failed'}
+									<p class="text-center text-sm text-red-700" role="alert">
+										{lectureTranslationStatus.error_message ??
+											'This language could not be prepared.'}
+									</p>
+								{/if}
+							{/if}
+						</div>
+					{/if}
 					{#if assistantMeta.willDisplayUserInfo}
 						<div
 							class="flex max-w-sm flex-row items-stretch gap-2 rounded-2xl border border-red-600 px-3 py-2 text-center"
@@ -1048,15 +1244,36 @@
 						</div>
 					{/if}
 					<div class="flex flex-row p-1.5">
-						<Button
-							class="flex flex-row gap-1.5 rounded-lg bg-blue-dark-40 px-4 py-1.5 text-xs text-white transition-all hover:bg-blue-dark-50 hover:text-blue-light-50"
-							onclick={handleLectureThreadCreate}
-							type="button"
-							disabled={groupArchived}
-						>
-							<CirclePlusSolid size="sm" />
-							<span class="text-center text-sm font-normal"> Start a Lesson </span>
-						</Button>
+						{#if assistant.interaction_mode === 'lecture_slides' && !lectureTranslationReady}
+							<Button
+								class="flex flex-row gap-1.5 rounded-lg bg-blue-dark-40 px-4 py-1.5 text-xs text-white transition-all hover:bg-blue-dark-50 hover:text-blue-light-50"
+								onclick={prepareLectureTranslation}
+								type="button"
+								disabled={groupArchived ||
+									preparingLectureTranslation ||
+									lectureTranslationStatus?.status === 'queued' ||
+									lectureTranslationStatus?.status === 'processing'}
+							>
+								<CirclePlusSolid size="sm" />
+								<span class="text-center text-sm font-normal">
+									{lectureTranslationStatus?.status === 'failed'
+										? 'Retry'
+										: preparingLectureTranslation
+											? 'Preparing…'
+											: 'Prepare lesson'}
+								</span>
+							</Button>
+						{:else}
+							<Button
+								class="flex flex-row gap-1.5 rounded-lg bg-blue-dark-40 px-4 py-1.5 text-xs text-white transition-all hover:bg-blue-dark-50 hover:text-blue-light-50"
+								onclick={handleLectureThreadCreate}
+								type="button"
+								disabled={groupArchived}
+							>
+								<CirclePlusSolid size="sm" />
+								<span class="text-center text-sm font-normal"> Start a Lesson </span>
+							</Button>
+						{/if}
 					</div>
 				{:else if assistant.interaction_mode === 'chat' && !(assistant.assistant_should_message_first ?? false)}
 					<div class="h-[8%] max-h-16"></div>

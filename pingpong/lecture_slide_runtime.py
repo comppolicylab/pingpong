@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, cast
 
@@ -34,6 +35,28 @@ LectureSlideValidationError = (
 LectureSlideConflictError = interactive_lesson_runtime.InteractiveLessonConflictError
 
 
+@dataclass(frozen=True)
+class _TranslatedQuestionOption:
+    source: models.LectureSlideQuestionOption
+    continue_offset_ms: int
+    continue_slide_offset_ms: int
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self.source, name)
+
+
+@dataclass(frozen=True)
+class _TranslatedQuestion:
+    source: models.LectureSlideQuestion
+    stop_offset_ms: int
+    slide_offset_ms: int
+    options: list[_TranslatedQuestionOption]
+    correct_option: _TranslatedQuestionOption | None
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self.source, name)
+
+
 class LectureSlideAdapter:
     state_model: Any = models.LectureSlideThreadState
     interaction_model: Any = models.LectureSlideInteraction
@@ -54,6 +77,52 @@ class LectureSlideAdapter:
     ) -> list[interactive_lesson_runtime.LessonQuestion]:
         if thread.lecture_slide_deck is None:
             return []
+        translation = thread.lecture_slide_translation
+        if translation is not None:
+            translated_pages = {page.position: page for page in translation.pages}
+            translated_questions: list[_TranslatedQuestion] = []
+            for question in thread.lecture_slide_deck.questions:
+                page = translated_pages[question.slide_position]
+                assert page.start_offset_ms is not None
+                assert page.end_offset_ms is not None
+                slide_offset_ms = page.end_offset_ms - page.start_offset_ms
+                options = []
+                for option in question.options:
+                    continue_page = translated_pages[option.continue_slide_position]
+                    assert continue_page.start_offset_ms is not None
+                    assert continue_page.end_offset_ms is not None
+                    options.append(
+                        _TranslatedQuestionOption(
+                            source=option,
+                            continue_offset_ms=continue_page.end_offset_ms,
+                            continue_slide_offset_ms=(
+                                continue_page.end_offset_ms
+                                - continue_page.start_offset_ms
+                            ),
+                        )
+                    )
+                correct_option = next(
+                    (
+                        option
+                        for option in options
+                        if question.correct_option is not None
+                        and option.id == question.correct_option.id
+                    ),
+                    None,
+                )
+                translated_questions.append(
+                    _TranslatedQuestion(
+                        source=question,
+                        stop_offset_ms=page.end_offset_ms,
+                        slide_offset_ms=slide_offset_ms,
+                        options=options,
+                        correct_option=correct_option,
+                    )
+                )
+            return cast(
+                list[interactive_lesson_runtime.LessonQuestion],
+                translated_questions,
+            )
         return cast(
             list[interactive_lesson_runtime.LessonQuestion],
             [

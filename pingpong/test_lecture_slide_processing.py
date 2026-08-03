@@ -310,6 +310,336 @@ async def test_queue_lecture_slide_processing_run_reuses_active_run(db):
         assert first.attempt_number == 1
 
 
+async def test_translation_queue_deduplicates_and_preserves_retry_history(db):
+    async with db.async_session() as session:
+        deck = _deck(status=schemas.LectureSlideDeckStatus.READY, slide_count=1)
+        page = models.LectureSlidePage(
+            lecture_slide_deck=deck,
+            position=0,
+            content_kind=schemas.LectureSlideContentKind.SLIDE,
+            narration_text="Source narration",
+        )
+        session.add_all([deck, page])
+        await session.flush()
+
+        await lecture_slide_processing.queue_lecture_slide_translation(
+            session,
+            deck,
+            language_code="es",
+            language_name="Spanish",
+            openai_model="gpt-4.1-mini",
+        )
+        translation = await models.LectureSlideTranslation.get_by_deck_and_language(
+            session, deck.id, "es"
+        )
+        assert translation is not None
+        await lecture_slide_processing.queue_lecture_slide_translation(
+            session,
+            deck,
+            language_code="es",
+            language_name="Spanish",
+            openai_model="gpt-5-mini",
+        )
+        runs = list(
+            await session.scalars(
+                select(models.LectureSlideTranslationRun).where(
+                    models.LectureSlideTranslationRun.translation_id_snapshot
+                    == translation.id
+                )
+            )
+        )
+        assert len(runs) == 1
+
+        audio = models.LectureSlideNarrationStoredObject(
+            key="translated-part.webm",
+            content_type="audio/webm",
+            content_length=100,
+            duration_ms=500,
+        )
+        session.add(audio)
+        await session.flush()
+        translated_page = models.LectureSlideTranslationPage(
+            translation_id=translation.id,
+            position=0,
+            narration_text="Narración traducida",
+            narration_stored_object_id=audio.id,
+            word_timings=[],
+        )
+        session.add(translated_page)
+        runs[0].status = schemas.LectureSlideTranslationRunStatus.FAILED
+        translation.status = schemas.LectureSlideTranslationStatus.FAILED
+        await session.flush()
+
+        await lecture_slide_processing.queue_lecture_slide_translation(
+            session,
+            deck,
+            language_code="es",
+            language_name="Spanish",
+            openai_model="gpt-5-mini",
+        )
+        runs = list(
+            await session.scalars(
+                select(models.LectureSlideTranslationRun)
+                .where(
+                    models.LectureSlideTranslationRun.translation_id_snapshot
+                    == translation.id
+                )
+                .order_by(models.LectureSlideTranslationRun.attempt_number)
+            )
+        )
+
+        assert translation.openai_model == "gpt-4.1-mini"
+        assert [run.attempt_number for run in runs] == [1, 2]
+        assert runs[-1].completed_parts == 1
+        assert translated_page.narration_stored_object_id == audio.id
+
+
+async def test_translation_uses_one_structured_call_for_eligible_pages(db, monkeypatch):
+    async with db.async_session() as session:
+        class_ = models.Class(id=1, name="Slide Class", api_key="sk-test")
+        deck = _deck(status=schemas.LectureSlideDeckStatus.READY, slide_count=3)
+        deck.class_ = class_
+        pages = [
+            models.LectureSlidePage(
+                lecture_slide_deck=deck,
+                position=0,
+                content_kind=schemas.LectureSlideContentKind.SLIDE,
+                narration_text="Explain the first slide.",
+            ),
+            models.LectureSlidePage(
+                lecture_slide_deck=deck,
+                position=1,
+                content_kind=schemas.LectureSlideContentKind.VIDEO,
+                narration_text="Inserted video transcript.",
+            ),
+            models.LectureSlidePage(
+                lecture_slide_deck=deck,
+                position=2,
+                content_kind=schemas.LectureSlideContentKind.SLIDE,
+                narration_text=" ",
+            ),
+        ]
+        translation = models.LectureSlideTranslation(
+            lecture_slide_deck=deck,
+            language_code="es",
+            language_name="Spanish",
+            openai_model="gpt-4.1-mini",
+            status=schemas.LectureSlideTranslationStatus.PROCESSING,
+            stage=schemas.LectureSlideTranslationStage.TRANSLATION_TEXT,
+        )
+        run = models.LectureSlideTranslationRun(
+            translation=translation,
+            translation_id_snapshot=0,
+            stage=schemas.LectureSlideTranslationStage.TRANSLATION_TEXT,
+            attempt_number=1,
+            status=schemas.LectureSlideTranslationRunStatus.RUNNING,
+            lease_token="translation-token",
+        )
+        session.add_all([class_, deck, *pages, translation, run])
+        await session.flush()
+        run.translation_id_snapshot = translation.id
+        await session.commit()
+        translation_id = translation.id
+        run_id = run.id
+
+    captured_calls = []
+
+    async def fake_get_openai_client(_session, _class_id):
+        return SimpleNamespace()
+
+    async def fake_parse(_client, **kwargs):
+        captured_calls.append(kwargs)
+        return lecture_slide_processing.TranslatedSlideNarrationSet(
+            slides=[
+                lecture_slide_processing.TranslatedSlideNarration(
+                    slide_position=0,
+                    narration_text="Explica la primera diapositiva.",
+                )
+            ]
+        )
+
+    async def immediate_heartbeat(_run_id, _lease_token, awaitable):
+        return await awaitable
+
+    monkeypatch.setattr(
+        lecture_slide_processing,
+        "get_openai_client_by_class_id",
+        fake_get_openai_client,
+    )
+    monkeypatch.setattr(lecture_slide_processing, "_parse_responses_output", fake_parse)
+    monkeypatch.setattr(
+        lecture_slide_processing,
+        "_await_with_translation_lease_heartbeat",
+        immediate_heartbeat,
+    )
+
+    result = await lecture_slide_processing._generate_translation_text(
+        run_id,
+        "translation-token",
+        translation_id,
+    )
+
+    assert result is not None
+    assert len(captured_calls) == 1
+    payload = captured_calls[0]["input_messages"][0]["content"][0]["text"]
+    assert '"slide_position": 0' in payload
+    assert '"slide_position": 1' not in payload
+    assert '"slide_position": 2' not in payload
+    assert captured_calls[0]["model"] == "gpt-4.1-mini"
+
+
+async def test_translation_audio_passes_language_code_and_persists_timings(
+    db, monkeypatch
+):
+    async with db.async_session() as session:
+        class_ = models.Class(id=1, name="Slide Class", api_key="sk-test")
+        deck = _deck(status=schemas.LectureSlideDeckStatus.READY, slide_count=1)
+        deck.class_ = class_
+        deck.voice_id = "voice-1"
+        translation = models.LectureSlideTranslation(
+            lecture_slide_deck=deck,
+            language_code="es",
+            language_name="Spanish",
+            openai_model="gpt-4.1-mini",
+            status=schemas.LectureSlideTranslationStatus.PROCESSING,
+            stage=schemas.LectureSlideTranslationStage.NARRATION_AUDIO,
+        )
+        page = models.LectureSlideTranslationPage(
+            translation=translation,
+            position=0,
+            narration_text="Narración traducida",
+        )
+        run = models.LectureSlideTranslationRun(
+            translation=translation,
+            translation_id_snapshot=0,
+            stage=schemas.LectureSlideTranslationStage.NARRATION_AUDIO,
+            attempt_number=1,
+            total_parts=1,
+            status=schemas.LectureSlideTranslationRunStatus.RUNNING,
+            lease_token="translation-token",
+        )
+        session.add_all([class_, deck, translation, page, run])
+        await session.flush()
+        run.translation_id_snapshot = translation.id
+        await session.commit()
+        translation_id = translation.id
+        run_id = run.id
+        page_id = page.id
+
+    captured_language_codes = []
+
+    async def fake_api_key(_class_id):
+        return "elevenlabs-key"
+
+    async def fake_synthesize(_api_key, _voice_id, _text, *, language_code):
+        captured_language_codes.append(language_code)
+        return SimpleNamespace(
+            audio=b"audio",
+            content_type="audio/webm",
+            words=[
+                lecture_slide_processing.ElevenLabsSpeechWordTiming(
+                    word="Hola",
+                    start_ms=0,
+                    end_ms=400,
+                )
+            ],
+        )
+
+    async def immediate_heartbeat(_run_id, _lease_token, awaitable):
+        return await awaitable
+
+    async def fake_store(_key, _content_type, audio):
+        return "translated-part.webm", len(audio)
+
+    monkeypatch.setattr(
+        lecture_slide_processing, "_get_elevenlabs_api_key", fake_api_key
+    )
+    monkeypatch.setattr(
+        lecture_slide_processing,
+        "synthesize_elevenlabs_speech_with_timings",
+        fake_synthesize,
+    )
+    monkeypatch.setattr(
+        lecture_slide_processing,
+        "_await_with_translation_lease_heartbeat",
+        immediate_heartbeat,
+    )
+    monkeypatch.setattr(lecture_slide_processing, "_store_audio", fake_store)
+    monkeypatch.setattr(
+        lecture_slide_processing, "audio_duration_ms", lambda *_args: 500
+    )
+
+    completed = await lecture_slide_processing._synthesize_translation_audio(
+        run_id,
+        "translation-token",
+        translation_id,
+    )
+
+    assert completed is True
+    assert captured_language_codes == ["es"]
+    async with db.async_session() as session:
+        page = await session.get(models.LectureSlideTranslationPage, page_id)
+        assert page is not None
+        assert page.narration_stored_object_id is not None
+        assert page.word_timings == [{"word": "Hola", "start_ms": 0, "end_ms": 400}]
+
+
+async def test_translation_composite_retry_reuses_committed_artifacts(db, monkeypatch):
+    async with db.async_session() as session:
+        class_ = models.Class(id=1, name="Slide Class", api_key="sk-test")
+        deck = _deck(status=schemas.LectureSlideDeckStatus.READY)
+        deck.class_ = class_
+        audio = models.LectureSlideNarrationStoredObject(
+            key="translated-continuous.webm",
+            content_type="audio/webm",
+            content_length=100,
+            duration_ms=500,
+        )
+        caption = models.LectureSlideCaptionStoredObject(
+            key="translated-captions.vtt",
+            content_type="text/vtt",
+            content_length=50,
+        )
+        translation = models.LectureSlideTranslation(
+            lecture_slide_deck=deck,
+            language_code="es",
+            language_name="Spanish",
+            openai_model="gpt-4.1-mini",
+            status=schemas.LectureSlideTranslationStatus.PROCESSING,
+            stage=schemas.LectureSlideTranslationStage.COMPOSITE_ARTIFACTS,
+            total_duration_ms=500,
+            continuous_narration_stored_object=audio,
+            caption_stored_object=caption,
+        )
+        run = models.LectureSlideTranslationRun(
+            translation=translation,
+            translation_id_snapshot=0,
+            stage=schemas.LectureSlideTranslationStage.COMPOSITE_ARTIFACTS,
+            attempt_number=2,
+            status=schemas.LectureSlideTranslationRunStatus.RUNNING,
+            lease_token="translation-token",
+        )
+        session.add_all([class_, deck, audio, caption, translation, run])
+        await session.flush()
+        run.translation_id_snapshot = translation.id
+        await session.commit()
+        translation_id = translation.id
+        run_id = run.id
+
+    async def fail_combine(_stored_objects):
+        pytest.fail("committed composite audio should be reused")
+
+    monkeypatch.setattr(
+        lecture_slide_processing, "_combine_audio_objects", fail_combine
+    )
+
+    assert await lecture_slide_processing._persist_translation_composite_artifacts(
+        run_id,
+        "translation-token",
+        translation_id,
+    )
+
+
 async def test_queue_lecture_slide_processing_run_rewinds_later_active_run(db):
     await _create_class_and_deck(db)
     async with db.async_session() as session:
@@ -3332,6 +3662,52 @@ async def test_claim_next_any_processing_run_returns_video_assignment_for_older_
     assert claimed is not None
     assert claimed.kind == "video"
     assert claimed.run_id == video_run.id
+
+
+async def test_claim_next_any_processing_run_includes_translation_jobs(db):
+    async with db.async_session() as session:
+        class_ = models.Class(id=1, name="Class", api_key="sk-test")
+        deck = _deck(deck_id=1, status=schemas.LectureSlideDeckStatus.READY)
+        translation = models.LectureSlideTranslation(
+            lecture_slide_deck=deck,
+            language_code="fr",
+            language_name="French",
+            openai_model="gpt-4.1-mini",
+            status=schemas.LectureSlideTranslationStatus.QUEUED,
+            stage=schemas.LectureSlideTranslationStage.TRANSLATION_TEXT,
+        )
+        session.add_all([class_, deck, translation])
+        await session.flush()
+        translation_run = models.LectureSlideTranslationRun(
+            translation=translation,
+            translation_id_snapshot=translation.id,
+            stage=schemas.LectureSlideTranslationStage.TRANSLATION_TEXT,
+            attempt_number=1,
+            status=schemas.LectureSlideTranslationRunStatus.QUEUED,
+            created=utcnow() - timedelta(minutes=2),
+        )
+        session.add(translation_run)
+        slide_run = await models.LectureSlideProcessingRun.create(
+            session,
+            lecture_slide_deck_id=deck.id,
+            lecture_slide_deck_id_snapshot=deck.id,
+            class_id=1,
+            assistant_id_at_start=None,
+            stage=schemas.LectureSlideProcessingStage.SLIDE_ASSET_EXTRACTION,
+            attempt_number=1,
+            status=schemas.LectureSlideProcessingRunStatus.QUEUED,
+        )
+        slide_run.created = utcnow() - timedelta(minutes=1)
+        await session.commit()
+        translation_run_id = translation_run.id
+
+    claimed = await lecture_slide_processing.claim_next_any_processing_run(
+        leased_by="worker"
+    )
+
+    assert claimed is not None
+    assert claimed.kind == "translation"
+    assert claimed.run_id == translation_run_id
 
 
 # ---------------------------------------------------------------------------

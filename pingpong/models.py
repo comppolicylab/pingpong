@@ -3390,6 +3390,11 @@ class LectureSlideDeck(Base):
         "LectureSlideProcessingRun",
         back_populates="lecture_slide_deck",
     )
+    translations = relationship(
+        "LectureSlideTranslation",
+        back_populates="lecture_slide_deck",
+        cascade="all, delete-orphan",
+    )
     pages = relationship(
         "LectureSlidePage",
         back_populates="lecture_slide_deck",
@@ -3684,6 +3689,279 @@ class LectureSlideDeck(Base):
                 + "; ".join(invalid_pages)
             )
         return stored_objects
+
+
+class LectureSlideTranslation(Base):
+    __tablename__ = "lecture_slide_translations"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    lecture_slide_deck_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("lecture_slide_decks.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    lecture_slide_deck: Mapped["LectureSlideDeck"] = relationship(
+        "LectureSlideDeck", back_populates="translations"
+    )
+    language_code: Mapped[str] = mapped_column(String(16), nullable=False)
+    language_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    openai_model: Mapped[str] = mapped_column(String, nullable=False)
+    status: Mapped[schemas.LectureSlideTranslationStatus] = mapped_column(
+        SQLEnum(schemas.LectureSlideTranslationStatus),
+        nullable=False,
+        server_default=schemas.LectureSlideTranslationStatus.QUEUED.name,
+    )
+    stage: Mapped[schemas.LectureSlideTranslationStage] = mapped_column(
+        SQLEnum(schemas.LectureSlideTranslationStage),
+        nullable=False,
+        server_default=schemas.LectureSlideTranslationStage.TRANSLATION_TEXT.name,
+    )
+    error_message: Mapped[str | None] = mapped_column(String, nullable=True)
+    total_duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    continuous_narration_stored_object_id: Mapped[int | None] = mapped_column(
+        Integer,
+        ForeignKey(
+            "lecture_slide_narration_stored_objects.id",
+            ondelete="SET NULL",
+            name="fk_ls_translations_continuous_narration",
+        ),
+        nullable=True,
+    )
+    continuous_narration_stored_object: Mapped[
+        "LectureSlideNarrationStoredObject | None"
+    ] = relationship(
+        "LectureSlideNarrationStoredObject",
+        foreign_keys=[continuous_narration_stored_object_id],
+    )
+    caption_stored_object_id: Mapped[int | None] = mapped_column(
+        Integer,
+        ForeignKey(
+            "lecture_slide_caption_stored_objects.id",
+            ondelete="SET NULL",
+            name="fk_ls_translations_caption",
+        ),
+        nullable=True,
+        index=True,
+    )
+    caption_stored_object: Mapped["LectureSlideCaptionStoredObject | None"] = (
+        relationship("LectureSlideCaptionStoredObject")
+    )
+    pages: Mapped[list["LectureSlideTranslationPage"]] = relationship(
+        "LectureSlideTranslationPage",
+        back_populates="translation",
+        cascade="all, delete-orphan",
+        order_by="LectureSlideTranslationPage.position",
+    )
+    runs: Mapped[list["LectureSlideTranslationRun"]] = relationship(
+        "LectureSlideTranslationRun",
+        back_populates="translation",
+    )
+    threads: Mapped[list["Thread"]] = relationship(
+        "Thread", back_populates="lecture_slide_translation"
+    )
+    created: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), onupdate=func.now()
+    )
+    __table_args__ = (
+        Index(
+            "ix_ls_translation_continuous_audio",
+            "continuous_narration_stored_object_id",
+        ),
+        UniqueConstraint(
+            "lecture_slide_deck_id",
+            "language_code",
+            name="uq_ls_translation_deck_language",
+        ),
+    )
+
+    @classmethod
+    async def get_by_deck_and_language(
+        cls,
+        session: AsyncSession,
+        deck_id: int,
+        language_code: str,
+        *,
+        for_update: bool = False,
+    ) -> "LectureSlideTranslation | None":
+        stmt = (
+            select(cls)
+            .where(
+                cls.lecture_slide_deck_id == int(deck_id),
+                cls.language_code == language_code,
+            )
+            .options(
+                selectinload(cls.pages),
+                selectinload(cls.runs),
+            )
+        )
+        if for_update:
+            stmt = stmt.with_for_update()
+        return await session.scalar(stmt)
+
+
+class LectureSlideTranslationPage(Base):
+    __tablename__ = "lecture_slide_translation_pages"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    translation_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("lecture_slide_translations.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    translation: Mapped["LectureSlideTranslation"] = relationship(
+        "LectureSlideTranslation", back_populates="pages"
+    )
+    position: Mapped[int] = mapped_column(Integer, nullable=False)
+    narration_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    narration_stored_object_id: Mapped[int | None] = mapped_column(
+        Integer,
+        ForeignKey(
+            "lecture_slide_narration_stored_objects.id",
+            ondelete="SET NULL",
+            name="fk_ls_translation_pages_narration",
+        ),
+        nullable=True,
+    )
+    narration_stored_object: Mapped["LectureSlideNarrationStoredObject | None"] = (
+        relationship(
+            "LectureSlideNarrationStoredObject",
+            foreign_keys=[narration_stored_object_id],
+        )
+    )
+    word_timings: Mapped[list[dict[str, Any]] | None] = mapped_column(
+        JSON, nullable=True
+    )
+    start_offset_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    end_offset_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), onupdate=func.now()
+    )
+
+    __table_args__ = (
+        Index(
+            "ix_ls_translation_page_audio",
+            "narration_stored_object_id",
+        ),
+        UniqueConstraint(
+            "translation_id",
+            "position",
+            name="uq_ls_translation_page_position",
+        ),
+    )
+
+
+class LectureSlideTranslationRun(Base):
+    __tablename__ = "lecture_slide_translation_runs"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    translation_id: Mapped[int | None] = mapped_column(
+        Integer,
+        ForeignKey("lecture_slide_translations.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    translation: Mapped["LectureSlideTranslation | None"] = relationship(
+        "LectureSlideTranslation", back_populates="runs"
+    )
+    translation_id_snapshot: Mapped[int] = mapped_column(Integer, nullable=False)
+    stage: Mapped[schemas.LectureSlideTranslationStage] = mapped_column(
+        SQLEnum(schemas.LectureSlideTranslationStage), nullable=False
+    )
+    attempt_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    completed_parts: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default="0"
+    )
+    total_parts: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default="0"
+    )
+    status: Mapped[schemas.LectureSlideTranslationRunStatus] = mapped_column(
+        SQLEnum(schemas.LectureSlideTranslationRunStatus),
+        nullable=False,
+        server_default=schemas.LectureSlideTranslationRunStatus.QUEUED.name,
+    )
+    error_message: Mapped[str | None] = mapped_column(String, nullable=True)
+    lease_token: Mapped[str | None] = mapped_column(String, nullable=True)
+    leased_by: Mapped[str | None] = mapped_column(String, nullable=True)
+    lease_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    started_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    finished_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), index=True, onupdate=func.now()
+    )
+
+    __table_args__ = (
+        Index(
+            "ix_ls_translation_run_snapshot",
+            "translation_id_snapshot",
+        ),
+        Index(
+            "lecture_slide_translation_runs_active_idx",
+            "translation_id_snapshot",
+            unique=True,
+            sqlite_where=text("status IN ('QUEUED', 'RUNNING')"),
+            postgresql_where=text("status IN ('QUEUED', 'RUNNING')"),
+        ),
+        UniqueConstraint(
+            "translation_id_snapshot",
+            "attempt_number",
+            name="uq_ls_translation_run_attempt",
+        ),
+        Index(
+            "lecture_slide_translation_runs_status_lease_idx",
+            "status",
+            "lease_expires_at",
+        ),
+    )
+
+    @classmethod
+    async def get_by_id(
+        cls, session: AsyncSession, id_: int
+    ) -> "LectureSlideTranslationRun | None":
+        return await session.scalar(select(cls).where(cls.id == int(id_)))
+
+    @classmethod
+    async def get_non_terminal(
+        cls, session: AsyncSession, translation_id: int
+    ) -> "LectureSlideTranslationRun | None":
+        return await session.scalar(
+            select(cls)
+            .where(
+                cls.translation_id_snapshot == int(translation_id),
+                cls.status.in_(
+                    [
+                        schemas.LectureSlideTranslationRunStatus.QUEUED,
+                        schemas.LectureSlideTranslationRunStatus.RUNNING,
+                    ]
+                ),
+            )
+            .order_by(cls.created.asc())
+        )
+
+    @classmethod
+    async def get_latest_attempt_number(
+        cls, session: AsyncSession, translation_id: int
+    ) -> int:
+        value = await session.scalar(
+            select(func.max(cls.attempt_number)).where(
+                cls.translation_id_snapshot == int(translation_id)
+            )
+        )
+        return int(value or 0)
 
 
 _LECTURE_SLIDE_PROCESSING_STAGE_ORDER: Mapping[
@@ -4383,6 +4661,11 @@ def _thread_lecture_slide_base_loaders() -> tuple[Load, ...]:
             selectinload(LectureSlideDeck.questions).options(
                 *_lecture_slide_question_context_loaders()
             ),
+        ),
+        selectinload(Thread.lecture_slide_translation).options(
+            selectinload(LectureSlideTranslation.pages),
+            selectinload(LectureSlideTranslation.continuous_narration_stored_object),
+            selectinload(LectureSlideTranslation.caption_stored_object),
         ),
     )
 
@@ -9213,6 +9496,21 @@ class Thread(Base):
     lecture_slide_deck = relationship(
         "LectureSlideDeck", back_populates="threads", uselist=False
     )
+    lecture_slide_translation_id = Column(
+        Integer,
+        ForeignKey(
+            "lecture_slide_translations.id",
+            name="fk_threads_lecture_slide_translation_id",
+            ondelete="SET NULL",
+        ),
+        nullable=True,
+        index=True,
+    )
+    lecture_slide_translation = relationship(
+        "LectureSlideTranslation", back_populates="threads", uselist=False
+    )
+    lecture_language_code = Column(String(16), nullable=True)
+    lecture_language_name = Column(String(128), nullable=True)
     instructions = Column(String, nullable=True)
     timezone = Column(String, nullable=True)
     private = Column(Boolean)

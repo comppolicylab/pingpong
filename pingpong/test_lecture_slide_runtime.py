@@ -23,6 +23,53 @@ async def test_send_message_allows_first_run_for_lecture_slide_threads():
     assert server_module._allows_first_message_without_prior_run(thread)
 
 
+async def test_translated_question_adapter_preserves_content_and_retimes_offsets():
+    question = models.LectureSlideQuestion(
+        id=41,
+        position=1,
+        slide_position=2,
+        slide_offset_ms=1_000,
+        stop_offset_ms=4_000,
+        question_type=schemas.LectureSlideQuestionType.SINGLE_SELECT,
+        question_text="Which answer is correct?",
+        intro_text="Choose one.",
+    )
+    option = models.LectureSlideQuestionOption(
+        id=42,
+        position=1,
+        option_text="The original answer",
+        post_answer_text="Original feedback.",
+        continue_slide_position=2,
+        continue_slide_offset_ms=1_000,
+        continue_offset_ms=4_000,
+    )
+    question.options = [option]
+    question.correct_option = option
+    thread = SimpleNamespace(
+        lecture_slide_deck=SimpleNamespace(questions=[question]),
+        lecture_slide_translation=SimpleNamespace(
+            pages=[
+                SimpleNamespace(
+                    position=2,
+                    start_offset_ms=7_000,
+                    end_offset_ms=10_500,
+                )
+            ]
+        ),
+    )
+
+    translated = lecture_slide_runtime._SLIDE_ADAPTER.get_questions(thread)[0]
+
+    assert translated.question_text == "Which answer is correct?"
+    assert translated.intro_text == "Choose one."
+    assert translated.stop_offset_ms == 10_500
+    assert translated.slide_offset_ms == 3_500
+    assert translated.options[0].option_text == "The original answer"
+    assert translated.options[0].continue_offset_ms == 10_500
+    assert translated.options[0].continue_slide_offset_ms == 3_500
+    assert translated.correct_option is translated.options[0]
+
+
 def _slide_deck(
     class_: models.Class,
     source: models.LectureSlideSourceStoredObject,

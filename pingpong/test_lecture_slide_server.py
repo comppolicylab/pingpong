@@ -95,6 +95,111 @@ def test_additional_context_generation_payload_is_separate_user_message():
     ]
 
 
+@pytest.mark.asyncio
+@with_user(123)
+@with_institution(11, "Test Institution")
+@with_authz(
+    grants=[
+        ("user:123", "can_create_thread", "class:1"),
+        ("user:123", "student", "class:1"),
+    ]
+)
+async def test_translated_thread_requires_ready_variant_and_saves_language(
+    api, db, institution, valid_user_token
+):
+    async with db.async_session() as session:
+        class_ = models.Class(
+            id=1,
+            name="Test Class",
+            institution_id=institution.id,
+            api_key="test-key",
+        )
+        source = models.LectureSlideSourceStoredObject(
+            key="translated-slides.pdf",
+            original_filename="translated-slides.pdf",
+            content_type="application/pdf",
+            content_length=128,
+        )
+        deck = models.LectureSlideDeck(
+            id=1,
+            class_=class_,
+            source_stored_object=source,
+            display_name="Translated slides",
+            status=schemas.LectureSlideDeckStatus.READY,
+            slide_count=1,
+            total_duration_ms=1_000,
+        )
+        assistant = models.Assistant(
+            id=1,
+            name="Translated Slides",
+            class_=class_,
+            interaction_mode=schemas.InteractionMode.LECTURE_SLIDES,
+            version=3,
+            lecture_slide_deck=deck,
+            instructions="Teach from the slides.",
+            model="gpt-4o-mini",
+            tools="[]",
+            use_latex=False,
+            use_image_descriptions=False,
+            hide_prompt=False,
+        )
+        translation = models.LectureSlideTranslation(
+            lecture_slide_deck=deck,
+            language_code="es",
+            language_name="Spanish",
+            openai_model="gpt-4o-mini",
+            status=schemas.LectureSlideTranslationStatus.PROCESSING,
+            stage=schemas.LectureSlideTranslationStage.NARRATION_AUDIO,
+        )
+        session.add_all([class_, source, deck, assistant, translation])
+        await session.commit()
+        translation_id = translation.id
+
+    unavailable = api.post(
+        "/api/v1/class/1/thread/lecture",
+        json={"assistant_id": 1, "parties": [123], "language_code": "es"},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert unavailable.status_code == 409
+
+    async with db.async_session() as session:
+        translation = await session.get(models.LectureSlideTranslation, translation_id)
+        assert translation is not None
+        audio = models.LectureSlideNarrationStoredObject(
+            key="translated.webm",
+            content_type="audio/webm",
+            content_length=100,
+            duration_ms=1_200,
+        )
+        caption = models.LectureSlideCaptionStoredObject(
+            key="translated.vtt",
+            content_type="text/vtt",
+            content_length=50,
+        )
+        session.add_all([audio, caption])
+        await session.flush()
+        translation.status = schemas.LectureSlideTranslationStatus.READY
+        translation.continuous_narration_stored_object_id = audio.id
+        translation.caption_stored_object_id = caption.id
+        translation.total_duration_ms = 1_200
+        await session.commit()
+
+    ready = api.post(
+        "/api/v1/class/1/thread/lecture",
+        json={"assistant_id": 1, "parties": [123], "language_code": "es"},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+
+    assert ready.status_code == 200
+    assert ready.json()["thread"]["lecture_language_code"] == "es"
+    assert ready.json()["thread"]["lecture_language_name"] == "Spanish"
+    thread_id = ready.json()["thread"]["id"]
+    async with db.async_session() as session:
+        thread = await session.get(models.Thread, thread_id)
+        assert thread is not None
+        assert thread.lecture_slide_translation_id == translation_id
+
+
 @pytest.mark.parametrize(
     ("content_type", "format_names", "video_codec"),
     [
@@ -688,20 +793,50 @@ async def test_delete_lecture_slide_deck_if_unused_removes_context_rows_explicit
             content_type="text/markdown",
             content_length=2048,
         )
+        translation = models.LectureSlideTranslation(
+            lecture_slide_deck=deck,
+            language_code="es",
+            language_name="Spanish",
+            openai_model="gpt-4o-mini",
+            status=schemas.LectureSlideTranslationStatus.QUEUED,
+            stage=schemas.LectureSlideTranslationStage.TRANSLATION_TEXT,
+        )
+        session.add(translation)
+        await session.flush()
+        translation_run = models.LectureSlideTranslationRun(
+            translation=translation,
+            translation_id_snapshot=translation.id,
+            stage=schemas.LectureSlideTranslationStage.TRANSLATION_TEXT,
+            attempt_number=1,
+            status=schemas.LectureSlideTranslationRunStatus.QUEUED,
+        )
+        session.add(translation_run)
+        await session.flush()
+        translation_run_id = translation_run.id
 
         file_object_ids = (
             await lecture_slide_service.delete_lecture_slide_deck_if_unused(
                 session, deck.id
             )
         )
-        await session.flush()
+        await session.commit()
 
+    async with db.async_session() as session:
         remaining_context = await session.get(
             models.LectureSlideAdditionalContextFile, context_file.id
+        )
+        remaining_translation_run = await session.get(
+            models.LectureSlideTranslationRun, translation_run_id
         )
 
     assert file_object_ids == [file.id]
     assert remaining_context is None
+    assert remaining_translation_run is not None
+    assert (
+        remaining_translation_run.status
+        == schemas.LectureSlideTranslationRunStatus.CANCELLED
+    )
+    assert remaining_translation_run.translation_id is None
 
 
 @pytest.mark.asyncio

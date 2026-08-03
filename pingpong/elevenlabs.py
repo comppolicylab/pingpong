@@ -74,6 +74,93 @@ class ElevenLabsSpeechWithTimings:
     words: tuple[ElevenLabsSpeechWordTiming, ...]
 
 
+@dataclass(frozen=True)
+class ElevenLabsLanguage:
+    code: str
+    name: str
+
+
+# Published at https://elevenlabs.io/docs/help-center/other/what-languages-do-you-support.
+# Names follow the v3 list; codes use the speech API's ISO 639-1 convention where
+# available and ElevenLabs' established identifiers for Filipino and Cebuano.
+ELEVENLABS_V3_LANGUAGES: Final[tuple[ElevenLabsLanguage, ...]] = (
+    ElevenLabsLanguage("af", "Afrikaans"),
+    ElevenLabsLanguage("ar", "Arabic"),
+    ElevenLabsLanguage("hy", "Armenian"),
+    ElevenLabsLanguage("as", "Assamese"),
+    ElevenLabsLanguage("az", "Azerbaijani"),
+    ElevenLabsLanguage("be", "Belarusian"),
+    ElevenLabsLanguage("bn", "Bengali"),
+    ElevenLabsLanguage("bs", "Bosnian"),
+    ElevenLabsLanguage("bg", "Bulgarian"),
+    ElevenLabsLanguage("ca", "Catalan"),
+    ElevenLabsLanguage("ceb", "Cebuano"),
+    ElevenLabsLanguage("ny", "Chichewa"),
+    ElevenLabsLanguage("hr", "Croatian"),
+    ElevenLabsLanguage("cs", "Czech"),
+    ElevenLabsLanguage("da", "Danish"),
+    ElevenLabsLanguage("nl", "Dutch"),
+    ElevenLabsLanguage("en", "English"),
+    ElevenLabsLanguage("et", "Estonian"),
+    ElevenLabsLanguage("fil", "Filipino"),
+    ElevenLabsLanguage("fi", "Finnish"),
+    ElevenLabsLanguage("fr", "French"),
+    ElevenLabsLanguage("gl", "Galician"),
+    ElevenLabsLanguage("ka", "Georgian"),
+    ElevenLabsLanguage("de", "German"),
+    ElevenLabsLanguage("el", "Greek"),
+    ElevenLabsLanguage("gu", "Gujarati"),
+    ElevenLabsLanguage("ha", "Hausa"),
+    ElevenLabsLanguage("he", "Hebrew"),
+    ElevenLabsLanguage("hi", "Hindi"),
+    ElevenLabsLanguage("hu", "Hungarian"),
+    ElevenLabsLanguage("is", "Icelandic"),
+    ElevenLabsLanguage("id", "Indonesian"),
+    ElevenLabsLanguage("ga", "Irish"),
+    ElevenLabsLanguage("it", "Italian"),
+    ElevenLabsLanguage("ja", "Japanese"),
+    ElevenLabsLanguage("jv", "Javanese"),
+    ElevenLabsLanguage("kn", "Kannada"),
+    ElevenLabsLanguage("kk", "Kazakh"),
+    ElevenLabsLanguage("ky", "Kirghiz"),
+    ElevenLabsLanguage("ko", "Korean"),
+    ElevenLabsLanguage("lv", "Latvian"),
+    ElevenLabsLanguage("ln", "Lingala"),
+    ElevenLabsLanguage("lt", "Lithuanian"),
+    ElevenLabsLanguage("lb", "Luxembourgish"),
+    ElevenLabsLanguage("mk", "Macedonian"),
+    ElevenLabsLanguage("ms", "Malay"),
+    ElevenLabsLanguage("ml", "Malayalam"),
+    ElevenLabsLanguage("zh", "Mandarin Chinese"),
+    ElevenLabsLanguage("mr", "Marathi"),
+    ElevenLabsLanguage("ne", "Nepali"),
+    ElevenLabsLanguage("no", "Norwegian"),
+    ElevenLabsLanguage("ps", "Pashto"),
+    ElevenLabsLanguage("fa", "Persian"),
+    ElevenLabsLanguage("pl", "Polish"),
+    ElevenLabsLanguage("pt", "Portuguese"),
+    ElevenLabsLanguage("pa", "Punjabi"),
+    ElevenLabsLanguage("ro", "Romanian"),
+    ElevenLabsLanguage("ru", "Russian"),
+    ElevenLabsLanguage("sr", "Serbian"),
+    ElevenLabsLanguage("sd", "Sindhi"),
+    ElevenLabsLanguage("sk", "Slovak"),
+    ElevenLabsLanguage("sl", "Slovenian"),
+    ElevenLabsLanguage("so", "Somali"),
+    ElevenLabsLanguage("es", "Spanish"),
+    ElevenLabsLanguage("sw", "Swahili"),
+    ElevenLabsLanguage("sv", "Swedish"),
+    ElevenLabsLanguage("ta", "Tamil"),
+    ElevenLabsLanguage("te", "Telugu"),
+    ElevenLabsLanguage("th", "Thai"),
+    ElevenLabsLanguage("tr", "Turkish"),
+    ElevenLabsLanguage("uk", "Ukrainian"),
+    ElevenLabsLanguage("ur", "Urdu"),
+    ElevenLabsLanguage("vi", "Vietnamese"),
+    ElevenLabsLanguage("cy", "Welsh"),
+)
+
+
 def get_elevenlabs_client(api_key: str) -> AsyncElevenLabs:
     if not api_key:
         raise ValueError("API key is required")
@@ -293,6 +380,7 @@ async def synthesize_elevenlabs_speech_with_timings(
     voice_id: str,
     text: str,
     *,
+    language_code: str | None = None,
     voice_settings: Mapping[str, Any] | None = None,
     timeout_seconds: int | None = None,
 ) -> ElevenLabsSpeechWithTimings:
@@ -308,6 +396,7 @@ async def synthesize_elevenlabs_speech_with_timings(
             voice_id=voice_id,
             text=text,
             model_id=ELEVENLABS_TTS_MODEL,
+            language_code=language_code,
             output_format=ELEVENLABS_VOICE_VALIDATION_OUTPUT_FORMAT,
             voice_settings=VoiceSettings(
                 **(

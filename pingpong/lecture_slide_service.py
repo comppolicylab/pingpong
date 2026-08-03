@@ -26,6 +26,7 @@ from pingpong.ai import get_openai_client_by_class_id
 from pingpong.config import config
 from pingpong.files import FILE_TYPES
 from pingpong.lecture_video_service import get_original_filename, get_upload_size
+from pingpong.now import utcnow
 from pingpong.video_store import VideoStoreError
 
 logger = logging.getLogger(__name__)
@@ -1785,6 +1786,27 @@ async def _delete_lecture_slide_narration_stored_objects_if_unused(
             )
         ).all()
     )
+    referenced_stored_object_ids.update(
+        (
+            await session.scalars(
+                select(models.LectureSlideTranslationPage.narration_stored_object_id)
+                .where(
+                    models.LectureSlideTranslationPage.narration_stored_object_id.in_(
+                        stored_object_ids
+                    )
+                )
+                .union_all(
+                    select(
+                        models.LectureSlideTranslation.continuous_narration_stored_object_id
+                    ).where(
+                        models.LectureSlideTranslation.continuous_narration_stored_object_id.in_(
+                            stored_object_ids
+                        )
+                    )
+                )
+            )
+        ).all()
+    )
 
     unused_stored_object_ids = [
         id_ for id_ in stored_object_ids if id_ not in referenced_stored_object_ids
@@ -1986,6 +2008,50 @@ async def delete_lecture_slide_deck_if_unused(
     await models.LectureSlideAdditionalContextFile.delete_all_by_deck_id(
         session, deck_id
     )
+    translation_ids = list(
+        await session.scalars(
+            select(models.LectureSlideTranslation.id).where(
+                models.LectureSlideTranslation.lecture_slide_deck_id == deck_id
+            )
+        )
+    )
+    if translation_ids:
+        await session.execute(
+            update(models.LectureSlideTranslationRun)
+            .where(
+                models.LectureSlideTranslationRun.translation_id.in_(translation_ids),
+                models.LectureSlideTranslationRun.status.in_(
+                    [
+                        schemas.LectureSlideTranslationRunStatus.QUEUED,
+                        schemas.LectureSlideTranslationRunStatus.RUNNING,
+                    ]
+                ),
+            )
+            .values(
+                status=schemas.LectureSlideTranslationRunStatus.CANCELLED,
+                finished_at=utcnow(),
+                lease_token=None,
+                leased_by=None,
+                lease_expires_at=None,
+            )
+        )
+        await session.execute(
+            update(models.LectureSlideTranslationRun)
+            .where(
+                models.LectureSlideTranslationRun.translation_id.in_(translation_ids)
+            )
+            .values(translation_id=None)
+        )
+        await session.execute(
+            delete(models.LectureSlideTranslationPage).where(
+                models.LectureSlideTranslationPage.translation_id.in_(translation_ids)
+            )
+        )
+        await session.execute(
+            delete(models.LectureSlideTranslation).where(
+                models.LectureSlideTranslation.id.in_(translation_ids)
+            )
+        )
     await session.execute(
         update(models.LectureSlideProcessingRun)
         .where(models.LectureSlideProcessingRun.lecture_slide_deck_id == deck_id)
