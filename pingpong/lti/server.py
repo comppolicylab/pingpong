@@ -1612,12 +1612,6 @@ async def link_lti_group(
     ):
         raise HTTPException(status_code=403, detail="Not authorized to link this class")
 
-    if lti_class.class_id is not None:
-        raise HTTPException(
-            status_code=400,
-            detail="This Canvas course is already linked to a PingPong group.",
-        )
-
     # Update the LTIClass to link it
     lti_class.class_id = body.class_id
     lti_class.lti_status = LTIStatus.LINKED
