@@ -1589,21 +1589,22 @@ async def link_lti_group(
     lti_class = await _get_lti_class_for_setup(request, lti_class_id)
     user = request.state["session"].user
 
-    # Verify user has teacher role on the target class using authz
-    has_teacher_role = await request.state["authz"].test(
-        f"user:{user.id}", "teacher", f"class:{body.class_id}"
+    # Verify user supervises the target class using authz.
+    has_supervisor_role = await request.state["authz"].test(
+        f"user:{user.id}", "supervisor", f"class:{body.class_id}"
     )
-    if not has_teacher_role:
+    if not has_supervisor_role:
         raise HTTPException(status_code=403, detail="Not authorized to link this class")
 
-    # Verify class doesn't already have an LTI link for this registration
-    has_link = await LTIClass.has_link_for_registration_and_class(
-        request.state["db"], lti_class.registration_id, body.class_id
+    # Verify this LMS course isn't already linked to a group for this
+    # registration. A group may be linked to several LMS courses.
+    has_link = await LTIClass.has_link_for_registration_and_course(
+        request.state["db"], lti_class.registration_id, lti_class.course_id
     )
     if has_link:
         raise HTTPException(
             status_code=400,
-            detail="This class is already linked to an LTI course from this registration",
+            detail="This Canvas course is already linked to a PingPong group.",
         )
 
     # Update the LTIClass to link it

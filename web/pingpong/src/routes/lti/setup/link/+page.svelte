@@ -38,14 +38,19 @@
 		$loading = true;
 
 		try {
-			const result = await api
+			const { error: linkError, data } = await api
 				.linkLTIGroup(fetch, ltiClassId, {
 					class_id: selectedGroupId
 				})
-				.then(api.explodeResponse);
+				.then(api.expandResponse);
+
+			if (linkError || !data) {
+				error = linkError?.detail || 'Failed to link group';
+				return;
+			}
 
 			// Redirect to the group's assistant page
-			await goto(resolve(`/group/${result.class_id}/assistant`));
+			await goto(resolve(`/group/${data.class_id}/assistant`));
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Failed to link group';
 		} finally {

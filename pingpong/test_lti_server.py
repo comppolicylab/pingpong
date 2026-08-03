@@ -295,6 +295,7 @@ def _make_lti_class(
         setup_user_id=setup_user_id,
         course_name="Course",
         course_code="CODE",
+        course_id="canvas-course-1",
         course_term="Fall",
         class_id=class_id,
         lms_user_id=lms_user_id,
@@ -1954,13 +1955,75 @@ async def test_link_lti_group_success(monkeypatch):
     )
     monkeypatch.setattr(
         server_module.LTIClass,
-        "has_link_for_registration_and_class",
-        lambda db, reg_id, class_id: _async_return(False),
+        "has_link_for_registration_and_course",
+        lambda db, reg_id, course_id: _async_return(False),
+    )
+    authz = FakeAuthz(test_result=True)
+    request = FakeRequest(
+        state=SimpleNamespace(
+            db=FakeDB(),
+            authz=authz,
+            session=SimpleNamespace(user=SimpleNamespace(id=10)),
+        )
+    )
+
+    response = await server_module.link_lti_group(
+        request, 1, LTISetupLinkRequest(class_id=55)
+    )
+
+    assert response.class_id == 55
+    assert lti_class.lti_status == LTIStatus.LINKED
+    # The relation checked must match the one linkable-groups lists on, so that
+    # every group offered to the user can actually be linked.
+    assert ("user:10", "supervisor", "class:55") in authz.test_calls
+
+
+@pytest.mark.asyncio
+async def test_link_lti_group_rejects_already_linked_course(monkeypatch):
+    lti_class = _make_lti_class()
+    monkeypatch.setattr(
+        server_module,
+        "_get_lti_class_for_setup",
+        lambda request, lti_class_id: _async_return(lti_class),
+    )
+    monkeypatch.setattr(
+        server_module.LTIClass,
+        "has_link_for_registration_and_course",
+        lambda db, reg_id, course_id: _async_return(True),
     )
     request = FakeRequest(
         state=SimpleNamespace(
             db=FakeDB(),
             authz=FakeAuthz(test_result=True),
+            session=SimpleNamespace(user=SimpleNamespace(id=10)),
+        )
+    )
+
+    with pytest.raises(HTTPException) as excinfo:
+        await server_module.link_lti_group(request, 1, LTISetupLinkRequest(class_id=55))
+
+    assert excinfo.value.status_code == 400
+    assert lti_class.lti_status == LTIStatus.PENDING
+
+
+@pytest.mark.asyncio
+async def test_link_lti_group_allows_institution_admin(monkeypatch):
+    """An institution admin has `admin` (hence `supervisor`) but not `teacher`."""
+    lti_class = _make_lti_class()
+    monkeypatch.setattr(
+        server_module,
+        "_get_lti_class_for_setup",
+        lambda request, lti_class_id: _async_return(lti_class),
+    )
+    monkeypatch.setattr(
+        server_module.LTIClass,
+        "has_link_for_registration_and_course",
+        lambda db, reg_id, course_id: _async_return(False),
+    )
+    request = FakeRequest(
+        state=SimpleNamespace(
+            db=FakeDB(),
+            authz=FakeAuthzByRelation({"supervisor": True, "teacher": False}),
             session=SimpleNamespace(user=SimpleNamespace(id=10)),
         )
     )
