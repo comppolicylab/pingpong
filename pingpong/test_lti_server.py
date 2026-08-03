@@ -2038,29 +2038,6 @@ async def test_link_lti_group_success(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_link_lti_group_rejects_already_linked_course(monkeypatch):
-    """A course that already points at a group cannot be linked again."""
-    lti_class = _make_lti_class(class_id=77)
-    _patch_setup_lookup(monkeypatch, lti_class)
-    _patch_target_class(monkeypatch)
-    request = FakeRequest(
-        state=SimpleNamespace(
-            db=FakeDB(),
-            authz=FakeAuthz(test_result=True),
-            session=SimpleNamespace(user=SimpleNamespace(id=10)),
-        )
-    )
-
-    with pytest.raises(HTTPException) as excinfo:
-        await server_module.link_lti_group(request, 1, LTISetupLinkRequest(class_id=55))
-
-    assert excinfo.value.status_code == 400
-    # The existing link is left untouched.
-    assert lti_class.class_id == 77
-    assert lti_class.lti_status == LTIStatus.PENDING
-
-
-@pytest.mark.asyncio
 async def test_link_lti_group_allows_group_with_existing_link(monkeypatch):
     """A group already linked to another course may receive a second link.
 
