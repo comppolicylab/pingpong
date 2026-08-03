@@ -488,6 +488,112 @@ async def test_translation_uses_one_structured_call_for_eligible_pages(db, monke
     assert captured_calls[0]["model"] == "gpt-4.1-mini"
 
 
+async def test_translation_chunks_large_source_payloads(db, monkeypatch):
+    async with db.async_session() as session:
+        class_ = models.Class(id=1, name="Slide Class", api_key="sk-test")
+        deck = _deck(status=schemas.LectureSlideDeckStatus.READY, slide_count=3)
+        deck.class_ = class_
+        pages = [
+            models.LectureSlidePage(
+                lecture_slide_deck=deck,
+                position=position,
+                content_kind=schemas.LectureSlideContentKind.SLIDE,
+                narration_text=f"Explain slide {position}.",
+            )
+            for position in range(3)
+        ]
+        translation = models.LectureSlideTranslation(
+            lecture_slide_deck=deck,
+            language_code="es",
+            language_name="Spanish",
+            openai_model="gpt-4.1-mini",
+            status=schemas.LectureSlideTranslationStatus.PROCESSING,
+            stage=schemas.LectureSlideTranslationStage.TRANSLATION_TEXT,
+        )
+        run = models.LectureSlideTranslationRun(
+            translation=translation,
+            translation_id_snapshot=0,
+            stage=schemas.LectureSlideTranslationStage.TRANSLATION_TEXT,
+            attempt_number=1,
+            status=schemas.LectureSlideTranslationRunStatus.RUNNING,
+            lease_token="translation-token",
+        )
+        session.add_all([class_, deck, *pages, translation, run])
+        await session.flush()
+        run.translation_id_snapshot = translation.id
+        await session.commit()
+        translation_id = translation.id
+        run_id = run.id
+
+    captured_positions = []
+
+    async def fake_get_openai_client(_session, _class_id):
+        return SimpleNamespace()
+
+    async def fake_parse(_client, **kwargs):
+        payload = kwargs["input_messages"][0]["content"][0]["text"]
+        source_items = json.loads(payload.split("\n", 3)[-1])
+        captured_positions.append([item["slide_position"] for item in source_items])
+        return lecture_slide_processing.TranslatedSlideNarrationSet(
+            slides=[
+                lecture_slide_processing.TranslatedSlideNarration(
+                    slide_position=item["slide_position"],
+                    narration_text=f"Diapositiva {item['slide_position']}.",
+                )
+                for item in source_items
+            ]
+        )
+
+    async def immediate_heartbeat(_run_id, _lease_token, awaitable):
+        return await awaitable
+
+    monkeypatch.setattr(
+        lecture_slide_processing,
+        "LECTURE_SLIDE_TRANSLATION_SOURCE_TOKEN_BUDGET",
+        15,
+    )
+    monkeypatch.setattr(
+        lecture_slide_processing, "_count_text_tokens", lambda _text: 10
+    )
+    monkeypatch.setattr(
+        lecture_slide_processing,
+        "get_openai_client_by_class_id",
+        fake_get_openai_client,
+    )
+    monkeypatch.setattr(lecture_slide_processing, "_parse_responses_output", fake_parse)
+    monkeypatch.setattr(
+        lecture_slide_processing,
+        "_await_with_translation_lease_heartbeat",
+        immediate_heartbeat,
+    )
+
+    result = await lecture_slide_processing._generate_translation_text(
+        run_id,
+        "translation-token",
+        translation_id,
+    )
+
+    assert result is not None
+    assert captured_positions == [[0], [1], [2]]
+    assert [slide.slide_position for slide in result.slides] == [0, 1, 2]
+
+
+async def test_translation_rejects_a_single_oversized_slide(monkeypatch):
+    monkeypatch.setattr(
+        lecture_slide_processing,
+        "LECTURE_SLIDE_TRANSLATION_SOURCE_TOKEN_BUDGET",
+        9,
+    )
+    monkeypatch.setattr(
+        lecture_slide_processing, "_count_text_tokens", lambda _text: 10
+    )
+
+    with pytest.raises(RuntimeError, match="slide 4 narration exceeds"):
+        lecture_slide_processing._translation_source_chunks(
+            [{"slide_position": 4, "narration_text": "Too long"}]
+        )
+
+
 async def test_translation_audio_passes_language_code_and_persists_timings(
     db, monkeypatch
 ):
@@ -638,6 +744,61 @@ async def test_translation_composite_retry_reuses_committed_artifacts(db, monkey
         "translation-token",
         translation_id,
     )
+
+
+async def test_translation_composite_rejects_expired_lease_before_offsets(
+    db, monkeypatch
+):
+    async with db.async_session() as session:
+        class_ = models.Class(id=1, name="Slide Class", api_key="sk-test")
+        deck = _deck(status=schemas.LectureSlideDeckStatus.READY)
+        deck.class_ = class_
+        translation = models.LectureSlideTranslation(
+            lecture_slide_deck=deck,
+            language_code="es",
+            language_name="Spanish",
+            openai_model="gpt-4.1-mini",
+            status=schemas.LectureSlideTranslationStatus.PROCESSING,
+            stage=schemas.LectureSlideTranslationStage.COMPOSITE_ARTIFACTS,
+        )
+        page = models.LectureSlideTranslationPage(
+            translation=translation,
+            position=0,
+            narration_text="",
+        )
+        run = models.LectureSlideTranslationRun(
+            translation=translation,
+            translation_id_snapshot=0,
+            stage=schemas.LectureSlideTranslationStage.COMPOSITE_ARTIFACTS,
+            attempt_number=1,
+            status=schemas.LectureSlideTranslationRunStatus.RUNNING,
+            lease_token="new-owner-token",
+        )
+        session.add_all([class_, deck, translation, page, run])
+        await session.flush()
+        run.translation_id_snapshot = translation.id
+        await session.commit()
+        translation_id = translation.id
+        run_id = run.id
+        page_id = page.id
+
+    async def fail_combine(_stored_objects):
+        pytest.fail("an expired lease must not reach composite generation")
+
+    monkeypatch.setattr(
+        lecture_slide_processing, "_combine_audio_objects", fail_combine
+    )
+
+    assert not await lecture_slide_processing._persist_translation_composite_artifacts(
+        run_id,
+        "expired-token",
+        translation_id,
+    )
+    async with db.async_session() as session:
+        page = await session.get(models.LectureSlideTranslationPage, page_id)
+        assert page is not None
+        assert page.start_offset_ms is None
+        assert page.end_offset_ms is None
 
 
 async def test_queue_lecture_slide_processing_run_rewinds_later_active_run(db):

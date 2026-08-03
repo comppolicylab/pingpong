@@ -45,17 +45,20 @@ async def test_translated_question_adapter_preserves_content_and_retimes_offsets
     )
     question.options = [option]
     question.correct_option = option
+    deck = SimpleNamespace(questions=[question])
+    translation = SimpleNamespace(
+        pages=[
+            SimpleNamespace(
+                position=2,
+                start_offset_ms=7_000,
+                end_offset_ms=10_500,
+            )
+        ],
+        has_complete_timeline_for_deck=lambda candidate: candidate is deck,
+    )
     thread = SimpleNamespace(
-        lecture_slide_deck=SimpleNamespace(questions=[question]),
-        lecture_slide_translation=SimpleNamespace(
-            pages=[
-                SimpleNamespace(
-                    position=2,
-                    start_offset_ms=7_000,
-                    end_offset_ms=10_500,
-                )
-            ]
-        ),
+        lecture_slide_deck=deck,
+        lecture_slide_translation=translation,
     )
 
     translated = lecture_slide_runtime._SLIDE_ADAPTER.get_questions(thread)[0]
@@ -68,6 +71,79 @@ async def test_translated_question_adapter_preserves_content_and_retimes_offsets
     assert translated.options[0].continue_offset_ms == 10_500
     assert translated.options[0].continue_slide_offset_ms == 3_500
     assert translated.correct_option is translated.options[0]
+
+
+async def test_lecture_slide_availability_rejects_cross_deck_translation(db):
+    async with db.async_session() as session:
+        class_ = models.Class(id=1, name="Slide Class", api_key="sk-test")
+        source = models.LectureSlideSourceStoredObject(
+            key="slides.pdf",
+            original_filename="slides.pdf",
+            content_type="application/pdf",
+            content_length=128,
+        )
+        other_source = models.LectureSlideSourceStoredObject(
+            key="other-slides.pdf",
+            original_filename="other-slides.pdf",
+            content_type="application/pdf",
+            content_length=128,
+        )
+        deck = models.LectureSlideDeck(
+            id=1,
+            class_=class_,
+            source_stored_object=source,
+            display_name="Slides",
+            status=schemas.LectureSlideDeckStatus.READY,
+            slide_count=1,
+        )
+        other_deck = models.LectureSlideDeck(
+            id=2,
+            class_=class_,
+            source_stored_object=other_source,
+            display_name="Other slides",
+            status=schemas.LectureSlideDeckStatus.READY,
+            slide_count=1,
+        )
+        caption = models.LectureSlideCaptionStoredObject(
+            key="other-translation.vtt",
+            content_type="text/vtt",
+            content_length=50,
+        )
+        translation = models.LectureSlideTranslation(
+            lecture_slide_deck=other_deck,
+            language_code="es",
+            language_name="Spanish",
+            openai_model="gpt-4.1-mini",
+            status=schemas.LectureSlideTranslationStatus.READY,
+            stage=schemas.LectureSlideTranslationStage.COMPOSITE_ARTIFACTS,
+            caption_stored_object=caption,
+        )
+        thread = models.Thread(
+            id=1,
+            class_=class_,
+            interaction_mode=schemas.InteractionMode.LECTURE_SLIDES,
+            lecture_slide_deck=deck,
+            lecture_slide_translation=translation,
+        )
+        session.add_all(
+            [
+                class_,
+                source,
+                other_source,
+                deck,
+                other_deck,
+                caption,
+                translation,
+                thread,
+            ]
+        )
+        await session.commit()
+
+        _, captions_available = await server_module._lecture_slide_availability(
+            session, thread
+        )
+
+    assert captions_available is False
 
 
 def _slide_deck(

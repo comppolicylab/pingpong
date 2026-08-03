@@ -1832,6 +1832,61 @@ async def _delete_lecture_slide_audio_keys_quietly(keys: Iterable[str]) -> None:
             logger.exception("Failed to clean up lecture slide audio key=%s", key)
 
 
+async def _delete_lecture_slide_caption_stored_objects_if_unused(
+    session: AsyncSession,
+    stored_object_rows: Iterable[tuple[int, str]],
+) -> list[str]:
+    stored_object_keys_by_id = dict(stored_object_rows)
+    if not stored_object_keys_by_id:
+        return []
+
+    stored_object_ids = list(stored_object_keys_by_id)
+    referenced_stored_object_ids = set(
+        (
+            await session.scalars(
+                select(models.LectureSlideDeck.caption_stored_object_id).where(
+                    models.LectureSlideDeck.caption_stored_object_id.in_(
+                        stored_object_ids
+                    )
+                )
+            )
+        ).all()
+    )
+    referenced_stored_object_ids.update(
+        (
+            await session.scalars(
+                select(models.LectureSlideTranslation.caption_stored_object_id).where(
+                    models.LectureSlideTranslation.caption_stored_object_id.in_(
+                        stored_object_ids
+                    )
+                )
+            )
+        ).all()
+    )
+    unused_stored_object_ids = [
+        id_ for id_ in stored_object_ids if id_ not in referenced_stored_object_ids
+    ]
+    if not unused_stored_object_ids:
+        return []
+
+    await session.execute(
+        delete(models.LectureSlideCaptionStoredObject).where(
+            models.LectureSlideCaptionStoredObject.id.in_(unused_stored_object_ids)
+        )
+    )
+    return [stored_object_keys_by_id[id_] for id_ in unused_stored_object_ids]
+
+
+async def _delete_lecture_slide_caption_keys_quietly(keys: Iterable[str]) -> None:
+    if not config.video_store:
+        return
+    for key in keys:
+        try:
+            await config.video_store.store.delete(key)
+        except Exception:
+            logger.exception("Failed to clean up lecture slide caption key=%s", key)
+
+
 async def clone_lecture_slide_deck_snapshot(
     session: AsyncSession,
     deck: models.LectureSlideDeck,
@@ -2015,7 +2070,76 @@ async def delete_lecture_slide_deck_if_unused(
             )
         )
     )
+    translation_audio_rows: list[tuple[int, str]] = []
+    translation_caption_rows: list[tuple[int, str]] = []
     if translation_ids:
+        translation_audio_rows = list(
+            dict(
+                [
+                    *(
+                        await session.execute(
+                            select(
+                                models.LectureSlideTranslationPage.narration_stored_object_id,
+                                models.LectureSlideNarrationStoredObject.key,
+                            )
+                            .join(
+                                models.LectureSlideNarrationStoredObject,
+                                models.LectureSlideNarrationStoredObject.id
+                                == models.LectureSlideTranslationPage.narration_stored_object_id,
+                            )
+                            .where(
+                                models.LectureSlideTranslationPage.translation_id.in_(
+                                    translation_ids
+                                ),
+                                models.LectureSlideTranslationPage.narration_stored_object_id.is_not(
+                                    None
+                                ),
+                            )
+                        )
+                    ).all(),
+                    *(
+                        await session.execute(
+                            select(
+                                models.LectureSlideTranslation.continuous_narration_stored_object_id,
+                                models.LectureSlideNarrationStoredObject.key,
+                            )
+                            .join(
+                                models.LectureSlideNarrationStoredObject,
+                                models.LectureSlideNarrationStoredObject.id
+                                == models.LectureSlideTranslation.continuous_narration_stored_object_id,
+                            )
+                            .where(
+                                models.LectureSlideTranslation.id.in_(translation_ids),
+                                models.LectureSlideTranslation.continuous_narration_stored_object_id.is_not(
+                                    None
+                                ),
+                            )
+                        )
+                    ).all(),
+                ]
+            ).items()
+        )
+        translation_caption_rows = list(
+            (
+                await session.execute(
+                    select(
+                        models.LectureSlideTranslation.caption_stored_object_id,
+                        models.LectureSlideCaptionStoredObject.key,
+                    )
+                    .join(
+                        models.LectureSlideCaptionStoredObject,
+                        models.LectureSlideCaptionStoredObject.id
+                        == models.LectureSlideTranslation.caption_stored_object_id,
+                    )
+                    .where(
+                        models.LectureSlideTranslation.id.in_(translation_ids),
+                        models.LectureSlideTranslation.caption_stored_object_id.is_not(
+                            None
+                        ),
+                    )
+                )
+            ).all()
+        )
         await session.execute(
             update(models.LectureSlideTranslationRun)
             .where(
@@ -2052,6 +2176,20 @@ async def delete_lecture_slide_deck_if_unused(
                 models.LectureSlideTranslation.id.in_(translation_ids)
             )
         )
+        await session.flush()
+        translation_audio_keys = (
+            await _delete_lecture_slide_narration_stored_objects_if_unused(
+                session, translation_audio_rows
+            )
+        )
+        translation_caption_keys = (
+            await _delete_lecture_slide_caption_stored_objects_if_unused(
+                session, translation_caption_rows
+            )
+        )
+    else:
+        translation_audio_keys = []
+        translation_caption_keys = []
     await session.execute(
         update(models.LectureSlideProcessingRun)
         .where(models.LectureSlideProcessingRun.lecture_slide_deck_id == deck_id)
@@ -2153,4 +2291,6 @@ async def delete_lecture_slide_deck_if_unused(
     )
     await session.flush()
     await _delete_lecture_slide_audio_keys_quietly(audio_keys)
+    await _delete_lecture_slide_audio_keys_quietly(translation_audio_keys)
+    await _delete_lecture_slide_caption_keys_quietly(translation_caption_keys)
     return additional_context_file_object_ids

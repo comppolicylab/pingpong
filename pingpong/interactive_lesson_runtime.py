@@ -69,6 +69,9 @@ class InteractiveLessonAdapter(Protocol):
     def get_questions(self, thread: models.Thread) -> Sequence["LessonQuestion"]:
         pass
 
+    def questions_are_derived(self, thread: models.Thread) -> bool:
+        pass
+
     def get_state(self, thread: models.Thread) -> "LessonState | None":
         pass
 
@@ -247,10 +250,7 @@ def _question_markers(
 def _get_current_question(
     thread: models.Thread, state: LessonState, *, adapter: InteractiveLessonAdapter
 ) -> LessonQuestion | None:
-    if (
-        state.current_question is not None
-        and thread.lecture_slide_translation_id is None
-    ):
+    if state.current_question is not None and not adapter.questions_are_derived(thread):
         return state.current_question
     if adapter.get_asset(thread) is None:
         return None
@@ -269,10 +269,10 @@ def _adapted_option(
     option: LessonQuestionOption | None,
 ) -> LessonQuestionOption | None:
     if question is None or option is None:
-        return option
+        return None
     return next(
         (candidate for candidate in question.options if candidate.id == option.id),
-        option,
+        None,
     )
 
 
@@ -357,7 +357,8 @@ def _build_continuation(
                 break
 
     active_option = _adapted_option(current_question, state.active_option)
-    assert active_option is not None
+    if active_option is None:
+        return None
 
     return schemas.InteractiveLessonContinuation(
         option_id=active_option.id,

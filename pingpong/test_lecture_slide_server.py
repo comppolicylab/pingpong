@@ -29,6 +29,14 @@ class FakeLectureSlideStore:
         self.deleted_keys.append(key)
 
 
+class FakeLectureSlideAudioStore:
+    def __init__(self):
+        self.deleted_keys: list[str] = []
+
+    async def delete_file(self, key: str):
+        self.deleted_keys.append(key)
+
+
 class FakeOpenAIFiles:
     def __init__(self):
         self.created_files = []
@@ -143,6 +151,14 @@ async def test_translated_thread_requires_ready_variant_and_saves_language(
             use_image_descriptions=False,
             hide_prompt=False,
         )
+        page = models.LectureSlidePage(
+            lecture_slide_deck=deck,
+            position=0,
+            content_kind=schemas.LectureSlideContentKind.SLIDE,
+            narration_text="Source narration.",
+            start_offset_ms=0,
+            end_offset_ms=1_000,
+        )
         translation = models.LectureSlideTranslation(
             lecture_slide_deck=deck,
             language_code="es",
@@ -151,9 +167,27 @@ async def test_translated_thread_requires_ready_variant_and_saves_language(
             status=schemas.LectureSlideTranslationStatus.PROCESSING,
             stage=schemas.LectureSlideTranslationStage.NARRATION_AUDIO,
         )
-        session.add_all([class_, source, deck, assistant, translation])
+        session.add_all([class_, source, deck, assistant, page, translation])
         await session.commit()
         translation_id = translation.id
+
+    languages = api.get(
+        "/api/v1/class/1/assistant/1/lecture-slides/languages",
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert languages.status_code == 200
+    assert languages.json()["can_prepare"] is False
+    unsupported_status = api.get(
+        "/api/v1/class/1/assistant/1/lecture-slides/translations/not-a-language",
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert unsupported_status.status_code == 422
+    forbidden_prepare = api.post(
+        "/api/v1/class/1/assistant/1/lecture-slides/translations",
+        json={"language_code": "es"},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert forbidden_prepare.status_code == 403
 
     unavailable = api.post(
         "/api/v1/class/1/thread/lecture",
@@ -182,6 +216,15 @@ async def test_translated_thread_requires_ready_variant_and_saves_language(
         translation.continuous_narration_stored_object_id = audio.id
         translation.caption_stored_object_id = caption.id
         translation.total_duration_ms = 1_200
+        session.add(
+            models.LectureSlideTranslationPage(
+                translation=translation,
+                position=0,
+                narration_text="Narración.",
+                start_offset_ms=0,
+                end_offset_ms=1_200,
+            )
+        )
         await session.commit()
 
     ready = api.post(
@@ -198,6 +241,66 @@ async def test_translated_thread_requires_ready_variant_and_saves_language(
         thread = await session.get(models.Thread, thread_id)
         assert thread is not None
         assert thread.lecture_slide_translation_id == translation_id
+
+
+@pytest.mark.asyncio
+@with_user(123)
+@with_institution(11, "Test Institution")
+@with_authz(
+    grants=[
+        ("user:123", "can_create_thread", "class:1"),
+        ("user:123", "can_edit", "assistant:1"),
+    ]
+)
+async def test_lecture_slide_editor_can_prepare_translation(
+    api, db, institution, valid_user_token
+):
+    async with db.async_session() as session:
+        class_ = models.Class(
+            id=1,
+            name="Test Class",
+            institution_id=institution.id,
+            api_key="test-key",
+        )
+        source = models.LectureSlideSourceStoredObject(
+            key="slides.pdf",
+            original_filename="slides.pdf",
+            content_type="application/pdf",
+            content_length=128,
+        )
+        deck = models.LectureSlideDeck(
+            id=1,
+            class_=class_,
+            source_stored_object=source,
+            display_name="Slides",
+            status=schemas.LectureSlideDeckStatus.READY,
+            slide_count=1,
+        )
+        assistant = models.Assistant(
+            id=1,
+            name="Slides",
+            class_=class_,
+            interaction_mode=schemas.InteractionMode.LECTURE_SLIDES,
+            lecture_slide_deck=deck,
+            model="gpt-4o-mini",
+        )
+        session.add_all([class_, source, deck, assistant])
+        await session.commit()
+
+    languages = api.get(
+        "/api/v1/class/1/assistant/1/lecture-slides/languages",
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert languages.status_code == 200
+    assert languages.json()["can_prepare"] is True
+
+    prepared = api.post(
+        "/api/v1/class/1/assistant/1/lecture-slides/translations",
+        json={"language_code": "es"},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert prepared.status_code == 200
+    assert prepared.json()["status"] == "queued"
 
 
 @pytest.mark.parametrize(
@@ -744,8 +847,20 @@ async def test_apply_additional_context_files_preserves_existing_files_for_other
 @pytest.mark.asyncio
 @with_institution(11, "Test Institution")
 async def test_delete_lecture_slide_deck_if_unused_removes_context_rows_explicitly(
-    db, institution
+    db, institution, config, monkeypatch
 ):
+    audio_store = FakeLectureSlideAudioStore()
+    caption_store = FakeLectureSlideStore()
+    monkeypatch.setattr(
+        config,
+        "lecture_video_audio_store",
+        SimpleNamespace(store=audio_store),
+    )
+    monkeypatch.setattr(
+        config,
+        "video_store",
+        SimpleNamespace(store=caption_store),
+    )
     async with db.async_session() as session:
         user = models.User(id=123, email="owner@example.com")
         class_ = models.Class(
@@ -801,8 +916,38 @@ async def test_delete_lecture_slide_deck_if_unused_removes_context_rows_explicit
             status=schemas.LectureSlideTranslationStatus.QUEUED,
             stage=schemas.LectureSlideTranslationStage.TRANSLATION_TEXT,
         )
-        session.add(translation)
+        page_audio = models.LectureSlideNarrationStoredObject(
+            key="translated-page.webm",
+            content_type="audio/webm",
+            content_length=100,
+            duration_ms=500,
+        )
+        continuous_audio = models.LectureSlideNarrationStoredObject(
+            key="translated-continuous.webm",
+            content_type="audio/webm",
+            content_length=100,
+            duration_ms=500,
+        )
+        caption = models.LectureSlideCaptionStoredObject(
+            key="translated.vtt",
+            content_type="text/vtt",
+            content_length=50,
+        )
+        translation.continuous_narration_stored_object = continuous_audio
+        translation.caption_stored_object = caption
+        translation_page = models.LectureSlideTranslationPage(
+            translation=translation,
+            position=0,
+            narration_text="Narración",
+            narration_stored_object=page_audio,
+        )
+        session.add_all(
+            [translation, translation_page, page_audio, continuous_audio, caption]
+        )
         await session.flush()
+        page_audio_id = page_audio.id
+        continuous_audio_id = continuous_audio.id
+        caption_id = caption.id
         translation_run = models.LectureSlideTranslationRun(
             translation=translation,
             translation_id_snapshot=translation.id,
@@ -828,6 +973,15 @@ async def test_delete_lecture_slide_deck_if_unused_removes_context_rows_explicit
         remaining_translation_run = await session.get(
             models.LectureSlideTranslationRun, translation_run_id
         )
+        remaining_page_audio = await session.get(
+            models.LectureSlideNarrationStoredObject, page_audio_id
+        )
+        remaining_continuous_audio = await session.get(
+            models.LectureSlideNarrationStoredObject, continuous_audio_id
+        )
+        remaining_caption = await session.get(
+            models.LectureSlideCaptionStoredObject, caption_id
+        )
 
     assert file_object_ids == [file.id]
     assert remaining_context is None
@@ -837,6 +991,14 @@ async def test_delete_lecture_slide_deck_if_unused_removes_context_rows_explicit
         == schemas.LectureSlideTranslationRunStatus.CANCELLED
     )
     assert remaining_translation_run.translation_id is None
+    assert remaining_page_audio is None
+    assert remaining_continuous_audio is None
+    assert remaining_caption is None
+    assert set(audio_store.deleted_keys) == {
+        "translated-page.webm",
+        "translated-continuous.webm",
+    }
+    assert caption_store.deleted_keys == ["translated.vtt"]
 
 
 @pytest.mark.asyncio

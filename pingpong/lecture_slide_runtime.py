@@ -42,6 +42,8 @@ class _TranslatedQuestionOption:
     continue_slide_offset_ms: int
 
     def __getattr__(self, name: str) -> Any:
+        if name == "source":
+            raise AttributeError(name)
         return getattr(self.source, name)
 
 
@@ -54,7 +56,23 @@ class _TranslatedQuestion:
     correct_option: _TranslatedQuestionOption | None
 
     def __getattr__(self, name: str) -> Any:
+        if name == "source":
+            raise AttributeError(name)
         return getattr(self.source, name)
+
+
+def usable_lecture_slide_translation(
+    thread: models.Thread,
+) -> models.LectureSlideTranslation | None:
+    deck = thread.lecture_slide_deck
+    translation = thread.lecture_slide_translation
+    if (
+        deck is None
+        or translation is None
+        or not translation.has_complete_timeline_for_deck(deck)
+    ):
+        return None
+    return translation
 
 
 class LectureSlideAdapter:
@@ -77,20 +95,36 @@ class LectureSlideAdapter:
     ) -> list[interactive_lesson_runtime.LessonQuestion]:
         if thread.lecture_slide_deck is None:
             return []
-        translation = thread.lecture_slide_translation
+        translation = usable_lecture_slide_translation(thread)
         if translation is not None:
             translated_pages = {page.position: page for page in translation.pages}
             translated_questions: list[_TranslatedQuestion] = []
             for question in thread.lecture_slide_deck.questions:
-                page = translated_pages[question.slide_position]
-                assert page.start_offset_ms is not None
-                assert page.end_offset_ms is not None
+                if (
+                    question.slide_position is None
+                    or (page := translated_pages.get(question.slide_position)) is None
+                    or page.start_offset_ms is None
+                    or page.end_offset_ms is None
+                ):
+                    continue
+                # Translated narration has different word timings, so questions
+                # intentionally snap to the translated slide boundary.
                 slide_offset_ms = page.end_offset_ms - page.start_offset_ms
-                options = []
+                options: list[_TranslatedQuestionOption] = []
                 for option in question.options:
-                    continue_page = translated_pages[option.continue_slide_position]
-                    assert continue_page.start_offset_ms is not None
-                    assert continue_page.end_offset_ms is not None
+                    if (
+                        option.continue_slide_position is None
+                        or (
+                            continue_page := translated_pages.get(
+                                option.continue_slide_position
+                            )
+                        )
+                        is None
+                        or continue_page.start_offset_ms is None
+                        or continue_page.end_offset_ms is None
+                    ):
+                        options = []
+                        break
                     options.append(
                         _TranslatedQuestionOption(
                             source=option,
@@ -101,6 +135,8 @@ class LectureSlideAdapter:
                             ),
                         )
                     )
+                if len(options) != len(question.options):
+                    continue
                 correct_option = next(
                     (
                         option
@@ -132,6 +168,9 @@ class LectureSlideAdapter:
                 and question.stop_offset_ms is not None
             ],
         )
+
+    def questions_are_derived(self, thread: models.Thread) -> bool:
+        return usable_lecture_slide_translation(thread) is not None
 
     def get_state(
         self, thread: models.Thread

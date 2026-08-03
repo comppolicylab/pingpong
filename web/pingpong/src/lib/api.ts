@@ -3845,6 +3845,7 @@ export type LectureSlideLanguage = {
 
 export type LectureSlideLanguagesResponse = {
 	languages: LectureSlideLanguage[];
+	can_prepare: boolean;
 };
 
 export type LectureSlideTranslationStatus =

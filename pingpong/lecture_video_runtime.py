@@ -88,6 +88,9 @@ class LectureVideoAdapter:
             thread.lecture_video.questions,
         )
 
+    def questions_are_derived(self, thread: models.Thread) -> bool:
+        return False
+
     def get_state(
         self, thread: models.Thread
     ) -> interactive_lesson_runtime.LessonState | None:

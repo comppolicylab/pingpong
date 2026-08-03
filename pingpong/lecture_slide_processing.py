@@ -203,6 +203,7 @@ Rules:
 - Preserve bracketed ElevenLabs delivery or audio tags where they appear.
 - Do not summarize, explain, add facts, add labels, or translate into any language other than the target language.
 - Return exactly one translated item for every supplied slide_position."""
+LECTURE_SLIDE_TRANSLATION_SOURCE_TOKEN_BUDGET = 20_000
 
 RUN_LEASE_DURATION = timedelta(minutes=10)
 RUN_LEASE_HEARTBEAT_INTERVAL = min(timedelta(minutes=1), RUN_LEASE_DURATION / 2)
@@ -1141,8 +1142,14 @@ async def queue_lecture_slide_translation(
         total_parts=total_parts,
         status=schemas.LectureSlideTranslationRunStatus.QUEUED,
     )
-    session.add(run)
-    await session.flush()
+    try:
+        async with session.begin_nested():
+            session.add(run)
+            await session.flush()
+    except IntegrityError:
+        # Another request queued the same translation while this transaction was
+        # preparing its attempt number. The active-run index is the arbiter.
+        return
 
 
 def lecture_slide_translation_status_response(
@@ -1604,44 +1611,75 @@ async def _generate_translation_text(
 
     async with config.db.driver.async_session() as session:
         openai_client = await get_openai_client_by_class_id(session, class_id)
-    result = await _await_with_translation_lease_heartbeat(
-        run_id,
-        lease_token,
-        _parse_responses_output(
-            openai_client,
-            model=openai_model,
-            instructions=LECTURE_SLIDE_TRANSLATION_PROMPT,
-            response_model=TranslatedSlideNarrationSet,
-            input_messages=[
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "input_text",
-                            "text": (
-                                f"Target language: {target_language} "
-                                f"({target_language_code}).\n\n"
-                                "Translate this JSON array of narration parts:\n"
-                                f"{json.dumps(source_items, ensure_ascii=False)}"
-                            ),
-                        }
-                    ],
-                }
-            ],
-        ),
-    )
-    if result is None:
-        return None
-    expected_positions = {int(item["slide_position"]) for item in source_items}
-    actual_positions = [slide.slide_position for slide in result.slides]
-    if (
-        len(actual_positions) != len(set(actual_positions))
-        or set(actual_positions) != expected_positions
-    ):
-        raise RuntimeError(
-            "OpenAI returned an incomplete lecture narration translation."
+    translated_slides: list[TranslatedSlideNarration] = []
+    for source_chunk in _translation_source_chunks(source_items):
+        result = await _await_with_translation_lease_heartbeat(
+            run_id,
+            lease_token,
+            _parse_responses_output(
+                openai_client,
+                model=openai_model,
+                instructions=LECTURE_SLIDE_TRANSLATION_PROMPT,
+                response_model=TranslatedSlideNarrationSet,
+                input_messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "input_text",
+                                "text": (
+                                    f"Target language: {target_language} "
+                                    f"({target_language_code}).\n\n"
+                                    "Translate this JSON array of narration parts:\n"
+                                    f"{json.dumps(source_chunk, ensure_ascii=False)}"
+                                ),
+                            }
+                        ],
+                    }
+                ],
+            ),
         )
-    return result
+        if result is None:
+            return None
+        expected_positions = {int(item["slide_position"]) for item in source_chunk}
+        actual_positions = [slide.slide_position for slide in result.slides]
+        if (
+            len(actual_positions) != len(set(actual_positions))
+            or set(actual_positions) != expected_positions
+        ):
+            raise RuntimeError(
+                "OpenAI returned an incomplete lecture narration translation."
+            )
+        translated_slides.extend(result.slides)
+    return TranslatedSlideNarrationSet(slides=translated_slides)
+
+
+def _translation_source_chunks(
+    source_items: list[dict[str, int | str]],
+) -> list[list[dict[str, int | str]]]:
+    chunks: list[list[dict[str, int | str]]] = []
+    current_chunk: list[dict[str, int | str]] = []
+    current_tokens = 0
+    for item in source_items:
+        item_tokens = _count_text_tokens(json.dumps(item, ensure_ascii=False))
+        if item_tokens > LECTURE_SLIDE_TRANSLATION_SOURCE_TOKEN_BUDGET:
+            raise RuntimeError(
+                f"Lecture slide {item['slide_position']} narration exceeds the "
+                "translation token budget."
+            )
+        if (
+            current_chunk
+            and current_tokens + item_tokens
+            > LECTURE_SLIDE_TRANSLATION_SOURCE_TOKEN_BUDGET
+        ):
+            chunks.append(current_chunk)
+            current_chunk = []
+            current_tokens = 0
+        current_chunk.append(item)
+        current_tokens += item_tokens
+    if current_chunk:
+        chunks.append(current_chunk)
+    return chunks
 
 
 async def _persist_translation_page_rows(
@@ -1828,6 +1866,13 @@ async def _persist_translation_composite_artifacts(
     translation_id: int,
 ) -> bool:
     async with config.db.driver.async_session() as session:
+        run = await models.LectureSlideTranslationRun.get_by_id(session, run_id)
+        if (
+            run is None
+            or run.status != schemas.LectureSlideTranslationRunStatus.RUNNING
+            or run.lease_token != lease_token
+        ):
+            return False
         translation = await session.scalar(
             select(models.LectureSlideTranslation)
             .where(models.LectureSlideTranslation.id == translation_id)
@@ -1950,10 +1995,24 @@ async def _mark_translation_run_completed(
         ):
             return
         if run.translation_id is not None:
-            translation = await session.get(
-                models.LectureSlideTranslation, run.translation_id
+            translation = await session.scalar(
+                select(models.LectureSlideTranslation)
+                .where(models.LectureSlideTranslation.id == run.translation_id)
+                .options(
+                    selectinload(
+                        models.LectureSlideTranslation.lecture_slide_deck
+                    ).selectinload(models.LectureSlideDeck.pages),
+                    selectinload(models.LectureSlideTranslation.pages),
+                )
             )
             if translation is not None:
+                if not translation.has_complete_timeline_for_deck(
+                    translation.lecture_slide_deck,
+                    require_ready=False,
+                ):
+                    raise RuntimeError(
+                        "Lecture slide translation does not have a complete timeline."
+                    )
                 translation.status = schemas.LectureSlideTranslationStatus.READY
                 translation.error_message = None
                 session.add(translation)
@@ -2265,14 +2324,12 @@ async def _await_with_translation_lease_heartbeat(
                 return await task
             if not await _ensure_translation_run_can_continue(run_id, lease_token):
                 task.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await task
+                await asyncio.gather(task, return_exceptions=True)
                 return None
     except Exception:
         if not task.done():
             task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await task
+            await asyncio.gather(task, return_exceptions=True)
         raise
 
 

@@ -1421,6 +1421,7 @@ class LectureSlideLanguage(BaseModel):
 
 class LectureSlideLanguagesResponse(BaseModel):
     languages: list[LectureSlideLanguage]
+    can_prepare: bool = False
 
 
 class PrepareLectureSlideTranslationRequest(BaseModel):

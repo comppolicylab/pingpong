@@ -566,11 +566,16 @@ async def _lecture_slide_availability(
         select(
             models.LectureSlideDeck.voice_id,
             models.LectureSlideDeck.caption_stored_object_id,
+            models.LectureSlideTranslation.id,
             models.LectureSlideTranslation.caption_stored_object_id,
         )
         .outerjoin(
             models.LectureSlideTranslation,
-            models.LectureSlideTranslation.id == thread.lecture_slide_translation_id,
+            (models.LectureSlideTranslation.id == thread.lecture_slide_translation_id)
+            & (
+                models.LectureSlideTranslation.lecture_slide_deck_id
+                == thread.lecture_slide_deck_id
+            ),
         )
         .where(models.LectureSlideDeck.id == thread.lecture_slide_deck_id)
     )
@@ -578,12 +583,15 @@ async def _lecture_slide_availability(
     if lecture_slide_row is None:
         return False, False
 
-    voice_id, base_caption_stored_object_id, translated_caption_stored_object_id = (
-        lecture_slide_row
-    )
+    (
+        voice_id,
+        base_caption_stored_object_id,
+        matched_translation_id,
+        translated_caption_stored_object_id,
+    ) = lecture_slide_row
     caption_stored_object_id = (
         translated_caption_stored_object_id
-        if thread.lecture_slide_translation_id is not None
+        if matched_translation_id is not None
         else base_caption_stored_object_id
     )
     captions_available = caption_stored_object_id is not None
@@ -609,7 +617,7 @@ def _lecture_slide_deck_view(
     if deck is None:
         return None
 
-    translation = thread.lecture_slide_translation
+    translation = lecture_slide_runtime.usable_lecture_slide_translation(thread)
     translated_pages = (
         {page.position: page for page in translation.pages}
         if translation is not None
@@ -5648,8 +5656,13 @@ async def get_thread_lecture_slide_continuous_narration(
     )
     deck = cast(models.LectureSlideDeck, thread.lecture_slide_deck)
     narration = (
-        thread.lecture_slide_translation.continuous_narration_stored_object
-        if thread.lecture_slide_translation is not None
+        translation.continuous_narration_stored_object
+        if (
+            translation := lecture_slide_runtime.usable_lecture_slide_translation(
+                thread
+            )
+        )
+        is not None
         else deck.continuous_narration_stored_object
     )
     if narration is None:
@@ -5703,8 +5716,13 @@ async def get_thread_lecture_slide_captions(
     )
     deck = cast(models.LectureSlideDeck, thread.lecture_slide_deck)
     caption = (
-        thread.lecture_slide_translation.caption_stored_object
-        if thread.lecture_slide_translation is not None
+        translation.caption_stored_object
+        if (
+            translation := lecture_slide_runtime.usable_lecture_slide_translation(
+                thread
+            )
+        )
+        is not None
         else deck.caption_stored_object
     )
     if caption is None:
@@ -8252,7 +8270,11 @@ async def create_lecture_thread(
             lecture_language_code = "original"
             lecture_language_name = "Original"
         else:
-            assert lecture_slide_deck_id is not None
+            if lecture_slide_deck_id is None or assistant.lecture_slide_deck is None:
+                raise HTTPException(
+                    status_code=409,
+                    detail="This assistant's lecture slides are unavailable.",
+                )
             translation = await models.LectureSlideTranslation.get_by_deck_and_language(
                 request.state["db"],
                 lecture_slide_deck_id,
@@ -8263,6 +8285,9 @@ async def create_lecture_thread(
                 or translation.status != schemas.LectureSlideTranslationStatus.READY
                 or translation.continuous_narration_stored_object_id is None
                 or translation.caption_stored_object_id is None
+                or not translation.has_complete_timeline_for_deck(
+                    assistant.lecture_slide_deck
+                )
             ):
                 raise HTTPException(
                     status_code=409,
@@ -11161,8 +11186,12 @@ async def get_assistant_lecture_slide_config(
     )
 
 
-def _lecture_slide_languages() -> schemas.LectureSlideLanguagesResponse:
+def _lecture_slide_languages(
+    *,
+    can_prepare: bool,
+) -> schemas.LectureSlideLanguagesResponse:
     return schemas.LectureSlideLanguagesResponse(
+        can_prepare=can_prepare,
         languages=[
             schemas.LectureSlideLanguage(code="original", name="Original"),
             *[
@@ -11189,7 +11218,11 @@ async def get_lecture_slide_translation_languages(
     await lecture_slide_service.get_lecture_slide_assistant_for_class(
         request.state["db"], int(assistant_id), int(class_id)
     )
-    return _lecture_slide_languages()
+    can_prepare = await (
+        Authz("can_edit", f"assistant:{assistant_id}")
+        | Authz("supervisor", f"class:{class_id}")
+    ).test_with_cache(request)
+    return _lecture_slide_languages(can_prepare=can_prepare)
 
 
 @v1.get(
@@ -11214,6 +11247,13 @@ async def get_lecture_slide_translation_status(
             language_code="original",
             status="ready",
         )
+    if not any(
+        language.code == normalized_code for language in ELEVENLABS_V3_LANGUAGES
+    ):
+        raise HTTPException(
+            422,
+            "The selected language is not supported by the configured ElevenLabs model.",
+        )
     translation = await models.LectureSlideTranslation.get_by_deck_and_language(
         request.state["db"],
         assistant.lecture_slide_deck_id,
@@ -11228,7 +11268,10 @@ async def get_lecture_slide_translation_status(
 @v1.post(
     "/class/{class_id}/assistant/{assistant_id}/lecture-slides/translations",
     dependencies=[
-        Depends(Authz("can_create_thread", "class:{class_id}")),
+        Depends(
+            Authz("can_edit", "assistant:{assistant_id}")
+            | Authz("supervisor", "class:{class_id}")
+        ),
         Depends(ClassNotArchived()),
     ],
     response_model=schemas.LectureSlideTranslationStatusResponse,

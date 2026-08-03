@@ -392,11 +392,13 @@ async def synthesize_elevenlabs_speech_with_timings(
             if timeout_seconds is not None
             else None
         )
+        language_options = (
+            {"language_code": language_code} if language_code is not None else {}
+        )
         response = await client.text_to_speech.convert_with_timestamps(
             voice_id=voice_id,
             text=text,
             model_id=ELEVENLABS_TTS_MODEL,
-            language_code=language_code,
             output_format=ELEVENLABS_VOICE_VALIDATION_OUTPUT_FORMAT,
             voice_settings=VoiceSettings(
                 **(
@@ -406,6 +408,7 @@ async def synthesize_elevenlabs_speech_with_timings(
                 )
             ),
             request_options=request_options,
+            **language_options,
         )
     except Exception as exc:
         _raise_elevenlabs_synthesis_error(

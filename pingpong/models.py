@@ -3777,6 +3777,42 @@ class LectureSlideTranslation(Base):
         ),
     )
 
+    def has_complete_timeline_for_deck(
+        self,
+        deck: "LectureSlideDeck",
+        *,
+        require_ready: bool = True,
+    ) -> bool:
+        if (
+            self.lecture_slide_deck_id != deck.id
+            or (
+                require_ready
+                and self.status != schemas.LectureSlideTranslationStatus.READY
+            )
+            or self.continuous_narration_stored_object_id is None
+            or self.caption_stored_object_id is None
+            or self.total_duration_ms is None
+        ):
+            return False
+
+        deck_positions = [
+            page.position for page in sorted(deck.pages, key=lambda page: page.position)
+        ]
+        translated_pages = sorted(self.pages, key=lambda page: page.position)
+        if [page.position for page in translated_pages] != deck_positions:
+            return False
+
+        expected_start_ms = 0
+        for page in translated_pages:
+            if (
+                page.start_offset_ms != expected_start_ms
+                or page.end_offset_ms is None
+                or page.end_offset_ms < expected_start_ms
+            ):
+                return False
+            expected_start_ms = page.end_offset_ms
+        return self.total_duration_ms == expected_start_ms
+
     @classmethod
     async def get_by_deck_and_language(
         cls,

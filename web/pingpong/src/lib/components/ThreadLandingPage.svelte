@@ -107,6 +107,7 @@
 			lectureSlideLanguages.some((language) => language.code === requestedLanguage)
 		) {
 			selectedLectureLanguageCode = requestedLanguage;
+			translationPollAttempts = 0;
 			const generation = ++translationRequestGeneration;
 			await refreshLectureTranslationStatus(assistant.id, requestedLanguage, generation);
 		}
@@ -186,12 +187,15 @@
 	let lessonThumbnailAssistantId: number | undefined;
 	let translationAssistantId: number | undefined;
 	let lectureSlideLanguages: api.LectureSlideLanguage[] = [{ code: 'original', name: 'Original' }];
+	let canPrepareLectureTranslation = false;
 	let selectedLectureLanguageCode = 'original';
 	let lectureTranslationStatus: api.LectureSlideTranslationStatusResponse | null = null;
 	let lectureLanguageError: string | null = null;
 	let preparingLectureTranslation = false;
 	let translationPollTimer: ReturnType<typeof setTimeout> | null = null;
 	let translationRequestGeneration = 0;
+	let translationPollAttempts = 0;
+	const TRANSLATION_POLL_MAX_ATTEMPTS = 60;
 	$: selectedLectureLanguage =
 		lectureSlideLanguages.find((language) => language.code === selectedLectureLanguageCode) ??
 		lectureSlideLanguages[0];
@@ -203,6 +207,24 @@
 			clearTimeout(translationPollTimer);
 			translationPollTimer = null;
 		}
+	};
+
+	const scheduleTranslationPoll = (
+		assistantId: number,
+		languageCode: string,
+		generation: number,
+		baseDelayMs: number
+	) => {
+		translationPollAttempts += 1;
+		if (translationPollAttempts >= TRANSLATION_POLL_MAX_ATTEMPTS) {
+			lectureLanguageError = 'Translation is taking longer than expected. Reload to retry.';
+			return;
+		}
+		const delayMs = Math.min(baseDelayMs * 2 ** Math.floor(translationPollAttempts / 10), 30000);
+		translationPollTimer = setTimeout(
+			() => void refreshLectureTranslationStatus(assistantId, languageCode, generation),
+			delayMs
+		);
 	};
 
 	const refreshLectureTranslationStatus = async (
@@ -229,10 +251,7 @@
 			lectureTranslationStatus = status;
 			lectureLanguageError = null;
 			if (status.status === 'queued' || status.status === 'processing') {
-				translationPollTimer = setTimeout(
-					() => void refreshLectureTranslationStatus(assistantId, languageCode, generation),
-					2000
-				);
+				scheduleTranslationPoll(assistantId, languageCode, generation, 2000);
 			}
 		} catch (error) {
 			if (
@@ -241,10 +260,12 @@
 				selectedLectureLanguageCode === languageCode
 			) {
 				lectureLanguageError = errorMessage(error, 'Unable to check translation progress.');
-				translationPollTimer = setTimeout(
-					() => void refreshLectureTranslationStatus(assistantId, languageCode, generation),
-					5000
-				);
+				const status = api.isErrorResponse(error) ? error.$status : null;
+				const isPermanentClientError =
+					status !== null && status >= 400 && status < 500 && status !== 408 && status !== 429;
+				if (!isPermanentClientError) {
+					scheduleTranslationPoll(assistantId, languageCode, generation, 5000);
+				}
 			}
 		}
 	};
@@ -252,7 +273,9 @@
 	const loadLectureSlideLanguages = async (assistantId: number) => {
 		const generation = ++translationRequestGeneration;
 		stopTranslationPolling();
+		translationPollAttempts = 0;
 		lectureSlideLanguages = [{ code: 'original', name: 'Original' }];
+		canPrepareLectureTranslation = false;
 		lectureTranslationStatus = null;
 		lectureLanguageError = null;
 		try {
@@ -261,6 +284,7 @@
 			);
 			if (generation !== translationRequestGeneration || assistant.id !== assistantId) return;
 			lectureSlideLanguages = result.languages;
+			canPrepareLectureTranslation = result.can_prepare;
 			const requestedLanguage = $page.url.searchParams.get('language') || 'original';
 			selectedLectureLanguageCode = result.languages.some(
 				(language) => language.code === requestedLanguage
@@ -272,6 +296,10 @@
 			if (generation === translationRequestGeneration) {
 				lectureLanguageError = errorMessage(error, 'Unable to load translation languages.');
 				selectedLectureLanguageCode = 'original';
+				const url = new URL($page.url);
+				url.searchParams.delete('language');
+				// eslint-disable-next-line svelte/no-navigation-without-resolve
+				replaceState(`${url.pathname}${url.search}`, $page.state);
 			}
 		}
 	};
@@ -280,6 +308,8 @@
 		const languageCode = (event.currentTarget as HTMLSelectElement).value;
 		selectedLectureLanguageCode = languageCode;
 		lectureTranslationStatus = null;
+		lectureLanguageError = null;
+		translationPollAttempts = 0;
 		const url = new URL($page.url);
 		if (languageCode === 'original') url.searchParams.delete('language');
 		else url.searchParams.set('language', languageCode);
@@ -291,12 +321,18 @@
 	};
 
 	const prepareLectureTranslation = async () => {
-		if (groupArchived || selectedLectureLanguageCode === 'original' || preparingLectureTranslation)
+		if (
+			groupArchived ||
+			!canPrepareLectureTranslation ||
+			selectedLectureLanguageCode === 'original' ||
+			preparingLectureTranslation
+		)
 			return;
 		preparingLectureTranslation = true;
 		const assistantId = assistant.id;
 		const languageCode = selectedLectureLanguageCode;
 		const generation = ++translationRequestGeneration;
+		translationPollAttempts = 0;
 		try {
 			const status = api.explodeResponse(
 				await api.prepareLectureSlideTranslation(fetch, data.class.id, assistantId, languageCode)
@@ -1244,23 +1280,34 @@
 						</div>
 					{/if}
 					<div class="flex flex-row p-1.5">
-						{#if assistant.interaction_mode === 'lecture_slides' && !lectureTranslationReady}
+						{#if assistant.interaction_mode === 'lecture_slides' && selectedLectureLanguageCode !== 'original' && lectureTranslationStatus === null && lectureLanguageError === null}
+							<Button
+								class="flex flex-row gap-1.5 rounded-lg bg-blue-dark-40 px-4 py-1.5 text-xs text-white"
+								type="button"
+								disabled
+							>
+								<span class="text-center text-sm font-normal">Checking…</span>
+							</Button>
+						{:else if assistant.interaction_mode === 'lecture_slides' && !lectureTranslationReady}
 							<Button
 								class="flex flex-row gap-1.5 rounded-lg bg-blue-dark-40 px-4 py-1.5 text-xs text-white transition-all hover:bg-blue-dark-50 hover:text-blue-light-50"
 								onclick={prepareLectureTranslation}
 								type="button"
 								disabled={groupArchived ||
+									!canPrepareLectureTranslation ||
 									preparingLectureTranslation ||
 									lectureTranslationStatus?.status === 'queued' ||
 									lectureTranslationStatus?.status === 'processing'}
 							>
 								<CirclePlusSolid size="sm" />
 								<span class="text-center text-sm font-normal">
-									{lectureTranslationStatus?.status === 'failed'
-										? 'Retry'
-										: preparingLectureTranslation
-											? 'Preparing…'
-											: 'Prepare lesson'}
+									{!canPrepareLectureTranslation
+										? 'Ask a moderator to prepare'
+										: lectureTranslationStatus?.status === 'failed'
+											? 'Retry'
+											: preparingLectureTranslation
+												? 'Preparing…'
+												: 'Prepare lesson'}
 								</span>
 							</Button>
 						{:else}
