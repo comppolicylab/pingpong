@@ -6535,20 +6535,6 @@ class LTIClass(Base):
         return await session.scalar(stmt)
 
     @classmethod
-    async def has_link_for_registration_and_class(
-        cls, session: AsyncSession, registration_id: int, class_id: int
-    ) -> bool:
-        """Check if a class already has an LTI link for a specific registration."""
-        stmt = select(LTIClass).where(
-            and_(
-                LTIClass.registration_id == registration_id,
-                LTIClass.class_id == class_id,
-            )
-        )
-        result = await session.scalar(stmt)
-        return result is not None
-
-    @classmethod
     async def get_by_class_id(
         cls, session: AsyncSession, class_id: int
     ) -> List["LTIClass"]:
