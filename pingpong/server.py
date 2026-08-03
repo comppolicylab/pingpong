@@ -83,6 +83,7 @@ from pingpong.class_credentials import (
 )
 from pingpong.elevenlabs import (
     ELEVENLABS_TTS_VOICE_SETTINGS,
+    ELEVENLABS_V3_LANGUAGES,
     ELEVENLABS_VOICE_SAMPLE_TEXT_HEADER,
     synthesize_elevenlabs_voice_sample,
 )
@@ -565,13 +566,34 @@ async def _lecture_slide_availability(
         select(
             models.LectureSlideDeck.voice_id,
             models.LectureSlideDeck.caption_stored_object_id,
-        ).where(models.LectureSlideDeck.id == thread.lecture_slide_deck_id)
+            models.LectureSlideTranslation.id,
+            models.LectureSlideTranslation.caption_stored_object_id,
+        )
+        .outerjoin(
+            models.LectureSlideTranslation,
+            (models.LectureSlideTranslation.id == thread.lecture_slide_translation_id)
+            & (
+                models.LectureSlideTranslation.lecture_slide_deck_id
+                == thread.lecture_slide_deck_id
+            ),
+        )
+        .where(models.LectureSlideDeck.id == thread.lecture_slide_deck_id)
     )
     lecture_slide_row = lecture_slide_availability.one_or_none()
     if lecture_slide_row is None:
         return False, False
 
-    voice_id, caption_stored_object_id = lecture_slide_row
+    (
+        voice_id,
+        base_caption_stored_object_id,
+        matched_translation_id,
+        translated_caption_stored_object_id,
+    ) = lecture_slide_row
+    caption_stored_object_id = (
+        translated_caption_stored_object_id
+        if matched_translation_id is not None
+        else base_caption_stored_object_id
+    )
     captions_available = caption_stored_object_id is not None
     tts_available = False
     if (voice_id or "").strip():
@@ -595,8 +617,24 @@ def _lecture_slide_deck_view(
     if deck is None:
         return None
 
+    translation = lecture_slide_runtime.usable_lecture_slide_translation(thread)
+    translated_pages = (
+        {page.position: page for page in translation.pages}
+        if translation is not None
+        else {}
+    )
+    continuous_narration_stored_object_id = (
+        translation.continuous_narration_stored_object_id
+        if translation is not None
+        else deck.continuous_narration_stored_object_id
+    )
+    caption_stored_object_id = (
+        translation.caption_stored_object_id
+        if translation is not None
+        else deck.caption_stored_object_id
+    )
     continuous_narration_url = None
-    if deck.continuous_narration_stored_object_id is not None:
+    if continuous_narration_stored_object_id is not None:
         continuous_narration_url = str(
             request.url_for(
                 "get_thread_lecture_slide_continuous_narration",
@@ -606,7 +644,7 @@ def _lecture_slide_deck_view(
         )
 
     captions_url = None
-    if deck.caption_stored_object_id is not None:
+    if caption_stored_object_id is not None:
         captions_url = str(
             request.url_for(
                 "get_thread_lecture_slide_captions",
@@ -618,7 +656,11 @@ def _lecture_slide_deck_view(
     return schemas.LectureSlideDeckView(
         id=deck.id,
         display_name=deck.display_name,
-        total_duration_ms=deck.total_duration_ms,
+        total_duration_ms=(
+            translation.total_duration_ms
+            if translation is not None
+            else deck.total_duration_ms
+        ),
         continuous_narration_url=continuous_narration_url,
         captions_url=captions_url,
         pages=[
@@ -627,8 +669,16 @@ def _lecture_slide_deck_view(
                 position=page.position,
                 content_kind=page.content_kind,
                 source_page_number=page.source_page_number,
-                start_offset_ms=page.start_offset_ms,
-                end_offset_ms=page.end_offset_ms,
+                start_offset_ms=(
+                    translated_pages[page.position].start_offset_ms
+                    if page.position in translated_pages
+                    else page.start_offset_ms
+                ),
+                end_offset_ms=(
+                    translated_pages[page.position].end_offset_ms
+                    if page.position in translated_pages
+                    else page.end_offset_ms
+                ),
                 image_stored_object_id=page.image_stored_object_id,
                 media_stored_object_id=page.media_stored_object_id,
                 media_url=(
@@ -5605,7 +5655,16 @@ async def get_thread_lecture_slide_continuous_narration(
         request.state["db"], class_id, thread_id
     )
     deck = cast(models.LectureSlideDeck, thread.lecture_slide_deck)
-    narration = deck.continuous_narration_stored_object
+    narration = (
+        translation.continuous_narration_stored_object
+        if (
+            translation := lecture_slide_runtime.usable_lecture_slide_translation(
+                thread
+            )
+        )
+        is not None
+        else deck.continuous_narration_stored_object
+    )
     if narration is None:
         raise HTTPException(
             status_code=404, detail="Lecture slide narration not found."
@@ -5656,7 +5715,16 @@ async def get_thread_lecture_slide_captions(
         request.state["db"], class_id, thread_id
     )
     deck = cast(models.LectureSlideDeck, thread.lecture_slide_deck)
-    caption = deck.caption_stored_object
+    caption = (
+        translation.caption_stored_object
+        if (
+            translation := lecture_slide_runtime.usable_lecture_slide_translation(
+                thread
+            )
+        )
+        is not None
+        else deck.caption_stored_object
+    )
     if caption is None:
         raise HTTPException(status_code=404, detail="Captions not available.")
 
@@ -8193,6 +8261,49 @@ async def create_lecture_thread(
 
     lecture_video_id = None if is_slide_lesson else assistant.lecture_video_id
     lecture_slide_deck_id = assistant.lecture_slide_deck_id if is_slide_lesson else None
+    lecture_slide_translation_id = None
+    lecture_language_code = None
+    lecture_language_name = None
+    requested_language_code = req.language_code.strip().lower()
+    if is_slide_lesson:
+        if requested_language_code == "original":
+            lecture_language_code = "original"
+            lecture_language_name = "Original"
+        else:
+            if lecture_slide_deck_id is None or assistant.lecture_slide_deck is None:
+                raise HTTPException(
+                    status_code=409,
+                    detail="This assistant's lecture slides are unavailable.",
+                )
+            translation = await models.LectureSlideTranslation.get_by_deck_and_language(
+                request.state["db"],
+                lecture_slide_deck_id,
+                requested_language_code,
+            )
+            if (
+                translation is None
+                or translation.status != schemas.LectureSlideTranslationStatus.READY
+                or translation.continuous_narration_stored_object_id is None
+                or translation.caption_stored_object_id is None
+                or not translation.has_complete_timeline_for_deck(
+                    assistant.lecture_slide_deck
+                )
+            ):
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        "This lecture slide translation is not ready. "
+                        "Prepare it from the lesson landing page first."
+                    ),
+                )
+            lecture_slide_translation_id = translation.id
+            lecture_language_code = translation.language_code
+            lecture_language_name = translation.language_name
+    elif requested_language_code != "original":
+        raise HTTPException(
+            status_code=400,
+            detail="Language selection is only available for lecture slides.",
+        )
 
     if assistant.version != 3:
         raise HTTPException(
@@ -8237,6 +8348,9 @@ async def create_lecture_thread(
         "timezone": req.timezone,
         "lecture_video_id": lecture_video_id,
         "lecture_slide_deck_id": lecture_slide_deck_id,
+        "lecture_slide_translation_id": lecture_slide_translation_id,
+        "lecture_language_code": lecture_language_code,
+        "lecture_language_name": lecture_language_name,
         "display_user_info": assistant.should_record_user_information
         and not class_.private,
         "prevent_user_thread_deletion": (
@@ -11069,6 +11183,144 @@ async def get_assistant_lecture_slide_config(
         questions=questions,
         question_drafts=question_drafts,
         processing_status=processing_status,
+    )
+
+
+def _lecture_slide_languages(
+    *,
+    can_prepare: bool,
+) -> schemas.LectureSlideLanguagesResponse:
+    return schemas.LectureSlideLanguagesResponse(
+        can_prepare=can_prepare,
+        languages=[
+            schemas.LectureSlideLanguage(code="original", name="Original"),
+            *[
+                schemas.LectureSlideLanguage(
+                    code=language.code,
+                    name=language.name,
+                )
+                for language in ELEVENLABS_V3_LANGUAGES
+            ],
+        ],
+    )
+
+
+@v1.get(
+    "/class/{class_id}/assistant/{assistant_id}/lecture-slides/languages",
+    dependencies=[Depends(Authz("can_create_thread", "class:{class_id}"))],
+    response_model=schemas.LectureSlideLanguagesResponse,
+)
+async def get_lecture_slide_translation_languages(
+    class_id: str,
+    assistant_id: str,
+    request: StateRequest,
+):
+    await lecture_slide_service.get_lecture_slide_assistant_for_class(
+        request.state["db"], int(assistant_id), int(class_id)
+    )
+    can_prepare = await (
+        Authz("can_edit", f"assistant:{assistant_id}")
+        | Authz("supervisor", f"class:{class_id}")
+    ).test_with_cache(request)
+    return _lecture_slide_languages(can_prepare=can_prepare)
+
+
+@v1.get(
+    "/class/{class_id}/assistant/{assistant_id}/lecture-slides/translations/{language_code}",
+    dependencies=[Depends(Authz("can_create_thread", "class:{class_id}"))],
+    response_model=schemas.LectureSlideTranslationStatusResponse,
+)
+async def get_lecture_slide_translation_status(
+    class_id: str,
+    assistant_id: str,
+    language_code: str,
+    request: StateRequest,
+):
+    assistant = await lecture_slide_service.get_lecture_slide_assistant_for_class(
+        request.state["db"], int(assistant_id), int(class_id)
+    )
+    if assistant.lecture_slide_deck_id is None:
+        raise HTTPException(404, "Lecture slide deck not found.")
+    normalized_code = language_code.strip().lower()
+    if normalized_code == "original":
+        return schemas.LectureSlideTranslationStatusResponse(
+            language_code="original",
+            status="ready",
+        )
+    if not any(
+        language.code == normalized_code for language in ELEVENLABS_V3_LANGUAGES
+    ):
+        raise HTTPException(
+            422,
+            "The selected language is not supported by the configured ElevenLabs model.",
+        )
+    translation = await models.LectureSlideTranslation.get_by_deck_and_language(
+        request.state["db"],
+        assistant.lecture_slide_deck_id,
+        normalized_code,
+    )
+    return lecture_slide_processing.lecture_slide_translation_status_response(
+        translation,
+        language_code=normalized_code,
+    )
+
+
+@v1.post(
+    "/class/{class_id}/assistant/{assistant_id}/lecture-slides/translations",
+    dependencies=[
+        Depends(
+            Authz("can_edit", "assistant:{assistant_id}")
+            | Authz("supervisor", "class:{class_id}")
+        ),
+        Depends(ClassNotArchived()),
+    ],
+    response_model=schemas.LectureSlideTranslationStatusResponse,
+)
+async def prepare_lecture_slide_translation(
+    class_id: str,
+    assistant_id: str,
+    req: schemas.PrepareLectureSlideTranslationRequest,
+    request: StateRequest,
+):
+    assistant = await lecture_slide_service.get_lecture_slide_assistant_for_class(
+        request.state["db"], int(assistant_id), int(class_id)
+    )
+    if assistant.lecture_slide_deck_id is None:
+        raise HTTPException(404, "Lecture slide deck not found.")
+    deck = await models.LectureSlideDeck.get_by_id_with_processing_context(
+        request.state["db"], assistant.lecture_slide_deck_id
+    )
+    if deck is None:
+        raise HTTPException(404, "Lecture slide deck not found.")
+    if deck.status != schemas.LectureSlideDeckStatus.READY:
+        raise HTTPException(409, "This lecture slide deck is not ready.")
+
+    normalized_code = req.language_code.strip().lower()
+    if normalized_code == "original":
+        raise HTTPException(400, "The original lesson does not require preparation.")
+    language = next(
+        (item for item in ELEVENLABS_V3_LANGUAGES if item.code == normalized_code),
+        None,
+    )
+    if language is None:
+        raise HTTPException(
+            422,
+            "The selected language is not supported by the configured ElevenLabs model.",
+        )
+    await lecture_slide_processing.queue_lecture_slide_translation(
+        request.state["db"],
+        deck,
+        language_code=language.code,
+        language_name=language.name,
+        openai_model=assistant.model,
+    )
+    await request.state["db"].commit()
+    translation = await models.LectureSlideTranslation.get_by_deck_and_language(
+        request.state["db"], deck.id, language.code
+    )
+    return lecture_slide_processing.lecture_slide_translation_status_response(
+        translation,
+        language_code=language.code,
     )
 
 

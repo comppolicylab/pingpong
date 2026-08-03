@@ -23,6 +23,129 @@ async def test_send_message_allows_first_run_for_lecture_slide_threads():
     assert server_module._allows_first_message_without_prior_run(thread)
 
 
+async def test_translated_question_adapter_preserves_content_and_retimes_offsets():
+    question = models.LectureSlideQuestion(
+        id=41,
+        position=1,
+        slide_position=2,
+        slide_offset_ms=1_000,
+        stop_offset_ms=4_000,
+        question_type=schemas.LectureSlideQuestionType.SINGLE_SELECT,
+        question_text="Which answer is correct?",
+        intro_text="Choose one.",
+    )
+    option = models.LectureSlideQuestionOption(
+        id=42,
+        position=1,
+        option_text="The original answer",
+        post_answer_text="Original feedback.",
+        continue_slide_position=2,
+        continue_slide_offset_ms=1_000,
+        continue_offset_ms=4_000,
+    )
+    question.options = [option]
+    question.correct_option = option
+    deck = SimpleNamespace(questions=[question])
+    translation = SimpleNamespace(
+        pages=[
+            SimpleNamespace(
+                position=2,
+                start_offset_ms=7_000,
+                end_offset_ms=10_500,
+            )
+        ],
+        has_complete_timeline_for_deck=lambda candidate: candidate is deck,
+    )
+    thread = SimpleNamespace(
+        lecture_slide_deck=deck,
+        lecture_slide_translation=translation,
+    )
+
+    translated = lecture_slide_runtime._SLIDE_ADAPTER.get_questions(thread)[0]
+
+    assert translated.question_text == "Which answer is correct?"
+    assert translated.intro_text == "Choose one."
+    assert translated.stop_offset_ms == 10_500
+    assert translated.slide_offset_ms == 3_500
+    assert translated.options[0].option_text == "The original answer"
+    assert translated.options[0].continue_offset_ms == 10_500
+    assert translated.options[0].continue_slide_offset_ms == 3_500
+    assert translated.correct_option is translated.options[0]
+
+
+async def test_lecture_slide_availability_rejects_cross_deck_translation(db):
+    async with db.async_session() as session:
+        class_ = models.Class(id=1, name="Slide Class", api_key="sk-test")
+        source = models.LectureSlideSourceStoredObject(
+            key="slides.pdf",
+            original_filename="slides.pdf",
+            content_type="application/pdf",
+            content_length=128,
+        )
+        other_source = models.LectureSlideSourceStoredObject(
+            key="other-slides.pdf",
+            original_filename="other-slides.pdf",
+            content_type="application/pdf",
+            content_length=128,
+        )
+        deck = models.LectureSlideDeck(
+            id=1,
+            class_=class_,
+            source_stored_object=source,
+            display_name="Slides",
+            status=schemas.LectureSlideDeckStatus.READY,
+            slide_count=1,
+        )
+        other_deck = models.LectureSlideDeck(
+            id=2,
+            class_=class_,
+            source_stored_object=other_source,
+            display_name="Other slides",
+            status=schemas.LectureSlideDeckStatus.READY,
+            slide_count=1,
+        )
+        caption = models.LectureSlideCaptionStoredObject(
+            key="other-translation.vtt",
+            content_type="text/vtt",
+            content_length=50,
+        )
+        translation = models.LectureSlideTranslation(
+            lecture_slide_deck=other_deck,
+            language_code="es",
+            language_name="Spanish",
+            openai_model="gpt-4.1-mini",
+            status=schemas.LectureSlideTranslationStatus.READY,
+            stage=schemas.LectureSlideTranslationStage.COMPOSITE_ARTIFACTS,
+            caption_stored_object=caption,
+        )
+        thread = models.Thread(
+            id=1,
+            class_=class_,
+            interaction_mode=schemas.InteractionMode.LECTURE_SLIDES,
+            lecture_slide_deck=deck,
+            lecture_slide_translation=translation,
+        )
+        session.add_all(
+            [
+                class_,
+                source,
+                other_source,
+                deck,
+                other_deck,
+                caption,
+                translation,
+                thread,
+            ]
+        )
+        await session.commit()
+
+        _, captions_available = await server_module._lecture_slide_availability(
+            session, thread
+        )
+
+    assert captions_available is False
+
+
 def _slide_deck(
     class_: models.Class,
     source: models.LectureSlideSourceStoredObject,

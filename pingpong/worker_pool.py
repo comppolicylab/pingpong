@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_WORKER_POLL_INTERVAL_SECONDS = 5.0
 DEFAULT_WORKER_SHUTDOWN_GRACE_SECONDS = 5.0
-RunKind = Literal["run", "slide", "video"]
+RunKind = Literal["run", "slide", "video", "translation"]
 
 
 def _sentence_case(value: str) -> str:

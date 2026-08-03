@@ -3835,6 +3835,29 @@ export type CreateLectureThreadRequest = {
 	parties?: number[];
 	timezone?: string | null;
 	conversation_id?: string | null;
+	language_code?: string;
+};
+
+export type LectureSlideLanguage = {
+	code: string;
+	name: string;
+};
+
+export type LectureSlideLanguagesResponse = {
+	languages: LectureSlideLanguage[];
+	can_prepare: boolean;
+};
+
+export type LectureSlideTranslationStatus =
+	'not_started' | 'queued' | 'processing' | 'ready' | 'failed';
+
+export type LectureSlideTranslationStatusResponse = {
+	language_code: string;
+	status: LectureSlideTranslationStatus;
+	stage?: string | null;
+	completed_parts: number;
+	total_parts: number;
+	error_message?: string | null;
 };
 
 export type VoiceModeRecordingInfo = {
@@ -3923,6 +3946,8 @@ export type Thread = {
 	prevent_user_thread_deletion?: boolean;
 	anonymous_session?: boolean;
 	is_current_user_participant?: boolean;
+	lecture_language_code?: string | null;
+	lecture_language_name?: string | null;
 };
 
 export type ThreadWithOptionalToken = {
@@ -3960,6 +3985,37 @@ export const createLectureThread = async (
 ) => {
 	const url = `class/${classId}/thread/lecture`;
 	return await POST<CreateLectureThreadRequest, ThreadWithOptionalToken>(f, url, data);
+};
+
+export const getLectureSlideLanguages = async (
+	f: Fetcher,
+	classId: number,
+	assistantId: number
+) => {
+	const url = `class/${classId}/assistant/${assistantId}/lecture-slides/languages`;
+	return await GET<never, LectureSlideLanguagesResponse>(f, url);
+};
+
+export const getLectureSlideTranslationStatus = async (
+	f: Fetcher,
+	classId: number,
+	assistantId: number,
+	languageCode: string
+) => {
+	const url = `class/${classId}/assistant/${assistantId}/lecture-slides/translations/${encodeURIComponent(languageCode)}`;
+	return await GET<never, LectureSlideTranslationStatusResponse>(f, url);
+};
+
+export const prepareLectureSlideTranslation = async (
+	f: Fetcher,
+	classId: number,
+	assistantId: number,
+	languageCode: string
+) => {
+	const url = `class/${classId}/assistant/${assistantId}/lecture-slides/translations`;
+	return await POST<{ language_code: string }, LectureSlideTranslationStatusResponse>(f, url, {
+		language_code: languageCode
+	});
 };
 
 /**

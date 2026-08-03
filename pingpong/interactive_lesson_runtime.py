@@ -69,6 +69,9 @@ class InteractiveLessonAdapter(Protocol):
     def get_questions(self, thread: models.Thread) -> Sequence["LessonQuestion"]:
         pass
 
+    def questions_are_derived(self, thread: models.Thread) -> bool:
+        pass
+
     def get_state(self, thread: models.Thread) -> "LessonState | None":
         pass
 
@@ -247,7 +250,7 @@ def _question_markers(
 def _get_current_question(
     thread: models.Thread, state: LessonState, *, adapter: InteractiveLessonAdapter
 ) -> LessonQuestion | None:
-    if state.current_question is not None:
+    if state.current_question is not None and not adapter.questions_are_derived(thread):
         return state.current_question
     if adapter.get_asset(thread) is None:
         return None
@@ -255,6 +258,22 @@ def _get_current_question(
         if question.id == state.current_question_id:
             return question
     return None
+
+
+def _storage_model(value: Any) -> Any:
+    return getattr(value, "source", value)
+
+
+def _adapted_option(
+    question: LessonQuestion | None,
+    option: LessonQuestionOption | None,
+) -> LessonQuestionOption | None:
+    if question is None or option is None:
+        return None
+    return next(
+        (candidate for candidate in question.options if candidate.id == option.id),
+        None,
+    )
 
 
 def _get_next_question(
@@ -311,7 +330,7 @@ async def _reset_question_queue_for_offset(
     state.active_option_id = None
     state.active_option = None
     state.current_question_id = next_question.id if next_question is not None else None
-    state.current_question = next_question
+    state.current_question = _storage_model(next_question)
 
 
 def _build_continuation(
@@ -337,12 +356,16 @@ def _build_continuation(
                 correct_option_id = question.correct_option.id
                 break
 
+    active_option = _adapted_option(current_question, state.active_option)
+    if active_option is None:
+        return None
+
     return schemas.InteractiveLessonContinuation(
-        option_id=state.active_option.id,
+        option_id=active_option.id,
         correct_option_id=correct_option_id,
-        post_answer_text=state.active_option.post_answer_text or None,
-        post_answer_narration_id=_narration_id(state.active_option.post_narration),
-        resume_offset_ms=state.active_option.continue_offset_ms,
+        post_answer_text=active_option.post_answer_text or None,
+        post_answer_narration_id=_narration_id(active_option.post_narration),
+        resume_offset_ms=active_option.continue_offset_ms,
         next_question=_question_prompt(next_question)
         if next_question is not None
         else None,
@@ -983,7 +1006,7 @@ async def _handle_answer_submitted(
         )
 
     state.state = state_enum.AWAITING_POST_ANSWER_RESUME
-    state.active_option = option
+    state.active_option = _storage_model(option)
     await _append_interaction(
         session,
         state,
@@ -1032,7 +1055,7 @@ async def _handle_resumed(
         return
 
     current_question = _get_current_question(state.thread, state, adapter=adapter)
-    active_option = state.active_option
+    active_option = _adapted_option(current_question, state.active_option)
     if (
         state.state != state_enum.AWAITING_POST_ANSWER_RESUME
         or active_option is None
@@ -1051,7 +1074,7 @@ async def _handle_resumed(
         state.current_question = None
     else:
         state.current_question_id = next_question.id
-        state.current_question = next_question
+        state.current_question = _storage_model(next_question)
     state.state = state_enum.PLAYING
 
     await _append_interaction(

@@ -14,7 +14,7 @@ import tempfile
 import time
 from collections.abc import Callable, Coroutine, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import datetime, timedelta
 from functools import cache
 from pathlib import Path
 from typing import Any, TypeVar, TypedDict, cast
@@ -37,6 +37,7 @@ from pypdf import PdfReader
 from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload, undefer
 
 import pingpong.models as models
 import pingpong.schemas as schemas
@@ -194,6 +195,16 @@ Output requirements:
 - Use zero-based slide_position values.
 - Keep narration_text as plain spoken prose, with no markdown, bullets, slide labels, or stage directions."""
 
+LECTURE_SLIDE_TRANSLATION_PROMPT = """Translate the supplied lecture narration into the requested target language.
+
+Rules:
+- Preserve the complete meaning, teaching intent, terminology, names, numbers, equations, and ordering.
+- Write natural spoken narration suitable for text-to-speech.
+- Preserve bracketed ElevenLabs delivery or audio tags where they appear.
+- Do not summarize, explain, add facts, add labels, or translate into any language other than the target language.
+- Return exactly one translated item for every supplied slide_position."""
+LECTURE_SLIDE_TRANSLATION_SOURCE_TOKEN_BUDGET = 20_000
+
 RUN_LEASE_DURATION = timedelta(minutes=10)
 RUN_LEASE_HEARTBEAT_INTERVAL = min(timedelta(minutes=1), RUN_LEASE_DURATION / 2)
 UNEXPECTED_WORKER_EXIT_ERROR_MESSAGE = "Lecture slide worker exited unexpectedly."
@@ -231,6 +242,19 @@ class GeneratedSlideNarration(BaseModel):
     slide_position: int = Field(..., ge=0)
     title: str | None = None
     narration_text: str = Field(..., min_length=1)
+
+
+class TranslatedSlideNarration(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    slide_position: int = Field(..., ge=0)
+    narration_text: str = Field(..., min_length=1)
+
+
+class TranslatedSlideNarrationSet(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    slides: list[TranslatedSlideNarration]
 
 
 class GeneratedSlideNarrationSet(BaseModel):
@@ -1028,6 +1052,133 @@ async def queue_manifest_generation_processing_run(
     )
 
 
+async def queue_lecture_slide_translation(
+    session: AsyncSession,
+    deck: models.LectureSlideDeck,
+    *,
+    language_code: str,
+    language_name: str,
+    openai_model: str,
+) -> None:
+    normalized_code = language_code.strip().lower()
+    translation = await models.LectureSlideTranslation.get_by_deck_and_language(
+        session,
+        deck.id,
+        normalized_code,
+        for_update=True,
+    )
+    if translation is None:
+        try:
+            async with session.begin_nested():
+                translation = models.LectureSlideTranslation(
+                    lecture_slide_deck_id=deck.id,
+                    language_code=normalized_code,
+                    language_name=language_name,
+                    openai_model=openai_model,
+                    status=schemas.LectureSlideTranslationStatus.QUEUED,
+                    stage=schemas.LectureSlideTranslationStage.TRANSLATION_TEXT,
+                )
+                session.add(translation)
+                await session.flush()
+        except IntegrityError:
+            translation = await models.LectureSlideTranslation.get_by_deck_and_language(
+                session,
+                deck.id,
+                normalized_code,
+                for_update=True,
+            )
+    if translation is None:
+        raise RuntimeError("Unable to create the lecture slide translation.")
+    if translation.status == schemas.LectureSlideTranslationStatus.READY:
+        return
+
+    existing_run = await models.LectureSlideTranslationRun.get_non_terminal(
+        session, translation.id
+    )
+    if existing_run is not None:
+        return
+
+    attempt_number = (
+        await models.LectureSlideTranslationRun.get_latest_attempt_number(
+            session, translation.id
+        )
+        + 1
+    )
+    translation.status = schemas.LectureSlideTranslationStatus.QUEUED
+    translation.error_message = None
+    translation_pages = list(
+        (
+            await session.scalars(
+                select(models.LectureSlideTranslationPage).where(
+                    models.LectureSlideTranslationPage.translation_id == translation.id
+                )
+            )
+        ).all()
+    )
+    total_parts = len(deck.pages)
+    completed_parts = sum(
+        1
+        for page in translation_pages
+        if page.narration_stored_object_id is not None
+        or not text_needs_audio(page.narration_text or "")
+    )
+    if not translation_pages:
+        translation.stage = schemas.LectureSlideTranslationStage.TRANSLATION_TEXT
+    elif any(
+        page.narration_stored_object_id is None
+        for page in translation_pages
+        if (page.narration_text or "").strip()
+    ):
+        translation.stage = schemas.LectureSlideTranslationStage.NARRATION_AUDIO
+    else:
+        translation.stage = schemas.LectureSlideTranslationStage.COMPOSITE_ARTIFACTS
+    session.add(translation)
+    run = models.LectureSlideTranslationRun(
+        translation_id=translation.id,
+        translation_id_snapshot=translation.id,
+        stage=translation.stage,
+        attempt_number=attempt_number,
+        completed_parts=completed_parts,
+        total_parts=total_parts,
+        status=schemas.LectureSlideTranslationRunStatus.QUEUED,
+    )
+    try:
+        async with session.begin_nested():
+            session.add(run)
+            await session.flush()
+    except IntegrityError:
+        # Another request queued the same translation while this transaction was
+        # preparing its attempt number. The active-run index is the arbiter.
+        return
+
+
+def lecture_slide_translation_status_response(
+    translation: models.LectureSlideTranslation | None,
+    *,
+    language_code: str,
+) -> schemas.LectureSlideTranslationStatusResponse:
+    if translation is None:
+        return schemas.LectureSlideTranslationStatusResponse(
+            language_code=language_code,
+            status="not_started",
+        )
+    latest_run = max(
+        translation.runs,
+        key=lambda run: run.attempt_number,
+        default=None,
+    )
+    completed_parts = latest_run.completed_parts if latest_run else 0
+    total_parts = latest_run.total_parts if latest_run else len(translation.pages)
+    return schemas.LectureSlideTranslationStatusResponse(
+        language_code=translation.language_code,
+        status=translation.status.value,
+        stage=translation.stage,
+        completed_parts=completed_parts,
+        total_parts=total_parts,
+        error_message=translation.error_message,
+    )
+
+
 async def cancel_processing_runs(
     session: AsyncSession,
     deck_id: int,
@@ -1118,74 +1269,116 @@ async def claim_next_processing_run(
     return None
 
 
+def _claimable_translation_run_condition(now) -> Any:
+    return or_(
+        models.LectureSlideTranslationRun.status
+        == schemas.LectureSlideTranslationRunStatus.QUEUED,
+        and_(
+            models.LectureSlideTranslationRun.status
+            == schemas.LectureSlideTranslationRunStatus.RUNNING,
+            or_(
+                models.LectureSlideTranslationRun.lease_expires_at.is_(None),
+                models.LectureSlideTranslationRun.lease_expires_at < now,
+            ),
+        ),
+    )
+
+
+async def claim_next_translation_run(
+    *,
+    leased_by: str | None = None,
+) -> tuple[int, str] | None:
+    async with config.db.driver.async_session() as session:
+        now = utcnow()
+        condition = _claimable_translation_run_condition(now)
+        effective_leased_by = leased_by or build_runner_id()
+        candidate_id = await session.scalar(
+            select(models.LectureSlideTranslationRun.id)
+            .where(condition)
+            .order_by(
+                func.coalesce(models.LectureSlideTranslationRun.created, now).asc(),
+                models.LectureSlideTranslationRun.id.asc(),
+            )
+            .limit(1)
+        )
+        if candidate_id is None:
+            return None
+        lease_token = secrets.token_urlsafe(24)
+        result = await session.execute(
+            update(models.LectureSlideTranslationRun)
+            .where(models.LectureSlideTranslationRun.id == candidate_id)
+            .where(condition)
+            .values(
+                status=schemas.LectureSlideTranslationRunStatus.RUNNING,
+                lease_token=lease_token,
+                leased_by=effective_leased_by,
+                lease_expires_at=now + RUN_LEASE_DURATION,
+                started_at=func.coalesce(
+                    models.LectureSlideTranslationRun.started_at, now
+                ),
+                finished_at=None,
+            )
+        )
+        if result.rowcount:
+            await session.commit()
+            return candidate_id, lease_token
+    return None
+
+
 async def claim_next_any_processing_run(
     *,
     leased_by: str | None = None,
 ) -> RunAssignment | None:
     async with config.db.driver.async_session() as session:
         now = utcnow()
-        slide_result = await session.execute(
-            select(
-                models.LectureSlideProcessingRun.id,
-                models.LectureSlideProcessingRun.created,
-            )
-            .where(_claimable_processing_run_condition(now))
-            .order_by(
-                func.coalesce(models.LectureSlideProcessingRun.created, now).asc(),
-                models.LectureSlideProcessingRun.id.asc(),
-            )
-            .limit(1)
+        candidates: list[tuple[datetime, int, str]] = []
+        candidate_specs = (
+            (
+                models.LectureSlideProcessingRun,
+                _claimable_processing_run_condition(now),
+                "slide",
+            ),
+            (
+                models.LectureVideoProcessingRun,
+                lecture_video_processing._claimable_processing_run_condition(now),
+                "video",
+            ),
+            (
+                models.LectureSlideTranslationRun,
+                _claimable_translation_run_condition(now),
+                "translation",
+            ),
         )
-        slide_candidate = slide_result.first()
-        video_result = await session.execute(
-            select(
-                models.LectureVideoProcessingRun.id,
-                models.LectureVideoProcessingRun.created,
-            )
-            .where(lecture_video_processing._claimable_processing_run_condition(now))
-            .order_by(
-                func.coalesce(models.LectureVideoProcessingRun.created, now).asc(),
-                models.LectureVideoProcessingRun.id.asc(),
-            )
-            .limit(1)
-        )
-        video_candidate = video_result.first()
+        for model, condition, kind in candidate_specs:
+            candidate = (
+                await session.execute(
+                    select(model.id, model.created)
+                    .where(condition)
+                    .order_by(
+                        func.coalesce(model.created, now).asc(),
+                        model.id.asc(),
+                    )
+                    .limit(1)
+                )
+            ).first()
+            if candidate is not None:
+                candidates.append((candidate.created or now, int(candidate.id), kind))
 
-    try_video_first = False
-    if video_candidate is not None and slide_candidate is None:
-        try_video_first = True
-    elif video_candidate is not None and slide_candidate is not None:
-        video_created = video_candidate.created or utcnow()
-        slide_created = slide_candidate.created or utcnow()
-        try_video_first = (video_created, video_candidate.id) < (
-            slide_created,
-            slide_candidate.id,
-        )
-
-    if try_video_first:
-        claimed_video = await lecture_video_processing._claim_next_processing_run(
-            leased_by=leased_by
-        )
-        if claimed_video is not None:
-            run_id, lease_token = claimed_video
-            return RunAssignment(kind="video", run_id=run_id, lease_token=lease_token)
-        claimed_slide = await claim_next_processing_run(leased_by=leased_by)
-        if claimed_slide is None:
-            return None
-        run_id, lease_token = claimed_slide
-        return RunAssignment(kind="slide", run_id=run_id, lease_token=lease_token)
-
-    claimed_slide = await claim_next_processing_run(leased_by=leased_by)
-    if claimed_slide is not None:
-        run_id, lease_token = claimed_slide
-        return RunAssignment(kind="slide", run_id=run_id, lease_token=lease_token)
-    claimed_video = await lecture_video_processing._claim_next_processing_run(
-        leased_by=leased_by
-    )
-    if claimed_video is None:
-        return None
-    run_id, lease_token = claimed_video
-    return RunAssignment(kind="video", run_id=run_id, lease_token=lease_token)
+    claimers = {
+        "slide": claim_next_processing_run,
+        "video": lecture_video_processing._claim_next_processing_run,
+        "translation": claim_next_translation_run,
+    }
+    for _, _, kind in sorted(candidates):
+        claimed = await claimers[kind](leased_by=leased_by)
+        if claimed is not None:
+            run_id, lease_token = claimed
+            return RunAssignment(
+                kind=cast(Any, kind),
+                run_id=run_id,
+                lease_token=lease_token,
+            )
+    return None
 
 
 async def recover_failed_processing_assignment(
@@ -1199,6 +1392,12 @@ async def recover_failed_processing_assignment(
             assignment.lease_token,
             error_message=error_message,
         )
+    if assignment.kind == "translation":
+        return await recover_failed_translation_run(
+            assignment.run_id,
+            assignment.lease_token,
+            error_message=error_message,
+        )
     if assignment.kind != "slide":
         return False
     return await recover_failed_processing_run(
@@ -1206,6 +1405,39 @@ async def recover_failed_processing_assignment(
         assignment.lease_token,
         error_message=error_message,
     )
+
+
+async def recover_failed_translation_run(
+    run_id: int,
+    lease_token: str,
+    *,
+    error_message: str = UNEXPECTED_WORKER_EXIT_ERROR_MESSAGE,
+) -> bool:
+    async with config.db.driver.async_session() as session:
+        run = await models.LectureSlideTranslationRun.get_by_id(session, run_id)
+        if (
+            run is None
+            or run.status != schemas.LectureSlideTranslationRunStatus.RUNNING
+            or run.lease_token != lease_token
+        ):
+            return False
+        run.status = schemas.LectureSlideTranslationRunStatus.FAILED
+        run.error_message = error_message
+        run.finished_at = utcnow()
+        run.lease_token = None
+        run.leased_by = None
+        run.lease_expires_at = None
+        if run.translation_id is not None:
+            translation = await session.get(
+                models.LectureSlideTranslation, run.translation_id
+            )
+            if translation is not None:
+                translation.status = schemas.LectureSlideTranslationStatus.FAILED
+                translation.error_message = error_message
+                session.add(translation)
+        session.add(run)
+        await session.commit()
+        return True
 
 
 async def recover_failed_processing_run(
@@ -1250,9 +1482,548 @@ async def process_claimed_run(assignment: RunAssignment) -> None:
             assignment.lease_token,
         )
         return
+    if assignment.kind == "translation":
+        await _process_claimed_translation_run(
+            assignment.run_id,
+            assignment.lease_token,
+        )
+        return
     if assignment.kind != "slide":
         return
     await _process_claimed_slide_run(assignment.run_id, assignment.lease_token)
+
+
+async def _process_claimed_translation_run(
+    run_id: int,
+    lease_token: str,
+) -> None:
+    try:
+        async with config.db.driver.async_session() as session:
+            run = await models.LectureSlideTranslationRun.get_by_id(session, run_id)
+            if (
+                run is None
+                or run.status != schemas.LectureSlideTranslationRunStatus.RUNNING
+                or run.lease_token != lease_token
+                or run.translation_id is None
+            ):
+                return
+            translation_id = run.translation_id
+            translation = await session.get(
+                models.LectureSlideTranslation, translation_id
+            )
+            if translation is None:
+                return
+            translation.status = schemas.LectureSlideTranslationStatus.PROCESSING
+            translation.error_message = None
+            session.add(translation)
+            await session.commit()
+
+        if not await _translation_has_page_rows(translation_id):
+            if not await _set_translation_run_stage(
+                run_id,
+                lease_token,
+                schemas.LectureSlideTranslationStage.TRANSLATION_TEXT,
+            ):
+                return
+            translated_set = await _generate_translation_text(
+                run_id, lease_token, translation_id
+            )
+            if translated_set is None:
+                return
+            await _persist_translation_page_rows(
+                run_id, lease_token, translation_id, translated_set
+            )
+            if not await _ensure_translation_run_can_continue(run_id, lease_token):
+                return
+
+        if not await _set_translation_run_stage(
+            run_id,
+            lease_token,
+            schemas.LectureSlideTranslationStage.NARRATION_AUDIO,
+        ):
+            return
+        if not await _synthesize_translation_audio(run_id, lease_token, translation_id):
+            return
+
+        if not await _set_translation_run_stage(
+            run_id,
+            lease_token,
+            schemas.LectureSlideTranslationStage.COMPOSITE_ARTIFACTS,
+        ):
+            return
+        if not await _persist_translation_composite_artifacts(
+            run_id, lease_token, translation_id
+        ):
+            return
+        await _mark_translation_run_completed(run_id, lease_token)
+    except Exception as exc:
+        logger.exception("Lecture slide translation failed. run_id=%s", run_id)
+        await recover_failed_translation_run(
+            run_id,
+            lease_token,
+            error_message=_user_safe_processing_error_message(exc),
+        )
+
+
+async def _translation_has_page_rows(translation_id: int) -> bool:
+    async with config.db.driver.async_session() as session:
+        page_id = await session.scalar(
+            select(models.LectureSlideTranslationPage.id)
+            .where(models.LectureSlideTranslationPage.translation_id == translation_id)
+            .limit(1)
+        )
+        return page_id is not None
+
+
+async def _generate_translation_text(
+    run_id: int,
+    lease_token: str,
+    translation_id: int,
+) -> TranslatedSlideNarrationSet | None:
+    async with config.db.driver.async_session() as session:
+        translation = await session.scalar(
+            select(models.LectureSlideTranslation)
+            .where(models.LectureSlideTranslation.id == translation_id)
+            .options(
+                selectinload(
+                    models.LectureSlideTranslation.lecture_slide_deck
+                ).selectinload(models.LectureSlideDeck.pages)
+            )
+        )
+        if translation is None:
+            return None
+        deck = translation.lecture_slide_deck
+        source_items = [
+            {
+                "slide_position": page.position,
+                "narration_text": page.narration_text or "",
+            }
+            for page in sorted(deck.pages, key=lambda item: item.position)
+            if page.content_kind != schemas.LectureSlideContentKind.VIDEO
+            and text_needs_audio(page.narration_text or "")
+        ]
+        class_id = deck.class_id
+        target_language = translation.language_name
+        target_language_code = translation.language_code
+        openai_model = translation.openai_model
+    if not source_items:
+        return TranslatedSlideNarrationSet(slides=[])
+
+    async with config.db.driver.async_session() as session:
+        openai_client = await get_openai_client_by_class_id(session, class_id)
+    translated_slides: list[TranslatedSlideNarration] = []
+    for source_chunk in _translation_source_chunks(source_items):
+        result = await _await_with_translation_lease_heartbeat(
+            run_id,
+            lease_token,
+            _parse_responses_output(
+                openai_client,
+                model=openai_model,
+                instructions=LECTURE_SLIDE_TRANSLATION_PROMPT,
+                response_model=TranslatedSlideNarrationSet,
+                input_messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "input_text",
+                                "text": (
+                                    f"Target language: {target_language} "
+                                    f"({target_language_code}).\n\n"
+                                    "Translate this JSON array of narration parts:\n"
+                                    f"{json.dumps(source_chunk, ensure_ascii=False)}"
+                                ),
+                            }
+                        ],
+                    }
+                ],
+            ),
+        )
+        if result is None:
+            return None
+        expected_positions = {int(item["slide_position"]) for item in source_chunk}
+        actual_positions = [slide.slide_position for slide in result.slides]
+        if (
+            len(actual_positions) != len(set(actual_positions))
+            or set(actual_positions) != expected_positions
+        ):
+            raise RuntimeError(
+                "OpenAI returned an incomplete lecture narration translation."
+            )
+        translated_slides.extend(result.slides)
+    return TranslatedSlideNarrationSet(slides=translated_slides)
+
+
+def _translation_source_chunks(
+    source_items: list[dict[str, int | str]],
+) -> list[list[dict[str, int | str]]]:
+    chunks: list[list[dict[str, int | str]]] = []
+    current_chunk: list[dict[str, int | str]] = []
+    current_tokens = 0
+    for item in source_items:
+        item_tokens = _count_text_tokens(json.dumps(item, ensure_ascii=False))
+        if item_tokens > LECTURE_SLIDE_TRANSLATION_SOURCE_TOKEN_BUDGET:
+            raise RuntimeError(
+                f"Lecture slide {item['slide_position']} narration exceeds the "
+                "translation token budget."
+            )
+        if (
+            current_chunk
+            and current_tokens + item_tokens
+            > LECTURE_SLIDE_TRANSLATION_SOURCE_TOKEN_BUDGET
+        ):
+            chunks.append(current_chunk)
+            current_chunk = []
+            current_tokens = 0
+        current_chunk.append(item)
+        current_tokens += item_tokens
+    if current_chunk:
+        chunks.append(current_chunk)
+    return chunks
+
+
+async def _persist_translation_page_rows(
+    run_id: int,
+    lease_token: str,
+    translation_id: int,
+    translated_set: TranslatedSlideNarrationSet,
+) -> None:
+    translated_by_position = {
+        slide.slide_position: slide.narration_text for slide in translated_set.slides
+    }
+    async with config.db.driver.async_session() as session:
+        run = await models.LectureSlideTranslationRun.get_by_id(session, run_id)
+        translation = await session.scalar(
+            select(models.LectureSlideTranslation)
+            .where(models.LectureSlideTranslation.id == translation_id)
+            .options(
+                selectinload(models.LectureSlideTranslation.lecture_slide_deck).options(
+                    undefer(models.LectureSlideDeck.transcript_data),
+                    selectinload(models.LectureSlideDeck.pages)
+                    .selectinload(models.LectureSlidePage.narration)
+                    .selectinload(models.LectureSlideNarration.stored_object),
+                )
+            )
+        )
+        if (
+            run is None
+            or translation is None
+            or run.status != schemas.LectureSlideTranslationRunStatus.RUNNING
+            or run.lease_token != lease_token
+        ):
+            return
+        deck = translation.lecture_slide_deck
+        source_transcript = [
+            schemas.LectureVideoManifestWordV3.model_validate(word)
+            for word in (
+                (deck.transcript_data or {}).get("word_level_transcription") or []
+            )
+        ]
+        for page in sorted(deck.pages, key=lambda item: item.position):
+            narration_text = (
+                page.narration_text
+                if page.content_kind == schemas.LectureSlideContentKind.VIDEO
+                else translated_by_position.get(page.position, page.narration_text)
+            )
+            stored_object_id = None
+            word_timings: list[dict[str, Any]] | None = None
+            if (
+                page.content_kind == schemas.LectureSlideContentKind.VIDEO
+                and page.narration is not None
+                and page.narration.stored_object is not None
+            ):
+                stored_object_id = page.narration.stored_object.id
+                if page.start_offset_ms is not None and page.end_offset_ms is not None:
+                    word_timings = [
+                        {
+                            "word": word.word,
+                            "start_ms": word.start_offset_ms - page.start_offset_ms,
+                            "end_ms": word.end_offset_ms - page.start_offset_ms,
+                        }
+                        for word in _transcript_for_slide_window(
+                            source_transcript,
+                            start_offset_ms=page.start_offset_ms,
+                            end_offset_ms=page.end_offset_ms,
+                        )
+                    ]
+            session.add(
+                models.LectureSlideTranslationPage(
+                    translation_id=translation.id,
+                    position=page.position,
+                    narration_text=narration_text,
+                    narration_stored_object_id=stored_object_id,
+                    word_timings=word_timings,
+                )
+            )
+        run.total_parts = len(deck.pages)
+        run.completed_parts = sum(
+            1
+            for page in deck.pages
+            if page.content_kind == schemas.LectureSlideContentKind.VIDEO
+            or not text_needs_audio(
+                translated_by_position.get(page.position, page.narration_text) or ""
+            )
+        )
+        session.add(run)
+        await session.commit()
+
+
+async def _synthesize_translation_audio(
+    run_id: int,
+    lease_token: str,
+    translation_id: int,
+) -> bool:
+    async with config.db.driver.async_session() as session:
+        translation = await session.scalar(
+            select(models.LectureSlideTranslation)
+            .where(models.LectureSlideTranslation.id == translation_id)
+            .options(
+                selectinload(models.LectureSlideTranslation.pages),
+                selectinload(models.LectureSlideTranslation.lecture_slide_deck),
+            )
+        )
+        if translation is None:
+            return False
+        deck = translation.lecture_slide_deck
+        voice_id = deck.voice_id
+        class_id = deck.class_id
+        language_code = translation.language_code
+        pending_pages = [
+            (page.id, page.narration_text or "")
+            for page in translation.pages
+            if page.narration_stored_object_id is None
+            and text_needs_audio(page.narration_text or "")
+        ]
+    if pending_pages and not voice_id:
+        raise RuntimeError("Lecture slide deck voice_id is required for translation.")
+    api_key = await _get_elevenlabs_api_key(class_id) if pending_pages else None
+    for page_id, narration_text in pending_pages:
+        assert api_key is not None
+        assert voice_id is not None
+        synthesis = await _await_with_translation_lease_heartbeat(
+            run_id,
+            lease_token,
+            synthesize_elevenlabs_speech_with_timings(
+                api_key,
+                voice_id,
+                narration_text,
+                language_code=language_code,
+            ),
+        )
+        if synthesis is None:
+            return False
+        duration_ms = audio_duration_ms(synthesis.audio, synthesis.content_type)
+        store_key, content_length = await _store_audio(
+            generate_slide_narration_store_key(),
+            synthesis.content_type,
+            synthesis.audio,
+        )
+        try:
+            async with config.db.driver.async_session() as session:
+                run = await models.LectureSlideTranslationRun.get_by_id(session, run_id)
+                page = await session.get(models.LectureSlideTranslationPage, page_id)
+                if (
+                    run is None
+                    or page is None
+                    or run.status != schemas.LectureSlideTranslationRunStatus.RUNNING
+                    or run.lease_token != lease_token
+                ):
+                    await _delete_audio_key_quietly(store_key)
+                    return False
+                stored_object = models.LectureSlideNarrationStoredObject(
+                    key=store_key,
+                    content_type=synthesis.content_type,
+                    content_length=content_length,
+                    duration_ms=duration_ms,
+                )
+                session.add(stored_object)
+                await session.flush()
+                page.narration_stored_object_id = stored_object.id
+                page.word_timings = [
+                    {
+                        "word": word.word,
+                        "start_ms": word.start_ms,
+                        "end_ms": word.end_ms,
+                    }
+                    for word in synthesis.words
+                ]
+                session.add(page)
+                run.completed_parts = min(
+                    run.total_parts,
+                    run.completed_parts + 1,
+                )
+                session.add(run)
+                await session.commit()
+        except Exception:
+            await _delete_audio_key_quietly(store_key)
+            raise
+    return await _ensure_translation_run_can_continue(run_id, lease_token)
+
+
+async def _persist_translation_composite_artifacts(
+    run_id: int,
+    lease_token: str,
+    translation_id: int,
+) -> bool:
+    async with config.db.driver.async_session() as session:
+        run = await models.LectureSlideTranslationRun.get_by_id(session, run_id)
+        if (
+            run is None
+            or run.status != schemas.LectureSlideTranslationRunStatus.RUNNING
+            or run.lease_token != lease_token
+        ):
+            return False
+        translation = await session.scalar(
+            select(models.LectureSlideTranslation)
+            .where(models.LectureSlideTranslation.id == translation_id)
+            .options(
+                selectinload(models.LectureSlideTranslation.pages).selectinload(
+                    models.LectureSlideTranslationPage.narration_stored_object
+                )
+            )
+        )
+        if translation is None:
+            return False
+        if (
+            translation.continuous_narration_stored_object_id is not None
+            and translation.caption_stored_object_id is not None
+            and translation.total_duration_ms is not None
+        ):
+            return True
+        pages = sorted(translation.pages, key=lambda item: item.position)
+        stored_objects: list[models.LectureSlideNarrationStoredObject] = []
+        transcript: list[schemas.LectureVideoManifestWordV3] = []
+        current_offset_ms = 0
+        for page in pages:
+            stored_object = page.narration_stored_object
+            if stored_object is None:
+                if text_needs_audio(page.narration_text or ""):
+                    raise RuntimeError(
+                        f"Translated slide {page.position} is missing narration audio."
+                    )
+                page.start_offset_ms = current_offset_ms
+                page.end_offset_ms = current_offset_ms
+                session.add(page)
+                continue
+            duration_ms = stored_object.duration_ms
+            if duration_ms is None:
+                raise RuntimeError(
+                    f"Translated slide {page.position} is missing audio duration."
+                )
+            page.start_offset_ms = current_offset_ms
+            page.end_offset_ms = current_offset_ms + duration_ms
+            for word_index, raw_word in enumerate(page.word_timings or []):
+                transcript.append(
+                    schemas.LectureVideoManifestWordV3(
+                        id=f"translated-slide-{page.position}-word-{word_index}",
+                        word=str(raw_word["word"]),
+                        start_offset_ms=current_offset_ms + int(raw_word["start_ms"]),
+                        end_offset_ms=current_offset_ms + int(raw_word["end_ms"]),
+                    )
+                )
+            current_offset_ms = page.end_offset_ms
+            stored_objects.append(stored_object)
+            session.add(page)
+        await session.commit()
+        total_duration_ms = current_offset_ms
+
+    if not config.video_store:
+        raise RuntimeError("Video store not configured or unavailable.")
+    combined_audio = await _combine_audio_objects(stored_objects)
+    audio_key, audio_length = await _store_audio(
+        generate_slide_continuous_narration_store_key(),
+        LECTURE_SLIDE_CONTINUOUS_AUDIO_CONTENT_TYPE,
+        combined_audio,
+    )
+    caption_bytes = lecture_video_words_to_webvtt(transcript).encode("utf-8")
+    caption_key = generate_slide_caption_store_key()
+    await config.video_store.store.put(
+        caption_key, io.BytesIO(caption_bytes), "text/vtt"
+    )
+    try:
+        async with config.db.driver.async_session() as session:
+            run = await models.LectureSlideTranslationRun.get_by_id(session, run_id)
+            translation = await session.get(
+                models.LectureSlideTranslation, translation_id
+            )
+            if (
+                run is None
+                or translation is None
+                or run.status != schemas.LectureSlideTranslationRunStatus.RUNNING
+                or run.lease_token != lease_token
+            ):
+                await _delete_audio_key_quietly(audio_key)
+                with contextlib.suppress(Exception):
+                    await config.video_store.store.delete(caption_key)
+                return False
+            audio_object = models.LectureSlideNarrationStoredObject(
+                key=audio_key,
+                content_type=LECTURE_SLIDE_CONTINUOUS_AUDIO_CONTENT_TYPE,
+                content_length=audio_length,
+                duration_ms=total_duration_ms,
+            )
+            caption_object = models.LectureSlideCaptionStoredObject(
+                key=caption_key,
+                content_type="text/vtt",
+                content_length=len(caption_bytes),
+            )
+            session.add_all([audio_object, caption_object])
+            await session.flush()
+            translation.continuous_narration_stored_object_id = audio_object.id
+            translation.caption_stored_object_id = caption_object.id
+            translation.total_duration_ms = total_duration_ms
+            session.add(translation)
+            await session.commit()
+            return True
+    except Exception:
+        await _delete_audio_key_quietly(audio_key)
+        with contextlib.suppress(Exception):
+            await config.video_store.store.delete(caption_key)
+        raise
+
+
+async def _mark_translation_run_completed(
+    run_id: int,
+    lease_token: str,
+) -> None:
+    async with config.db.driver.async_session() as session:
+        run = await models.LectureSlideTranslationRun.get_by_id(session, run_id)
+        if (
+            run is None
+            or run.status != schemas.LectureSlideTranslationRunStatus.RUNNING
+            or run.lease_token != lease_token
+        ):
+            return
+        if run.translation_id is not None:
+            translation = await session.scalar(
+                select(models.LectureSlideTranslation)
+                .where(models.LectureSlideTranslation.id == run.translation_id)
+                .options(
+                    selectinload(
+                        models.LectureSlideTranslation.lecture_slide_deck
+                    ).selectinload(models.LectureSlideDeck.pages),
+                    selectinload(models.LectureSlideTranslation.pages),
+                )
+            )
+            if translation is not None:
+                if not translation.has_complete_timeline_for_deck(
+                    translation.lecture_slide_deck,
+                    require_ready=False,
+                ):
+                    raise RuntimeError(
+                        "Lecture slide translation does not have a complete timeline."
+                    )
+                translation.status = schemas.LectureSlideTranslationStatus.READY
+                translation.error_message = None
+                session.add(translation)
+        run.status = schemas.LectureSlideTranslationRunStatus.COMPLETED
+        run.error_message = None
+        run.finished_at = utcnow()
+        run.lease_token = None
+        run.leased_by = None
+        run.lease_expires_at = None
+        session.add(run)
+        await session.commit()
 
 
 async def _deck_has_slide_manifest(deck_id: int) -> bool:
@@ -1535,6 +2306,90 @@ async def _await_with_run_lease_heartbeat(
                 # Task was cancelled as part of cleanup; suppress the expected CancelledError.
                 pass
         raise
+
+
+async def _await_with_translation_lease_heartbeat(
+    run_id: int,
+    lease_token: str,
+    operation: Coroutine[Any, Any, Any],
+) -> Any | None:
+    task: asyncio.Task[Any] = asyncio.create_task(operation)
+    try:
+        while True:
+            done, _ = await asyncio.wait(
+                {task},
+                timeout=RUN_LEASE_HEARTBEAT_INTERVAL.total_seconds(),
+            )
+            if task in done:
+                return await task
+            if not await _ensure_translation_run_can_continue(run_id, lease_token):
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+                return None
+    except Exception:
+        if not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+        raise
+
+
+async def _ensure_translation_run_can_continue(
+    run_id: int,
+    lease_token: str,
+) -> bool:
+    async with config.db.driver.async_session() as session:
+        run = await models.LectureSlideTranslationRun.get_by_id(session, run_id)
+        if (
+            run is None
+            or run.status != schemas.LectureSlideTranslationRunStatus.RUNNING
+            or run.lease_token != lease_token
+            or run.translation_id is None
+        ):
+            return False
+        if (
+            await session.get(models.LectureSlideTranslation, run.translation_id)
+            is None
+        ):
+            run.status = schemas.LectureSlideTranslationRunStatus.CANCELLED
+            run.finished_at = utcnow()
+            run.lease_token = None
+            run.leased_by = None
+            run.lease_expires_at = None
+            session.add(run)
+            await session.commit()
+            return False
+        run.lease_expires_at = utcnow() + RUN_LEASE_DURATION
+        session.add(run)
+        await session.commit()
+        return True
+
+
+async def _set_translation_run_stage(
+    run_id: int,
+    lease_token: str,
+    stage: schemas.LectureSlideTranslationStage,
+) -> bool:
+    async with config.db.driver.async_session() as session:
+        run = await models.LectureSlideTranslationRun.get_by_id(session, run_id)
+        if (
+            run is None
+            or run.status != schemas.LectureSlideTranslationRunStatus.RUNNING
+            or run.lease_token != lease_token
+        ):
+            return False
+        run.stage = stage
+        run.lease_expires_at = utcnow() + RUN_LEASE_DURATION
+        session.add(run)
+        if run.translation_id is not None:
+            translation = await session.get(
+                models.LectureSlideTranslation, run.translation_id
+            )
+            if translation is not None:
+                translation.stage = stage
+                translation.status = schemas.LectureSlideTranslationStatus.PROCESSING
+                session.add(translation)
+        await session.commit()
+        return True
 
 
 async def _set_run_stage(

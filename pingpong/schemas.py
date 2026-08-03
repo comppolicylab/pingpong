@@ -535,6 +535,19 @@ class LectureSlideProcessingStage(StrEnum):
     COMPOSITE_ARTIFACTS = "composite_artifacts"
 
 
+class LectureSlideTranslationStage(StrEnum):
+    TRANSLATION_TEXT = "translation_text"
+    NARRATION_AUDIO = "narration_audio"
+    COMPOSITE_ARTIFACTS = "composite_artifacts"
+
+
+class LectureSlideTranslationStatus(StrEnum):
+    QUEUED = "queued"
+    PROCESSING = "processing"
+    READY = "ready"
+    FAILED = "failed"
+
+
 class LectureVideoProcessingRunStatus(StrEnum):
     QUEUED = "queued"
     RUNNING = "running"
@@ -544,6 +557,14 @@ class LectureVideoProcessingRunStatus(StrEnum):
 
 
 class LectureSlideProcessingRunStatus(StrEnum):
+    QUEUED = "queued"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+
+class LectureSlideTranslationRunStatus(StrEnum):
     QUEUED = "queued"
     RUNNING = "running"
     COMPLETED = "completed"
@@ -1393,6 +1414,29 @@ class LectureSlideConfigResponse(BaseModel):
     processing_status: LectureVideoProcessingRunSummary | None = None
 
 
+class LectureSlideLanguage(BaseModel):
+    code: str
+    name: str
+
+
+class LectureSlideLanguagesResponse(BaseModel):
+    languages: list[LectureSlideLanguage]
+    can_prepare: bool = False
+
+
+class PrepareLectureSlideTranslationRequest(BaseModel):
+    language_code: str = Field(..., min_length=2, max_length=16)
+
+
+class LectureSlideTranslationStatusResponse(BaseModel):
+    language_code: str
+    status: Literal["not_started", "queued", "processing", "ready", "failed"]
+    stage: LectureSlideTranslationStage | None = None
+    completed_parts: int = Field(0, ge=0)
+    total_parts: int = Field(0, ge=0)
+    error_message: str | None = None
+
+
 class LectureVideoDefaults(BaseModel):
     instructions: str
     generation_prompt: str
@@ -2228,6 +2272,8 @@ class Thread(BaseModel):
     prevent_user_thread_deletion: bool = False
     anonymous_session: bool = False
     lecture_video_id: int | None = None
+    lecture_language_code: str | None = None
+    lecture_language_name: str | None = None
     is_current_user_participant: bool = False
 
     model_config = ConfigDict(
@@ -2313,6 +2359,7 @@ class CreateLectureThread(BaseModel):
     assistant_id: int
     timezone: str | None = None
     conversation_id: str | None = None
+    language_code: str = Field("original", min_length=2, max_length=16)
 
 
 class VideoMetadata(BaseModel):
