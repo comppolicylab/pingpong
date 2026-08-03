@@ -46,7 +46,7 @@
 		$loading = true;
 
 		try {
-			const { error: createError, data } = await api
+			const { error: createError, data: result } = await api
 				.createLTIGroup(fetch, ltiClassId, {
 					name: name.trim(),
 					term: term.trim(),
@@ -54,13 +54,13 @@
 				})
 				.then(api.expandResponse);
 
-			if (createError || !data) {
+			if (createError || result?.class_id == null) {
 				error = createError?.detail || 'Failed to create group';
 				return;
 			}
 
 			// Redirect to the new group's assistant page
-			await goto(resolve(`/group/${data.class_id}/assistant`));
+			await goto(resolve(`/group/${result.class_id}/assistant`));
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Failed to create group';
 		} finally {

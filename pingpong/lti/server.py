@@ -1404,6 +1404,11 @@ async def _get_lti_class_for_setup(
     return lti_class
 
 
+def _registration_institution_ids(lti_class: LTIClass) -> set[int]:
+    """Institutions a registration may create or link groups under."""
+    return {inst.id for inst in lti_class.registration.institutions}
+
+
 @lti_router.get(
     "/setup/{lti_class_id}",
     dependencies=[Depends(LoggedIn())],
@@ -1433,16 +1438,21 @@ async def get_lti_setup_context(request: StateRequest, lti_class_id: int):
     response_model=LTILinkableGroupsResponse,
 )
 async def get_lti_linkable_groups(request: StateRequest, lti_class_id: int):
-    teacher_class_ids = await request.state["authz"].list(
+    lti_class = await _get_lti_class_for_setup(request, lti_class_id)
+    registration_institution_ids = _registration_institution_ids(lti_class)
+
+    supervised_class_ids = await request.state["authz"].list(
         f"user:{request.state['session'].user.id}",
         "supervisor",
         "class",
     )
 
-    if not teacher_class_ids:
+    if not supervised_class_ids:
         return LTILinkableGroupsResponse(groups=[])
 
-    classes = await Class.get_all_by_id_simple(request.state["db"], teacher_class_ids)
+    classes = await Class.get_all_by_id_simple(
+        request.state["db"], supervised_class_ids
+    )
 
     linkable_groups = [
         LTILinkableGroup(
@@ -1452,6 +1462,7 @@ async def get_lti_linkable_groups(request: StateRequest, lti_class_id: int):
             institution_name=cls.institution.name if cls.institution else "",
         )
         for cls in classes
+        if cls.institution_id in registration_institution_ids
     ]
 
     return LTILinkableGroupsResponse(groups=linkable_groups)
@@ -1589,19 +1600,19 @@ async def link_lti_group(
     lti_class = await _get_lti_class_for_setup(request, lti_class_id)
     user = request.state["session"].user
 
-    # Verify user supervises the target class using authz.
-    has_supervisor_role = await request.state["authz"].test(
-        f"user:{user.id}", "supervisor", f"class:{body.class_id}"
+    has_supervisor_role = await _is_supervisor_by_class_id(
+        request.state["authz"], user.id, body.class_id
     )
     if not has_supervisor_role:
         raise HTTPException(status_code=403, detail="Not authorized to link this class")
 
-    # Verify this LMS course isn't already linked to a group for this
-    # registration. A group may be linked to several LMS courses.
-    has_link = await LTIClass.has_link_for_registration_and_course(
-        request.state["db"], lti_class.registration_id, lti_class.course_id
-    )
-    if has_link:
+    target_class = await Class.get_by_id(request.state["db"], body.class_id)
+    if target_class is None or target_class.institution_id not in (
+        _registration_institution_ids(lti_class)
+    ):
+        raise HTTPException(status_code=403, detail="Not authorized to link this class")
+
+    if lti_class.class_id is not None:
         raise HTTPException(
             status_code=400,
             detail="This Canvas course is already linked to a PingPong group.",
