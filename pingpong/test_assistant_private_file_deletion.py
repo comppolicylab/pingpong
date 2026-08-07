@@ -4,6 +4,8 @@ import logging
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
+import httpx
+import openai
 import pytest
 from sqlalchemy import insert
 
@@ -66,6 +68,16 @@ class FailingDeleteStore:
         raise RuntimeError(f"could not delete {key}")
 
 
+def _openai_not_found_error(file_id: str) -> openai.NotFoundError:
+    request = httpx.Request("DELETE", f"https://api.openai.com/v1/files/{file_id}")
+    response = httpx.Response(404, request=request)
+    return openai.NotFoundError(
+        f"No file found with id '{file_id}'.",
+        response=response,
+        body={"error": {"message": "not found"}},
+    )
+
+
 @pytest.mark.asyncio
 async def test_delete_orphaned_s3_files_raises_on_store_delete_failure(
     db, config, monkeypatch
@@ -84,6 +96,62 @@ async def test_delete_orphaned_s3_files_raises_on_store_delete_failure(
             await files._delete_orphaned_s3_files(session, [s3_file_id])
 
         assert await session.get(models.S3File, s3_file_id) is not None
+
+
+@pytest.mark.asyncio
+async def test_delete_file_ignores_missing_remote_generated_file(
+    db, config, monkeypatch, caplog
+):
+    deleted_keys = []
+    store = SimpleNamespace(
+        delete=AsyncMock(side_effect=lambda key: deleted_keys.append(key))
+    )
+    monkeypatch.setattr(config, "file_store", SimpleNamespace(store=store))
+    authz = AsyncMock()
+    openai_client = AsyncMock()
+    openai_client.files.delete.side_effect = _openai_not_found_error("cfile-calendar")
+
+    async with db.async_session() as session:
+        uploader = models.User(id=7101, email="generated-file@test.dev")
+        class_ = models.Class(id=7102, name="Generated File Class", api_key="sk-test")
+        session.add_all([uploader, class_])
+        await session.flush()
+        file = await models.File.create(
+            session,
+            {
+                "name": "reminders.ics",
+                "content_type": "text/calendar",
+                "file_id": "cfile-calendar",
+                "private": True,
+                "uploader_id": uploader.id,
+                "class_id": class_.id,
+            },
+            class_.id,
+        )
+        s3_file = await models.S3File.create(
+            session,
+            key="generated/reminders.ics",
+            file_obj_ids=[file.id],
+        )
+        await session.refresh(file)
+
+        with caplog.at_level(logging.WARNING, logger="pingpong.files"):
+            result = await files.handle_delete_file(
+                session,
+                authz,
+                openai_client,
+                file.id,
+                class_.id,
+            )
+
+        assert result.status == "ok"
+        assert await models.File.get_by_id(session, file.id) is None
+        assert await session.get(models.S3File, s3_file.id) is None
+
+    openai_client.files.delete.assert_awaited_once_with("cfile-calendar")
+    store.delete.assert_awaited_once_with("generated/reminders.ics")
+    assert deleted_keys == ["generated/reminders.ics"]
+    assert "Could not find file cfile-calendar for deletion, ignored." in caplog.text
 
 
 @pytest.mark.asyncio

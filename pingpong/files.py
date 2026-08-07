@@ -214,7 +214,13 @@ async def handle_delete_file(
         # 4) If none remain, do the actual delete
         if remaining == 0:
             await File.delete(session, int_file_id)
-            await oai_client.files.delete(remote_file_id)
+            try:
+                await oai_client.files.delete(remote_file_id)
+            except openai.NotFoundError:
+                logger.warning(
+                    "Could not find file %s for deletion, ignored.",
+                    sanitize_for_log(remote_file_id),
+                )
             # 5) Revoke all grants for this file
             await authz.write_safe(revoke=revoke_grants)
             try:
