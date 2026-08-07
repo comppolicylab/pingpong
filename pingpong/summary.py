@@ -482,7 +482,6 @@ async def generate_thread_summary(
         text_format=AIAssistantSummaryOutput,
         reasoning=Reasoning(effort="low", summary=None),
         safety_identifier=safety_identifier,
-        temperature=0.0,
     )
 
     return completion.output_parsed
