@@ -368,7 +368,7 @@ async def generate_name(
             instructions=system_prompt,
             input=transcript,
             text_format=ThreadName,
-            reasoning=Reasoning(effort="low", summary=None),
+            reasoning=Reasoning(effort="none", summary=None),
             safety_identifier=safety_identifier_setting,
         )
         return response.output_parsed
