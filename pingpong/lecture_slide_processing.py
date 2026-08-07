@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any, TypeVar, TypedDict, cast
 
 import openai
+import sentry_sdk
 import tiktoken
 from openai.types import Reasoning
 import uuid_utils as uuid
@@ -50,7 +51,7 @@ from pingpong.class_credential_validation import (
     ClassCredentialVoiceValidationError,
 )
 from pingpong.config import config
-from pingpong.errors import capture_exception_to_sentry, sentry
+from pingpong.errors import sentry
 from pingpong.elevenlabs import (
     ElevenLabsSpeechWordTiming,
     synthesize_elevenlabs_speech,
@@ -876,19 +877,17 @@ def _worker_process_main(worker_slot: int, assignment_queue, result_queue) -> No
                 try:
                     runner.run(process_claimed_run(assignment))
                 except Exception as exc:
-                    logger.exception(
-                        "Lecture processing worker failed. run_id=%s slot=%s pid=%s",
-                        assignment.run_id,
-                        worker_slot,
-                        os.getpid(),
-                    )
-                    capture_exception_to_sentry(
-                        exc,
-                        source="lecture-processing-worker-child",
-                        worker_slot=worker_slot,
-                        pid=os.getpid(),
-                        run_id=assignment.run_id,
-                    )
+                    with sentry_sdk.new_scope() as scope:
+                        scope.set_tag("source", "lecture-processing-worker-child")
+                        scope.set_tag("worker_slot", worker_slot)
+                        scope.set_tag("pid", os.getpid())
+                        scope.set_tag("run_id", assignment.run_id)
+                        logger.exception(
+                            "Lecture processing worker failed. run_id=%s slot=%s pid=%s",
+                            assignment.run_id,
+                            worker_slot,
+                            os.getpid(),
+                        )
                     result_queue.put(
                         WorkerJobException(
                             worker_slot=worker_slot,

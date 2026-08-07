@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any
 
+import sentry_sdk
 import uuid_utils as uuid
 from sqlalchemy import and_, delete, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
@@ -32,7 +33,7 @@ from pingpong.class_credential_validation import (
     ClassCredentialVoiceValidationError,
 )
 from pingpong.config import config
-from pingpong.errors import capture_exception_to_sentry, sentry
+from pingpong.errors import sentry
 from pingpong.elevenlabs import (
     synthesize_elevenlabs_speech,
 )
@@ -205,19 +206,18 @@ def _worker_process_main(
                         )
                     )
                 except Exception as exc:
-                    logger.exception(
-                        "Lecture video worker process failed while handling run_id=%s. slot=%s pid=%s",
-                        assignment.run_id,
-                        worker_slot,
-                        os.getpid(),
-                    )
-                    capture_exception_to_sentry(
-                        exc,
-                        source="lecture-video-worker-child",
-                        worker_slot=worker_slot,
-                        pid=os.getpid(),
-                        run_id=assignment.run_id,
-                    )
+                    with sentry_sdk.new_scope() as scope:
+                        scope.set_tag("source", "lecture-video-worker-child")
+                        scope.set_tag("worker_slot", worker_slot)
+                        scope.set_tag("pid", os.getpid())
+                        scope.set_tag("run_id", assignment.run_id)
+
+                        logger.exception(
+                            "Lecture video worker process failed while handling run_id=%s. slot=%s pid=%s",
+                            assignment.run_id,
+                            worker_slot,
+                            os.getpid(),
+                        )
                     result_queue.put(
                         WorkerJobException(
                             worker_slot=worker_slot,

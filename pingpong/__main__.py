@@ -1740,7 +1740,7 @@ def run_lecture_video_worker(
     # Kept as a deployment-compatibility alias during the slide/video worker cutover.
     server = get_server(host=host, port=port)
 
-    with sentry(), server.run_in_thread():
+    with server.run_in_thread():
         with contextlib.suppress(KeyboardInterrupt):
             lecture_slide_processing.run_processing_worker_pool(
                 poll_interval_seconds=poll_interval,
@@ -1771,7 +1771,7 @@ def run_lecture_processing_worker(
 ) -> None:
     server = get_server(host=host, port=port)
 
-    with sentry(), server.run_in_thread():
+    with server.run_in_thread():
         with contextlib.suppress(KeyboardInterrupt):
             lecture_slide_processing.run_processing_worker_pool(
                 poll_interval_seconds=poll_interval,

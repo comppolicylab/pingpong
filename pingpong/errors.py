@@ -33,19 +33,6 @@ def init_sentry() -> None:
     _sentry_pid = current_pid
 
 
-def capture_exception_to_sentry(exc: Exception, **tags: object) -> None:
-    if not config.sentry.dsn:
-        return
-
-    init_sentry()
-    with sentry_sdk.push_scope() as scope:
-        for key, value in tags.items():
-            if value is not None:
-                scope.set_tag(key, str(value))
-        sentry_sdk.capture_exception(exc)
-        sentry_sdk.flush(timeout=2.0)
-
-
 @contextmanager
 def sentry():
     init_sentry()
