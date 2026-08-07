@@ -62,17 +62,14 @@ async def test_openai_class_models_include_latest_gpt_5_models(monkeypatch):
         }
     )
 
-    async def fake_lecture_video_provider_flags(_session, _class_id):
-        return {
-            "has_gemini_credential": False,
-            "has_elevenlabs_credential": False,
-            "lecture_video_enabled": False,
-        }
-
     monkeypatch.setattr(
         server_module,
         "_get_class_lecture_video_provider_flags",
-        fake_lecture_video_provider_flags,
+        AsyncMock(
+            side_effect=AssertionError(
+                "Listing models must not load lecture lesson provider state"
+            )
+        ),
     )
 
     response = await server_module.list_class_models(
@@ -147,17 +144,14 @@ async def test_azure_class_models_do_not_force_classic_assistants(monkeypatch):
         }
     )
 
-    async def fake_lecture_video_provider_flags(_session, _class_id):
-        return {
-            "has_gemini_credential": False,
-            "has_elevenlabs_credential": False,
-            "lecture_video_enabled": False,
-        }
-
     monkeypatch.setattr(
         server_module,
         "_get_class_lecture_video_provider_flags",
-        fake_lecture_video_provider_flags,
+        AsyncMock(
+            side_effect=AssertionError(
+                "Listing models must not load lecture lesson provider state"
+            )
+        ),
     )
 
     response = await server_module.list_class_models(

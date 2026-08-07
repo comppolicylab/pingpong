@@ -99,13 +99,14 @@
 	import { deriveLectureSlideProcessingTriggers } from '$lib/lectureSlideProcessing';
 	import { SvelteSet } from 'svelte/reactivity';
 	export let data;
-	$: lectureVideoDefaultInstructions = data.lectureVideoDefaults?.instructions || '';
-	$: lectureVideoDefaultGenerationPrompt = data.lectureVideoDefaults?.generation_prompt || '';
+	$: lectureVideoDefaultInstructions = data.lectureLessonEditorConfig?.instructions || '';
+	$: lectureVideoDefaultGenerationPrompt = data.lectureLessonEditorConfig?.generation_prompt || '';
 	$: lectureSlideDefaultGenerationPrompt =
-		data.lectureVideoDefaults?.lecture_slide_generation_prompt || '';
+		data.lectureLessonEditorConfig?.lecture_slide_generation_prompt || '';
 	$: lectureSlideDefaultNarrationPrompt =
-		data.lectureVideoDefaults?.lecture_slide_narration_prompt || '';
-	$: lectureSlideDefaultInstructions = data.lectureVideoDefaults?.lecture_slides_instructions || '';
+		data.lectureLessonEditorConfig?.lecture_slide_narration_prompt || '';
+	$: lectureSlideDefaultInstructions =
+		data.lectureLessonEditorConfig?.lecture_slides_instructions || '';
 	const SUPPORTED_LECTURE_VIDEO_QUESTION_TYPES = new Set<api.LectureVideoQuestionType>([
 		'single_select'
 	]);
@@ -722,8 +723,10 @@
 	let videoDescriptionDurationMs =
 		data.lectureVideoConfig?.video_description_duration_ms ?? DEFAULT_VIDEO_DESCRIPTION_DURATION_MS;
 	let hasSetVideoDescriptionDuration = false;
-	let canGenerateLectureVideoManifest = data.lectureVideoDefaults?.can_generate_manifest ?? false;
-	$: canGenerateLectureVideoManifest = data.lectureVideoDefaults?.can_generate_manifest ?? false;
+	let canGenerateLectureVideoManifest =
+		data.lectureLessonEditorConfig?.can_generate_manifest ?? false;
+	$: canGenerateLectureVideoManifest =
+		data.lectureLessonEditorConfig?.can_generate_manifest ?? false;
 	const effectiveOverwriteManifest = (storedOverwriteManifest?: boolean | null) =>
 		canGenerateLectureVideoManifest ? (storedOverwriteManifest ?? false) : true;
 	let overwriteManifest = effectiveOverwriteManifest(data.lectureVideoConfig?.overwrite_manifest);
