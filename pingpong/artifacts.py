@@ -8,6 +8,8 @@ from typing import IO, AsyncGenerator
 
 from aiohttp import ClientError
 
+from pingpong.http_utils import content_disposition
+
 logger = logging.getLogger(__name__)
 
 
@@ -48,7 +50,7 @@ class S3ArtifactStore(BaseArtifactStore):
                 Key=name,
                 Body=content.read(),
                 ContentType=content_type,
-                ContentDisposition=f'attachment; filename="{name}"',
+                ContentDisposition=content_disposition("attachment", name),
             )
 
     async def get(

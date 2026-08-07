@@ -100,6 +100,7 @@ from pingpong.followup_transform import (
     extract_followup_suggestions,
     strip_followup_snippets,
 )
+from pingpong.http_utils import content_disposition
 from pingpong.lti.lti_course import (
     find_class_by_course_id,
     find_class_by_course_id_search_by_canvas_account_lti_guid,
@@ -6459,7 +6460,9 @@ async def get_thread_recording(
             stream,
             media_type="application/octet-stream",
             headers={
-                "Content-Disposition": f'attachment; filename="{thread.voice_mode_recording}"'
+                "Content-Disposition": content_disposition(
+                    "attachment", str(thread.voice_mode_recording)
+                )
             },
         )
     except AudioStoreError:
@@ -6561,7 +6564,9 @@ async def redirect_to_transcription_download(
         return StreamingResponse(
             config.artifact_store.store.get(download_name),
             media_type="application/octet-stream",
-            headers={"Content-Disposition": f"attachment; filename={download_name}"},
+            headers={
+                "Content-Disposition": content_disposition("attachment", download_name)
+            },
         )
     except TimeException:
         return RedirectResponse(
@@ -6835,7 +6840,9 @@ async def redirect_to_export(class_id: str, request: StateRequest):
         return StreamingResponse(
             config.artifact_store.store.get(download_name),
             media_type="application/octet-stream",
-            headers={"Content-Disposition": f"attachment; filename={download_name}"},
+            headers={
+                "Content-Disposition": content_disposition("attachment", download_name)
+            },
         )
     except TimeException:
         return RedirectResponse(
@@ -10514,7 +10521,9 @@ async def _stream_lecture_slide_source_pdf(
         media_type=source.content_type or "application/pdf",
         headers={
             "Cache-Control": "private, max-age=86400",
-            "Content-Disposition": f'inline; filename="{source.original_filename}"',
+            "Content-Disposition": content_disposition(
+                "inline", source.original_filename
+            ),
         },
     )
 
@@ -15569,7 +15578,7 @@ async def get_image(
     return StreamingResponse(
         config.file_store.store.get(name=file.s3_file.key),
         media_type=file.content_type,
-        headers={"Content-Disposition": f"inline; filename={file.name}"},
+        headers={"Content-Disposition": content_disposition("inline", file.name)},
     )
 
 
@@ -15598,7 +15607,7 @@ async def _proxy_openai_file_response(
         )
     media_type = response.headers.get("content-type", "application/octet-stream")
     disposition = response.headers.get(
-        "content-disposition", f"inline; filename={file_id}"
+        "content-disposition", content_disposition("inline", file_id)
     )
     return Response(
         content=response.content,
@@ -15800,7 +15809,7 @@ async def download_file(
         # defaults set just in case.
         media_type = response.headers.get("content-type", "application/octet-stream")
         disposition = response.headers.get(
-            "content-disposition", f"attachment; filename={file_id}"
+            "content-disposition", content_disposition("attachment", file_id)
         )
         headers = {
             "Content-Type": media_type,
@@ -15842,7 +15851,9 @@ async def download_file(
         return StreamingResponse(
             config.file_store.store.get(name=file.s3_file.key),
             media_type="application/octet-stream",
-            headers={"Content-Disposition": f"attachment; filename={file.name}"},
+            headers={
+                "Content-Disposition": content_disposition("attachment", file.name)
+            },
         )
     else:
         raise HTTPException(
