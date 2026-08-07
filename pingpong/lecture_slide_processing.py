@@ -2185,12 +2185,6 @@ async def _process_claimed_slide_run(run_id: int, lease_token: str) -> None:
                         force_manifest_generation
                         or current_run.force_manifest_generation
                     )
-                if force_manifest_generation and pdf_path is None:
-                    pdf_path = await _download_source_pdf(
-                        run_id, lease_token, deck_id, temp_dir
-                    )
-                    if pdf_path is None:
-                        return
                 has_manifest = await _deck_has_slide_manifest(deck_id)
                 start_stage = (
                     schemas.LectureSlideProcessingStage.COMPOSITE_ARTIFACTS
@@ -2200,6 +2194,16 @@ async def _process_claimed_slide_run(run_id: int, lease_token: str) -> None:
                     and not force_manifest_generation
                     else schemas.LectureSlideProcessingStage.MANIFEST_GENERATION
                 )
+                if (
+                    start_stage
+                    == schemas.LectureSlideProcessingStage.MANIFEST_GENERATION
+                    and pdf_path is None
+                ):
+                    pdf_path = await _download_source_pdf(
+                        run_id, lease_token, deck_id, temp_dir
+                    )
+                    if pdf_path is None:
+                        return
 
             if start_stage == schemas.LectureSlideProcessingStage.MANIFEST_GENERATION:
                 if transcript is None:
@@ -3270,6 +3274,8 @@ async def _synthesize_slide_audio(
                 if content_kind == schemas.LectureSlideContentKind.VIDEO:
                     page.narration_text = narration_text
                 session.add(page)
+                run.lease_expires_at = utcnow() + RUN_LEASE_DURATION
+                session.add(run)
                 await session.commit()
         except Exception:
             await _delete_audio_key_quietly(store_key)
