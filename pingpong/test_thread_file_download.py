@@ -382,7 +382,9 @@ async def test_download_file_v3_requires_requested_message_reference(
 
     assert response.status_code == 200
     assert response.content == b"generated report"
-    assert response.headers["content-disposition"] == "attachment; filename=report.csv"
+    assert (
+        response.headers["content-disposition"] == 'attachment; filename="report.csv"'
+    )
 
 
 @with_user(123)
@@ -467,7 +469,7 @@ async def test_download_file_v3_allows_vision_annotation_by_object_id(
 
     assert response.status_code == 200
     assert response.content == b"image-bytes"
-    assert response.headers["content-disposition"] == "attachment; filename=chart.png"
+    assert response.headers["content-disposition"] == 'attachment; filename="chart.png"'
 
 
 @with_user(123)

@@ -518,7 +518,7 @@ async def test_get_image_v3_requires_thread_image_file_membership(
         image_file = models.File(
             id=570,
             file_id="file-image-57",
-            name="chart.png",
+            name="revenue\u202fchart.png",
             content_type="image/png",
             class_id=57,
             s3_file=models.S3File(id=5700, key="generated/chart.png"),
@@ -557,7 +557,10 @@ async def test_get_image_v3_requires_thread_image_file_membership(
     assert response.status_code == 200
     assert response.content == b"image-bytes"
     assert response.headers["content-type"] == "image/png"
-    assert response.headers["content-disposition"] == "inline; filename=chart.png"
+    assert (
+        response.headers["content-disposition"]
+        == "inline; filename*=utf-8''revenue%E2%80%AFchart.png"
+    )
 
 
 @with_user(123)
