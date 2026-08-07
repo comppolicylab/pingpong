@@ -3376,15 +3376,12 @@ async def update_user_class_role(
     dependencies=[Depends(Authz("supervisor", "class:{class_id}"))],
     response_model=schemas.GenericStatus,
 )
-async def remove_user_from_class(class_id: str, user_id: str, request: StateRequest):
-    cid = int(class_id)
-    uid = int(user_id)
-
+async def remove_user_from_class(class_id: int, user_id: int, request: StateRequest):
     try:
         await check_permissions(
             request,
-            uid,
-            cid,
+            user_id,
+            class_id,
         )
     except CheckUserPermissionException as e:
         logger.exception(
@@ -3400,11 +3397,11 @@ async def remove_user_from_class(class_id: str, user_id: str, request: StateRequ
             status_code=500,
             detail="We faced an internal error while verifying your permissions.",
         )
-    await models.UserClassRole.delete(request.state["db"], uid, cid)
+    await models.UserClassRole.delete(request.state["db"], user_id, class_id)
 
     revokes = list[Relation]()
     for role in ["admin", "teacher", "student"]:
-        revokes.append((f"user:{uid}", role, f"class:{cid}"))
+        revokes.append((f"user:{user_id}", role, f"class:{class_id}"))
 
     await request.state["authz"].write_safe(revoke=revokes)
     return {"status": "ok"}
