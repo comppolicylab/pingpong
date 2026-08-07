@@ -3168,6 +3168,82 @@ async def test_synthesize_slide_audio_skips_pages_with_existing_narration(
     assert [artifact.page_id for artifact in artifacts] == [changed_page_id]
 
 
+async def test_synthesize_slide_audio_renews_lease_after_each_persisted_page(
+    db, monkeypatch
+):
+    await _create_class_and_deck(db, slide_count=2)
+    now = utcnow()
+    initial_lease_expiry = now - timedelta(minutes=1)
+    async with db.async_session() as session:
+        pages = [
+            models.LectureSlidePage(
+                lecture_slide_deck_id=1,
+                position=0,
+                narration_text="First narration.",
+            ),
+            models.LectureSlidePage(
+                lecture_slide_deck_id=1,
+                position=1,
+                narration_text="Second narration.",
+            ),
+        ]
+        run = models.LectureSlideProcessingRun(
+            lecture_slide_deck_id=1,
+            lecture_slide_deck_id_snapshot=1,
+            class_id=1,
+            stage=schemas.LectureSlideProcessingStage.NARRATION_AUDIO,
+            attempt_number=1,
+            status=schemas.LectureSlideProcessingRunStatus.RUNNING,
+            lease_token="lease",
+            lease_expires_at=initial_lease_expiry,
+        )
+        session.add_all([*pages, run])
+        await session.commit()
+        run_id = run.id
+
+    lease_expiry_before_second_page = None
+
+    async def fake_get_elevenlabs_api_key(_class_id):
+        return "elevenlabs-key"
+
+    async def fake_synthesize_speech_with_timings(_api_key, _voice_id, text):
+        nonlocal lease_expiry_before_second_page
+        if text == "Second narration.":
+            async with db.async_session() as session:
+                run = await session.get(models.LectureSlideProcessingRun, run_id)
+                assert run is not None
+                lease_expiry_before_second_page = run.lease_expires_at
+        return SimpleNamespace(audio=f"audio-{text}".encode(), words=())
+
+    async def fake_store_audio(store_key, _content_type, audio):
+        return store_key, len(audio)
+
+    monkeypatch.setattr(lecture_slide_processing, "utcnow", lambda: now)
+    monkeypatch.setattr(
+        lecture_slide_processing, "_get_elevenlabs_api_key", fake_get_elevenlabs_api_key
+    )
+    monkeypatch.setattr(
+        lecture_slide_processing,
+        "synthesize_elevenlabs_speech_with_timings",
+        fake_synthesize_speech_with_timings,
+    )
+    monkeypatch.setattr(lecture_slide_processing, "_store_audio", fake_store_audio)
+    monkeypatch.setattr(lecture_slide_processing, "audio_duration_ms", lambda *_: 100)
+
+    artifacts = await lecture_slide_processing._synthesize_slide_audio(
+        run_id, "lease", 1
+    )
+
+    assert artifacts is not None
+    assert len(artifacts) == 2
+    assert lease_expiry_before_second_page is not None
+    assert lease_expiry_before_second_page != initial_lease_expiry
+    async with db.async_session() as session:
+        run = await session.get(models.LectureSlideProcessingRun, run_id)
+        assert run is not None
+        assert run.lease_expires_at == lease_expiry_before_second_page
+
+
 async def test_synthesize_slide_audio_deletes_uploaded_audio_when_db_lookup_raises(
     db, monkeypatch
 ):
@@ -4219,6 +4295,107 @@ async def test_process_audio_run_rereads_force_manifest_generation(db, monkeypat
 
     await lecture_slide_processing._process_claimed_slide_run(run_id, "lease")
 
+    assert manifest_generated is True
+
+
+async def test_process_audio_run_without_manifest_downloads_pdf_before_generation(
+    db, monkeypatch
+):
+    await _create_class_and_deck(db)
+    async with db.async_session() as session:
+        deck = await models.LectureSlideDeck.get_by_id_with_processing_context(
+            session, 1
+        )
+        assert deck is not None
+        deck.status = schemas.LectureSlideDeckStatus.PROCESSING
+        page = models.LectureSlidePage(
+            lecture_slide_deck_id=1,
+            position=0,
+            narration_text="Narration.",
+        )
+        run = models.LectureSlideProcessingRun(
+            lecture_slide_deck_id=1,
+            lecture_slide_deck_id_snapshot=1,
+            class_id=1,
+            stage=schemas.LectureSlideProcessingStage.NARRATION_AUDIO,
+            attempt_number=1,
+            status=schemas.LectureSlideProcessingRunStatus.RUNNING,
+            lease_token="lease",
+            force_manifest_generation=False,
+        )
+        session.add_all([page, run])
+        await session.commit()
+        run_id = run.id
+
+    downloaded_pdf = False
+    manifest_generated = False
+
+    async def fake_download_source_pdf(*_args):
+        nonlocal downloaded_pdf
+        downloaded_pdf = True
+        return "/tmp/slides.pdf"
+
+    async def fake_generate_slide_manifest(*_args):
+        nonlocal manifest_generated
+        manifest_generated = True
+        return lecture_slide_processing.GeneratedSlideManifest(questions=[])
+
+    monkeypatch.setattr(
+        lecture_slide_processing,
+        "get_openai_client_by_class_id",
+        lambda _session, _class_id: _async_value(SimpleNamespace()),
+    )
+    monkeypatch.setattr(
+        lecture_slide_processing,
+        "_get_responses_model_for_run",
+        lambda *_args: _async_value("gpt-test"),
+    )
+    monkeypatch.setattr(
+        lecture_slide_processing, "_download_source_pdf", fake_download_source_pdf
+    )
+    monkeypatch.setattr(
+        lecture_slide_processing,
+        "_synthesize_slide_audio",
+        lambda *_args: _async_value([SimpleNamespace(page_id=1)]),
+    )
+    monkeypatch.setattr(
+        lecture_slide_processing,
+        "_persist_slide_audio_timings",
+        lambda *_args: _async_value(
+            [
+                schemas.LectureVideoManifestWordV3(
+                    id="w1",
+                    word="hello",
+                    start_offset_ms=0,
+                    end_offset_ms=100,
+                )
+            ]
+        ),
+    )
+    monkeypatch.setattr(
+        lecture_slide_processing,
+        "_get_or_upload_openai_input_pdf",
+        lambda *_args: _async_value("file-test"),
+    )
+    monkeypatch.setattr(
+        lecture_slide_processing,
+        "_generate_slide_manifest",
+        fake_generate_slide_manifest,
+    )
+    monkeypatch.setattr(
+        lecture_slide_processing,
+        "_persist_slide_manifest",
+        lambda *_args: _async_value(None),
+    )
+    monkeypatch.setattr(
+        lecture_slide_processing,
+        "_persist_composite_artifacts",
+        lambda *_args: _async_value(None),
+    )
+
+    await lecture_slide_processing._process_claimed_slide_run(run_id, "lease")
+
+    assert downloaded_pdf is True
     assert manifest_generated is True
 
 
