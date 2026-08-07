@@ -36,6 +36,20 @@ def test_shared_media_routes_allow_query_parameter_auth(path):
     assert is_media_route(path)
 
 
+@with_user(123)
+@with_authz(grants=[("user:123", "supervisor", "class:594")])
+async def test_remove_user_from_class_rejects_non_integer_user_id(
+    api, valid_user_token
+):
+    response = api.delete(
+        "/api/v1/class/594/user/null",
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"][0]["type"] == "int_parsing"
+
+
 async def _async_return(value):
     return value
 
