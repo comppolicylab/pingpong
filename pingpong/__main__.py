@@ -1740,7 +1740,7 @@ def run_lecture_video_worker(
     # Kept as a deployment-compatibility alias during the slide/video worker cutover.
     server = get_server(host=host, port=port)
 
-    with sentry(), server.run_in_thread():
+    with server.run_in_thread():
         with contextlib.suppress(KeyboardInterrupt):
             lecture_slide_processing.run_processing_worker_pool(
                 poll_interval_seconds=poll_interval,
@@ -1771,7 +1771,7 @@ def run_lecture_processing_worker(
 ) -> None:
     server = get_server(host=host, port=port)
 
-    with sentry(), server.run_in_thread():
+    with server.run_in_thread():
         with contextlib.suppress(KeyboardInterrupt):
             lecture_slide_processing.run_processing_worker_pool(
                 poll_interval_seconds=poll_interval,
@@ -1848,5 +1848,11 @@ def run_dynamic_tasks_with_args(host: str, port: int, tasks: list[str]) -> None:
         asyncio.run(_parse_tasks())
 
 
+def main() -> None:
+    """Run every CLI command with process-wide Sentry instrumentation."""
+    with sentry():
+        cli()
+
+
 if __name__ == "__main__":
-    cli()
+    main()

@@ -6,7 +6,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from pingpong.errors import capture_exception_to_sentry
+import sentry_sdk
 
 logger = logging.getLogger(__name__)
 
@@ -148,13 +148,11 @@ class WorkerPoolManager:
                     self.sleep_fn(self.poll_interval_seconds)
         except KeyboardInterrupt:
             self.request_stop()
-        except Exception as exc:
-            logger.exception("%s manager failed.", self.worker_pool_label_display)
-            capture_exception_to_sentry(
-                exc,
-                source=self._manager_exception_source(),
-                workers=self.workers,
-            )
+        except Exception:
+            with sentry_sdk.new_scope() as scope:
+                scope.set_tag("source", self._manager_exception_source())
+                scope.set_tag("workers", self.workers)
+                logger.exception("%s manager failed.", self.worker_pool_label_display)
             raise
         finally:
             try:

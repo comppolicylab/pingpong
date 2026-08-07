@@ -1,33 +1,54 @@
-from contextlib import contextmanager
+import asyncio
+import os
+from contextlib import asynccontextmanager, contextmanager
 
 import sentry_sdk
 from sentry_sdk.integrations.aiohttp import AioHttpIntegration
 
 from .config import config
 
+_sentry_pid: int | None = None
 
-def capture_exception_to_sentry(exc: Exception, **tags: object) -> None:
+
+def init_sentry() -> None:
+    """Initialize Sentry once in the current process."""
+    global _sentry_pid
+
     if not config.sentry.dsn:
         return
 
-    with sentry_sdk.push_scope() as scope:
-        for key, value in tags.items():
-            if value is not None:
-                scope.set_tag(key, str(value))
-        sentry_sdk.capture_exception(exc)
-        sentry_sdk.flush(timeout=2.0)
+    current_pid = os.getpid()
+    if _sentry_pid == current_pid:
+        return
+
+    sentry_sdk.init(
+        dsn=config.sentry.dsn,
+        integrations=[AioHttpIntegration()],
+        traces_sample_rate=1.0,
+        profiles_sample_rate=1.0,
+        profile_lifecycle="trace",
+        enable_logs=True,
+        max_request_body_size="always",
+    )
+    # codeql[py/unused-global-variable]
+    _sentry_pid = current_pid
 
 
 @contextmanager
 def sentry():
-    if config.sentry.dsn:
-        sentry_sdk.init(
-            dsn=config.sentry.dsn,
-            integrations=[AioHttpIntegration()],
-            traces_sample_rate=1.0,
-            profiles_sample_rate=1.0,
-            profile_lifecycle="trace",
-            enable_logs=True,
-            max_request_body_size="always",
-        )
-    yield
+    init_sentry()
+    try:
+        yield
+    finally:
+        if config.sentry.dsn:
+            sentry_sdk.flush(timeout=2.0)
+
+
+@asynccontextmanager
+async def async_sentry():
+    init_sentry()
+    try:
+        yield
+    finally:
+        if config.sentry.dsn:
+            await asyncio.to_thread(sentry_sdk.flush, timeout=2.0)

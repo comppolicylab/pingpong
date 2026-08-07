@@ -178,7 +178,7 @@ from .canvas import (
     get_canvas_config,
 )
 from .config import config
-from .errors import sentry
+from .errors import async_sentry
 from .files import (
     FILE_TYPES,
     FileNotFoundException,
@@ -16643,16 +16643,17 @@ async def post_support(
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Run services in the background."""
-    if not await config.db.driver.exists():
-        logger.warning("Creating a new database since none exists.")
-        await config.db.driver.create()
-        await config.db.driver.init(models.Base)
+    async with async_sentry():
+        with metrics.metrics():
+            if not await config.db.driver.exists():
+                logger.warning("Creating a new database since none exists.")
+                await config.db.driver.create()
+                await config.db.driver.init(models.Base)
 
-    logger.info("Configuring authorization ...")
-    await config.authz.driver.init()
+            logger.info("Configuring authorization ...")
+            await config.authz.driver.init()
 
-    with sentry(), metrics.metrics():
-        yield
+            yield
 
 
 app = FastAPI(
