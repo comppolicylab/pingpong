@@ -173,7 +173,7 @@ Chronological list of previous Knowledge Check interactions, each showing:
 The previous conversation messages between you and the learner follow this developer message, ending with the learner's newest question.
 """
 
-DEFAULT_LECTURE_VIDEO_INSTRUCTIONS: str = DEFAULT_LECTURE_INSTRUCTIONS.safe_substitute(
+DEFAULT_LECTURE_VIDEO_INSTRUCTIONS: str = DEFAULT_LECTURE_INSTRUCTIONS.safe_substitute(  # codeql[py/unused-global-variable]
     {
         "lecture_type": "video",
         "activity_lesson": "in the video",

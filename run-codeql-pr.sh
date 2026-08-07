@@ -27,6 +27,7 @@ resolve_language_config() {
   CODEQL_LANGUAGE_NAME=""
   CODEQL_PACK=""
   CODEQL_SUITE_FILE=""
+  CODEQL_ADDITIONAL_SUITE_FILE=""
   CODEQL_EXTRA_QUERY=""
 
   case "$lang" in
@@ -43,7 +44,8 @@ resolve_language_config() {
     python)
       CODEQL_LANGUAGE_NAME="python"
       CODEQL_PACK="codeql/python-queries"
-      CODEQL_SUITE_FILE="python-security-and-quality.qls"
+      CODEQL_SUITE_FILE="python-security-extended.qls"
+      CODEQL_ADDITIONAL_SUITE_FILE="python-code-quality.qls"
       CODEQL_EXTRA_QUERY="$CODEQL_PACK:AlertSuppression.ql"
       ;;
     *)
@@ -180,6 +182,10 @@ run_codeql() {
   local lgtm_index_filters="${LGTM_INDEX_FILTERS:-}"
   local gitignored_excludes
   local -a queries=("$CODEQL_PACK:codeql-suites/$CODEQL_SUITE_FILE")
+
+  if [ -n "$CODEQL_ADDITIONAL_SUITE_FILE" ]; then
+    queries+=("$CODEQL_PACK:codeql-suites/$CODEQL_ADDITIONAL_SUITE_FILE")
+  fi
 
   if [ -n "$CODEQL_EXTRA_QUERY" ]; then
     queries+=("$CODEQL_EXTRA_QUERY")
