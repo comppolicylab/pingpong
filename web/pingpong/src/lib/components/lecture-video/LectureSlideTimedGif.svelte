@@ -14,6 +14,7 @@
 		startOffsetMs,
 		endOffsetMs,
 		timelineMedia,
+		timelineMediaBaseOffsetMs = 0,
 		paused
 	}: {
 		src: string;
@@ -22,6 +23,7 @@
 		startOffsetMs: number;
 		endOffsetMs: number;
 		timelineMedia: HTMLMediaElement | null;
+		timelineMediaBaseOffsetMs?: number;
 		paused: boolean;
 	} = $props();
 
@@ -175,7 +177,7 @@
 		let animationFrameId = 0;
 		const renderFrame = (nowMs: number) => {
 			const timelineOffsetMs = mediaElement
-				? mediaElement.currentTime * 1000
+				? timelineMediaBaseOffsetMs + mediaElement.currentTime * 1000
 				: initialOffsetMs + nowMs - startedAtMs;
 			if (timelineOffsetMs >= endOffsetMs) {
 				renderAtOffset(gif, Math.max(startOffsetMs, endOffsetMs - 1));

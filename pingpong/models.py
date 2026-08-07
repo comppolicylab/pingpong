@@ -4694,12 +4694,17 @@ def _thread_lecture_slide_base_loaders() -> tuple[Load, ...]:
             selectinload(LectureSlideDeck.pages).selectinload(
                 LectureSlidePage.media_stored_object
             ),
+            selectinload(LectureSlideDeck.pages)
+            .selectinload(LectureSlidePage.narration)
+            .selectinload(LectureSlideNarration.stored_object),
             selectinload(LectureSlideDeck.questions).options(
                 *_lecture_slide_question_context_loaders()
             ),
         ),
         selectinload(Thread.lecture_slide_translation).options(
-            selectinload(LectureSlideTranslation.pages),
+            selectinload(LectureSlideTranslation.pages).selectinload(
+                LectureSlideTranslationPage.narration_stored_object
+            ),
             selectinload(LectureSlideTranslation.continuous_narration_stored_object),
             selectinload(LectureSlideTranslation.caption_stored_object),
         ),

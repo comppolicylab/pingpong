@@ -1909,6 +1909,8 @@ export type LectureSlidePage = {
 	media_duration_ms?: number | null;
 	media_width_px?: number | null;
 	media_height_px?: number | null;
+	narration_url?: string | null;
+	narration_duration_ms?: number | null;
 	user_notes?: string | null;
 	narration_text?: string | null;
 };

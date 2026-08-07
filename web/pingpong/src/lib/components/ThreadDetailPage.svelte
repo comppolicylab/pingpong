@@ -3,6 +3,7 @@
 	import { beforeNavigate, goto, invalidateAll, afterNavigate } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import * as api from '$lib/api';
+	import { isCompleteAudioPlaylist } from '$lib/utils/audio-playlist';
 	import disagreementProjectIcon from '$lib/assets/disagreementproject.png';
 	import {
 		getAnonymousSessionToken,
@@ -210,6 +211,20 @@
 			0
 		);
 		return lastEnd > 0 ? lastEnd : lectureSlidePages.length * 60_000;
+	})();
+	$: lectureSlideAudioSegments = (() => {
+		const segments = lectureSlidePages.flatMap((page: api.LectureSlidePage) =>
+			page.narration_url && page.start_offset_ms != null && page.end_offset_ms != null
+				? [
+						{
+							src: api.withMediaAuthQuery(page.narration_url),
+							startOffsetMs: page.start_offset_ms,
+							endOffsetMs: page.end_offset_ms
+						}
+					]
+				: []
+		);
+		return isCompleteAudioPlaylist(segments, lectureSlideDurationMs) ? segments : [];
 	})();
 	function lectureSlidePageAtOffset(
 		offsetMs: number,
@@ -1863,6 +1878,7 @@
 				chatAvailable={threadLectureSlideChatAvailable}
 				lessonMode="lecture_slides"
 				mediaKind="audio"
+				audioSegments={lectureSlideAudioSegments}
 				durationMsOverride={lectureSlideDurationMs}
 				mediaAspectRatio={lectureSlideMediaAspectRatio}
 				on:sessionchange={handleLectureSlideSessionChange}
@@ -1885,7 +1901,13 @@
 						</button>
 					{/if}
 				{/snippet}
-				{#snippet visual(offsetMs, playbackPaused, timelineMedia, questionBoundaryMs)}
+				{#snippet visual(
+					offsetMs,
+					playbackPaused,
+					timelineMedia,
+					questionBoundaryMs,
+					timelineMediaBaseOffsetMs
+				)}
 					{@const visiblePage = lectureSlidePageAtOffset(offsetMs, questionBoundaryMs)}
 					{@const visiblePageIndex = visiblePage ? lectureSlidePageIndex(visiblePage) : -1}
 					{@const previousPage =
@@ -1913,6 +1935,7 @@
 									startOffsetMs={visiblePage.start_offset_ms}
 									endOffsetMs={visiblePage.end_offset_ms}
 									{timelineMedia}
+									{timelineMediaBaseOffsetMs}
 									paused={playbackPaused}
 								/>
 							{:else if visiblePage.media_url}
