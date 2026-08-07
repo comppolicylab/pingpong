@@ -370,7 +370,6 @@ async def generate_name(
             text_format=ThreadName,
             reasoning=Reasoning(effort="none", summary=None),
             safety_identifier=safety_identifier_setting,
-            temperature=0.0,
         )
         return response.output_parsed
     except openai.RateLimitError as e:
