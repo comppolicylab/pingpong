@@ -7,7 +7,7 @@ from sentry_sdk.integrations.aiohttp import AioHttpIntegration
 
 from .config import config
 
-_sentry_pid: int | None = None  # codeql[py/unused-global-variable]
+_sentry_pid: int | None = None
 
 
 def init_sentry() -> None:
@@ -30,6 +30,7 @@ def init_sentry() -> None:
         enable_logs=True,
         max_request_body_size="always",
     )
+    # codeql[py/unused-global-variable]
     _sentry_pid = current_pid
 
 
