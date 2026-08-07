@@ -1848,5 +1848,11 @@ def run_dynamic_tasks_with_args(host: str, port: int, tasks: list[str]) -> None:
         asyncio.run(_parse_tasks())
 
 
+def main() -> None:
+    """Run every CLI command with process-wide Sentry instrumentation."""
+    with sentry():
+        cli()
+
+
 if __name__ == "__main__":
-    cli()
+    main()
