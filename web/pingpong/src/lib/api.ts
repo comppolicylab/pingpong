@@ -2773,6 +2773,16 @@ export type LectureVideoAssistantEditorPolicy = {
 	message?: string | null;
 };
 
+export type LectureLessonEditorConfig = {
+	lecture_lesson_available: boolean;
+	instructions: string;
+	generation_prompt: string;
+	can_generate_manifest: boolean;
+	lecture_slides_instructions: string;
+	lecture_slide_generation_prompt: string;
+	lecture_slide_narration_prompt: string;
+};
+
 /**
  * List of language models.
  */
@@ -2780,14 +2790,6 @@ export type AssistantModels = {
 	models: AssistantModel[];
 	default_prompts?: AssistantDefaultPrompt[];
 	enforce_classic_assistants?: boolean;
-	lecture_video_defaults?: {
-		instructions: string;
-		generation_prompt: string;
-		can_generate_manifest: boolean;
-		lecture_slides_instructions: string;
-		lecture_slide_generation_prompt: string;
-		lecture_slide_narration_prompt: string;
-	} | null;
 };
 
 export type AssistantModelLite = {
@@ -2807,6 +2809,14 @@ export type AssistantModelLiteResponse = {
 export const getModels = async (f: Fetcher, classId: number) => {
 	const url = `class/${classId}/models`;
 	return await GET<never, AssistantModels>(f, url);
+};
+
+/**
+ * Load defaults and capabilities used by the lecture lesson assistant editor.
+ */
+export const getLectureLessonEditorConfig = async (f: Fetcher, classId: number) => {
+	const url = `class/${classId}/lecture-lesson/editor-config`;
+	return await GET<never, LectureLessonEditorConfig>(f, url);
 };
 
 export const getModelsLite = async (f: Fetcher) => {

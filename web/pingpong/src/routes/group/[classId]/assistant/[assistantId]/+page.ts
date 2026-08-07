@@ -6,6 +6,7 @@ import type {
 	AssistantDefaultPrompt,
 	MCPServerToolInput,
 	LectureVideoAssistantEditorPolicy as LectureVideoEditorPolicy,
+	LectureLessonEditorConfig,
 	LectureVideoConfigResponse,
 	LectureSlideConfigResponse,
 	Error as ApiError
@@ -16,6 +17,7 @@ import {
 	getAssistantLectureVideoConfig,
 	getAssistantLectureSlideConfig,
 	getLectureVideoEditorPolicy,
+	getLectureLessonEditorConfig,
 	expandResponse,
 	getModels
 } from '$lib/api';
@@ -35,14 +37,6 @@ async function ensureModels(
 	models: AssistantModel[];
 	defaultPrompts: AssistantDefaultPrompt[];
 	enforceClassicAssistants: boolean;
-	lectureVideoDefaults: {
-		instructions: string;
-		generation_prompt: string;
-		can_generate_manifest: boolean;
-		lecture_slides_instructions: string;
-		lecture_slide_generation_prompt: string;
-		lecture_slide_narration_prompt: string;
-	} | null;
 }> {
 	const cache = get(modelsPromptsStore)[classId];
 
@@ -50,36 +44,36 @@ async function ensureModels(
 		return {
 			models: cache.models,
 			defaultPrompts: cache.default_prompts ?? [],
-			enforceClassicAssistants: cache.enforce_classic_assistants ?? false,
-			lectureVideoDefaults: cache.lecture_video_defaults ?? null
+			enforceClassicAssistants: cache.enforce_classic_assistants ?? false
 		};
 	}
 
 	const modelsResponse = await getModels(fetchFn, classId).then(expandResponse);
-	const models = modelsResponse.error ? [] : modelsResponse.data.models;
-	const defaultPrompts = modelsResponse.error ? [] : (modelsResponse.data.default_prompts ?? []);
-	const enforceClassicAssistants = modelsResponse.error
-		? false
-		: (modelsResponse.data.enforce_classic_assistants ?? false);
-	const lectureVideoDefaults = modelsResponse.error
-		? null
-		: (modelsResponse.data.lecture_video_defaults ?? null);
+	if (modelsResponse.error) {
+		return {
+			models: [],
+			defaultPrompts: [],
+			enforceClassicAssistants: false
+		};
+	}
+
+	const models = modelsResponse.data.models;
+	const defaultPrompts = modelsResponse.data.default_prompts ?? [];
+	const enforceClassicAssistants = modelsResponse.data.enforce_classic_assistants ?? false;
 
 	modelsPromptsStore.update((m) => ({
 		...m,
 		[classId]: {
 			models,
 			default_prompts: defaultPrompts,
-			enforce_classic_assistants: enforceClassicAssistants,
-			lecture_video_defaults: lectureVideoDefaults
+			enforce_classic_assistants: enforceClassicAssistants
 		} as (typeof m)[number]
 	}));
 
 	return {
 		models,
 		defaultPrompts,
-		enforceClassicAssistants,
-		lectureVideoDefaults
+		enforceClassicAssistants
 	};
 }
 
@@ -161,6 +155,14 @@ async function loadLectureVideoEditorPolicy(
 	return response.error ? DEFAULT_LECTURE_VIDEO_EDITOR_POLICY : response.data;
 }
 
+async function loadLectureLessonEditorConfig(
+	fetchFn: typeof fetch,
+	classId: number
+): Promise<LectureLessonEditorConfig | null> {
+	const response = await getLectureLessonEditorConfig(fetchFn, classId).then(expandResponse);
+	return response.error ? null : response.data;
+}
+
 /**
  * Load additional data needed for managing the class.
  */
@@ -169,11 +171,13 @@ export const load: PageLoad = async ({ params, fetch, parent }) => {
 	const isCreating = params.assistantId === 'new';
 	const parentData = await parent();
 	const [
-		{ models, defaultPrompts, enforceClassicAssistants, lectureVideoDefaults },
-		lectureVideoPolicy
+		{ models, defaultPrompts, enforceClassicAssistants },
+		lectureVideoPolicy,
+		lectureLessonEditorConfig
 	] = await Promise.all([
 		ensureModels(fetch, classId),
-		loadLectureVideoEditorPolicy(fetch, classId)
+		loadLectureVideoEditorPolicy(fetch, classId),
+		loadLectureLessonEditorConfig(fetch, classId)
 	]);
 
 	let assistant: Assistant | null = null;
@@ -235,7 +239,7 @@ export const load: PageLoad = async ({ params, fetch, parent }) => {
 		models,
 		defaultPrompts,
 		enforceClassicAssistants,
-		lectureVideoDefaults,
+		lectureLessonEditorConfig,
 		lectureVideoPolicy: effectiveLectureVideoPolicy,
 		lectureVideoConfig,
 		lectureVideoConfigLoadError,

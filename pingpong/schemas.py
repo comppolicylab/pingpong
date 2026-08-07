@@ -1437,7 +1437,8 @@ class LectureSlideTranslationStatusResponse(BaseModel):
     error_message: str | None = None
 
 
-class LectureVideoDefaults(BaseModel):
+class LectureLessonEditorConfig(BaseModel):
+    lecture_lesson_available: bool
     instructions: str
     generation_prompt: str
     can_generate_manifest: bool = False
@@ -3425,7 +3426,6 @@ class AssistantModels(BaseModel):
     models: list[AssistantModel]
     default_prompts: list[AssistantDefaultPrompt] = []
     enforce_classic_assistants: bool = False
-    lecture_video_defaults: LectureVideoDefaults | None = None
 
 
 class Classes(BaseModel):

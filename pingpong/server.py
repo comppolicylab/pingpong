@@ -4160,26 +4160,10 @@ async def list_class_models(
         for prompt_id in default_prompt_ids
         if prompt_id in DEFAULT_PROMPTS
     ]
-    lecture_video_context = await _get_class_lecture_video_provider_flags(
-        request.state["db"], int(class_id)
-    )
-    lecture_video_defaults = (
-        schemas.LectureVideoDefaults(
-            instructions=lecture_video_manifest_generation.DEFAULT_LECTURE_VIDEO_INSTRUCTIONS,
-            generation_prompt=lecture_video_manifest_generation.DEFAULT_GENERATION_PROMPT_CONTENT,
-            can_generate_manifest=lecture_video_context["has_gemini_credential"],
-            lecture_slides_instructions=lecture_slide_processing.DEFAULT_LECTURE_SLIDE_INSTRUCTIONS,
-            lecture_slide_generation_prompt=lecture_slide_processing.DEFAULT_GENERATION_PROMPT_CONTENT,
-            lecture_slide_narration_prompt=lecture_slide_processing.DEFAULT_NARRATION_PROMPT,
-        )
-        if lecture_video_context["lecture_video_enabled"]
-        else None
-    )
     return {
         "models": filtered,
         "default_prompts": default_prompts,
         "enforce_classic_assistants": False,
-        "lecture_video_defaults": lecture_video_defaults,
     }
 
 
@@ -10948,6 +10932,32 @@ async def get_class_lecture_video_editor_policy(
     request: StateRequest,
 ):
     return await _get_lecture_video_editor_policy(request, int(class_id))
+
+
+@v1.get(
+    "/class/{class_id}/lecture-lesson/editor-config",
+    dependencies=[Depends(Authz("can_view", "class:{class_id}"))],
+    response_model=schemas.LectureLessonEditorConfig,
+)
+async def get_class_lecture_lesson_editor_config(
+    class_id: str,
+    request: StateRequest,
+    response: Response,
+):
+    response.headers["Cache-Control"] = "private, no-store"
+    lecture_video_context = await _get_class_lecture_video_provider_flags(
+        request.state["db"], int(class_id)
+    )
+
+    return schemas.LectureLessonEditorConfig(
+        lecture_lesson_available=lecture_video_context["lecture_video_enabled"],
+        instructions=lecture_video_manifest_generation.DEFAULT_LECTURE_VIDEO_INSTRUCTIONS,
+        generation_prompt=lecture_video_manifest_generation.DEFAULT_GENERATION_PROMPT_CONTENT,
+        can_generate_manifest=lecture_video_context["has_gemini_credential"],
+        lecture_slides_instructions=lecture_slide_processing.DEFAULT_LECTURE_SLIDE_INSTRUCTIONS,
+        lecture_slide_generation_prompt=lecture_slide_processing.DEFAULT_GENERATION_PROMPT_CONTENT,
+        lecture_slide_narration_prompt=lecture_slide_processing.DEFAULT_NARRATION_PROMPT,
+    )
 
 
 @v1.get(
