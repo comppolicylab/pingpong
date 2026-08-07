@@ -160,7 +160,7 @@ async function loadLectureLessonEditorConfig(
 	classId: number
 ): Promise<LectureLessonEditorConfig | null> {
 	const response = await getLectureLessonEditorConfig(fetchFn, classId).then(expandResponse);
-	return response.error ? null : response.data;
+	return response.error || !response.data.lecture_lesson_available ? null : response.data;
 }
 
 /**
