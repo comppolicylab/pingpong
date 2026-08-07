@@ -471,6 +471,96 @@ async def test_container_file_citation_preserves_container_file_id(db, monkeypat
     assert annotation.file_object_id is not None
 
 
+async def test_container_file_citation_persists_non_ci_generated_file(db, monkeypatch):
+    handler, _, _ = await _setup_handler_with_initial_message(db)
+    await handler.on_output_text_part_created(
+        SimpleNamespace(type="output_text", text="Generated a calendar.")
+    )
+    assert handler.message_part_id is not None
+
+    handler.openai_cli = SimpleNamespace(
+        containers=SimpleNamespace(
+            files=SimpleNamespace(
+                content=SimpleNamespace(
+                    retrieve=AsyncMock(
+                        return_value=SimpleNamespace(content=b"BEGIN:VCALENDAR\n")
+                    )
+                )
+            )
+        )
+    )
+
+    create_input_file = AsyncMock(
+        side_effect=AssertionError(
+            "non-CI generated outputs must not be uploaded as tool inputs"
+        )
+    )
+    monkeypatch.setattr(ai_module, "handle_create_file", create_input_file)
+
+    async def fake_handle_create_generated_file(
+        session, upload, source_file_id, **_kwargs
+    ):
+        file = models.File(
+            file_id=source_file_id,
+            name=upload.filename,
+            content_type=upload.content_type,
+            class_id=handler.class_id,
+            private=True,
+            uploader_id=handler.user_id,
+        )
+        session.add(file)
+        await session.flush()
+        return schemas.File.model_validate(file)
+
+    generated_file = AsyncMock(side_effect=fake_handle_create_generated_file)
+    monkeypatch.setattr(ai_module, "handle_create_generated_file", generated_file)
+
+    await handler.on_output_text_container_file_citation_added(
+        {
+            "type": "container_file_citation",
+            "file_id": "cfile-calendar",
+            "container_id": "cntr-original",
+            "filename": "reminders.ics",
+            "start_index": 10,
+            "end_index": 23,
+        },
+        annotation_index=0,
+    )
+
+    create_input_file.assert_not_awaited()
+    generated_file.assert_awaited_once()
+    assert generated_file.await_args.kwargs["source_file_id"] == "cfile-calendar"
+    assert generated_file.await_args.kwargs["upload"].content_type == "text/calendar"
+
+    async with db.async_session() as session:
+        annotation = await session.scalar(
+            select(models.Annotation).where(
+                models.Annotation.message_part_id == handler.message_part_id
+            )
+        )
+        thread = await session.get(models.Thread, handler.thread_id)
+        code_interpreter_files = await thread.awaitable_attrs.code_interpreter_files
+
+    assert annotation is not None
+    assert annotation.file_object_id is not None
+    assert annotation.filename == "reminders.ics"
+    assert code_interpreter_files == []
+
+    events = [
+        orjson.loads(line) for line in handler.flush().splitlines() if line.strip()
+    ]
+    file_path_annotations = [
+        annotation
+        for event in events
+        if event["type"] == "message_delta"
+        for content in event["delta"]["content"]
+        if content["type"] == "text"
+        for annotation in content["text"]["annotations"]
+        if annotation["type"] == "file_path"
+    ]
+    assert len(file_path_annotations) == 1
+
+
 async def _setup_handler_with_phase(db, phase: str):
     handler = await _create_handler_context(
         db,

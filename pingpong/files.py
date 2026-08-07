@@ -214,7 +214,13 @@ async def handle_delete_file(
         # 4) If none remain, do the actual delete
         if remaining == 0:
             await File.delete(session, int_file_id)
-            await oai_client.files.delete(remote_file_id)
+            try:
+                await oai_client.files.delete(remote_file_id)
+            except openai.NotFoundError:
+                logger.warning(
+                    "Could not find file %s for deletion, ignored.",
+                    sanitize_for_log(remote_file_id),
+                )
             # 5) Revoke all grants for this file
             await authz.write_safe(revoke=revoke_grants)
             try:
@@ -819,6 +825,78 @@ async def handle_create_file(
     )
 
     return file
+
+
+async def handle_create_generated_file(
+    session: AsyncSession,
+    authz: AuthzClient,
+    upload: UploadFile,
+    class_id: int,
+    uploader_id: int,
+    private: bool,
+    source_file_id: str,
+    user_auth: str | None = None,
+    anonymous_link_auth: str | None = None,
+    anonymous_user_auth: str | None = None,
+    anonymous_session_id: int | None = None,
+    anonymous_link_id: int | None = None,
+) -> "FileSchema":
+    """Persist a generated output without making it an OpenAI tool input."""
+    content_type = _normalize_upload_content_type(upload) or "application/octet-stream"
+    data = {
+        "file_id": source_file_id,
+        "private": private,
+        "uploader_id": int(uploader_id),
+        "name": upload.filename,
+        "content_type": content_type,
+        "anonymous_session_id": anonymous_session_id,
+        "anonymous_link_id": anonymous_link_id,
+    }
+    file = await File.create(session, data, class_id=class_id)
+    grants = _file_grants(
+        file, class_id, user_auth, anonymous_link_auth, anonymous_user_auth
+    )
+
+    suffix = Path(upload.filename or "").suffix.lower()
+    upload_filename = f"file_{uuid.uuid4()}{suffix}"
+    grants_written = False
+    stored = False
+    try:
+        await authz.write(grant=grants)
+        grants_written = True
+        await upload.seek(0)
+        await config.file_store.store.put(upload_filename, upload.file, content_type)
+        stored = True
+        await S3File.create(
+            session,
+            key=upload_filename,
+            file_obj_ids=[file.id],
+        )
+        await session.refresh(file)
+    except Exception:
+        if stored:
+            try:
+                await config.file_store.store.delete(upload_filename)
+            except Exception:
+                logger.exception(
+                    "Failed to clean up generated output from file store. key=%s",
+                    sanitize_for_log(upload_filename),
+                )
+        if grants_written:
+            await authz.write_safe(revoke=grants)
+        raise
+
+    return FileSchema(
+        id=file.id,
+        name=file.name,
+        content_type=file.content_type,
+        file_id=file.file_id,
+        class_id=class_id,
+        private=file.private,
+        uploader_id=file.uploader_id,
+        created=file.created,
+        updated=file.updated,
+    )
 
 
 # FILE_TYPES is the upload capability source of truth.

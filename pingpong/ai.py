@@ -19,9 +19,11 @@ from pingpong.auth import encode_auth_token, encode_streamed_message_image_proof
 from pingpong.authz.base import AuthzClient
 from pingpong.db import db_session_handler
 from pingpong.files import (
+    _is_ci_supported,
     _is_vision_supported,
     file_extension_to_mime_type,
     handle_create_file,
+    handle_create_generated_file,
 )
 from pingpong.followup_transform import (
     strip_followup_snippets,
@@ -1714,38 +1716,48 @@ class BufferedResponseStreamHandler:
         file_content = await self.openai_cli.containers.files.content.retrieve(
             file_id=data["file_id"], container_id=data["container_id"]
         )
-        extension = file_extension_to_mime_type(data["filename"].split(".")[-1])
+        filename = data["filename"] or f"container_file_{data['file_id']}"
+        inferred_content_type = file_extension_to_mime_type(filename.rsplit(".", 1)[-1])
+        content_type = inferred_content_type or "application/octet-stream"
         upload_file = UploadFile(
             file=io.BytesIO(file_content.content),
-            filename=data["filename"] or f"container_file_{data['file_id']}",
-            headers={
-                "content-type": file_extension_to_mime_type(
-                    data["filename"].split(".")[-1]
-                )
-            },
+            filename=filename,
+            headers={"content-type": content_type},
         )
 
         @db_session_handler
         async def create_file_on_output_text_container_file_citation_added(
             session_: AsyncSession,
         ):
-            file = await handle_create_file(
-                session=session_,
-                authz=self.auth,
-                oai_client=self.openai_cli,
-                upload=upload_file,
-                class_id=self.class_id,
-                uploader_id=self.user_id,
-                private=True,
-                purpose="vision"
-                if extension and _is_vision_supported(extension)
-                else "assistants",
-                user_auth=self.user_auth,
-                anonymous_link_auth=self.anonymous_link_auth,
-                anonymous_user_auth=self.anonymous_user_auth,
-                anonymous_session_id=self.anonymous_session_id,
-                anonymous_link_id=self.anonymous_link_id,
-            )
+            common_args = {
+                "session": session_,
+                "authz": self.auth,
+                "upload": upload_file,
+                "class_id": self.class_id,
+                "uploader_id": self.user_id,
+                "private": True,
+                "user_auth": self.user_auth,
+                "anonymous_link_auth": self.anonymous_link_auth,
+                "anonymous_user_auth": self.anonymous_user_auth,
+                "anonymous_session_id": self.anonymous_session_id,
+                "anonymous_link_id": self.anonymous_link_id,
+            }
+            if inferred_content_type and (
+                _is_vision_supported(inferred_content_type)
+                or _is_ci_supported(inferred_content_type)
+            ):
+                file = await handle_create_file(
+                    **common_args,
+                    oai_client=self.openai_cli,
+                    purpose="vision"
+                    if _is_vision_supported(inferred_content_type)
+                    else "assistants",
+                )
+            else:
+                file = await handle_create_generated_file(
+                    **common_args,
+                    source_file_id=data["file_id"],
+                )
             await session_.commit()
             return file
 
