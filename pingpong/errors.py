@@ -1,12 +1,13 @@
+import asyncio
 import os
-from contextlib import contextmanager
+from contextlib import asynccontextmanager, contextmanager
 
 import sentry_sdk
 from sentry_sdk.integrations.aiohttp import AioHttpIntegration
 
 from .config import config
 
-_sentry_pid: int | None = None
+_sentry_pid: int | None = None  # codeql[py/unused-global-variable]
 
 
 def init_sentry() -> None:
@@ -53,3 +54,13 @@ def sentry():
     finally:
         if config.sentry.dsn:
             sentry_sdk.flush(timeout=2.0)
+
+
+@asynccontextmanager
+async def async_sentry():
+    init_sentry()
+    try:
+        yield
+    finally:
+        if config.sentry.dsn:
+            await asyncio.to_thread(sentry_sdk.flush, timeout=2.0)
