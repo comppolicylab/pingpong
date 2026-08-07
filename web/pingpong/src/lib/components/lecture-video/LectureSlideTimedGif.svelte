@@ -168,6 +168,7 @@
 		const initialOffsetMs = paused ? offsetMs : untrack(() => offsetMs);
 		const targetCanvas = canvas;
 		const mediaElement = timelineMedia;
+		const mediaBaseOffsetMs = timelineMediaBaseOffsetMs;
 		if (!gif || !targetCanvas) return;
 
 		renderAtOffset(gif, initialOffsetMs);
@@ -177,7 +178,7 @@
 		let animationFrameId = 0;
 		const renderFrame = (nowMs: number) => {
 			const timelineOffsetMs = mediaElement
-				? timelineMediaBaseOffsetMs + mediaElement.currentTime * 1000
+				? mediaBaseOffsetMs + mediaElement.currentTime * 1000
 				: initialOffsetMs + nowMs - startedAtMs;
 			if (timelineOffsetMs >= endOffsetMs) {
 				renderAtOffset(gif, Math.max(startOffsetMs, endOffsetMs - 1));

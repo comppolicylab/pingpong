@@ -672,6 +672,18 @@ def _lecture_slide_deck_view(
         for page_id, narration in page_narrations.items()
     }
 
+    def page_narration_url(page: models.LectureSlidePage) -> str | None:
+        narration = page_narrations[page.id]
+        if narration is None:
+            return None
+        url = request.url_for(
+            "get_thread_lecture_slide_page_narration",
+            class_id=str(thread.class_id),
+            thread_id=str(thread.id),
+            page_id=str(page.id),
+        )
+        return f"{url}?v={narration.id}"
+
     return schemas.LectureSlideDeckView(
         id=deck.id,
         display_name=deck.display_name,
@@ -737,18 +749,7 @@ def _lecture_slide_deck_view(
                     if page.media_stored_object is not None
                     else None
                 ),
-                narration_url=(
-                    str(
-                        request.url_for(
-                            "get_thread_lecture_slide_page_narration",
-                            class_id=str(thread.class_id),
-                            thread_id=str(thread.id),
-                            page_id=str(page.id),
-                        )
-                    )
-                    if page_narrations[page.id] is not None
-                    else None
-                ),
+                narration_url=page_narration_url(page),
                 narration_duration_ms=page_narration_durations[page.id],
             )
             for page in sorted(deck.pages, key=lambda item: item.position)
@@ -5268,6 +5269,8 @@ async def _stream_audio_file_response(
     store_error_log: str,
     unexpected_error_log: str,
     retrieval_error_detail: str,
+    cache_control: str | None = None,
+    etag: str | None = None,
 ) -> StreamingResponse:
     total_length = content_length
     try:
@@ -5331,6 +5334,10 @@ async def _stream_audio_file_response(
             else total_length
         ),
     }
+    if cache_control is not None:
+        response_headers["Cache-Control"] = cache_control
+    if etag is not None:
+        response_headers["ETag"] = etag
     status_code = 200
     if is_partial and start is not None and end is not None:
         response_headers["Content-Range"] = f"bytes {start}-{end}/{total_length}"
@@ -5789,6 +5796,8 @@ async def get_thread_lecture_slide_page_narration(
             store_error_log="AudioStoreError while streaming lecture slide page narration; aborting stream.",
             unexpected_error_log="Unexpected error while streaming lecture slide page narration",
             retrieval_error_detail="Unable to retrieve the lecture slide narration audio.",
+            cache_control="private, max-age=31536000, immutable",
+            etag=f'"{narration.id}"',
         )
     except HTTPException:
         raise

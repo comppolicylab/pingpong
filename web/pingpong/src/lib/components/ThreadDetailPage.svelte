@@ -214,17 +214,25 @@
 	})();
 	$: lectureSlideAudioSegments = (() => {
 		const segments = lectureSlidePages.flatMap((page: api.LectureSlidePage) =>
-			page.narration_url && page.start_offset_ms != null && page.end_offset_ms != null
+			page.narration_url &&
+			page.narration_duration_ms != null &&
+			page.start_offset_ms != null &&
+			page.end_offset_ms != null
 				? [
 						{
 							src: api.withMediaAuthQuery(page.narration_url),
 							startOffsetMs: page.start_offset_ms,
-							endOffsetMs: page.end_offset_ms
+							endOffsetMs: page.end_offset_ms,
+							durationMs: page.narration_duration_ms
 						}
 					]
 				: []
 		);
-		return isCompleteAudioPlaylist(segments, lectureSlideDurationMs) ? segments : [];
+		if (isCompleteAudioPlaylist(segments, lectureSlideDurationMs)) return segments;
+		if (segments.length > 0) {
+			console.warn('Per-slide narration is incomplete; using continuous narration fallback.');
+		}
+		return [];
 	})();
 	function lectureSlidePageAtOffset(
 		offsetMs: number,

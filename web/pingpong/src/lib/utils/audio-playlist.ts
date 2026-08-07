@@ -2,7 +2,10 @@ export type AudioPlaylistSegment = {
 	src: string;
 	startOffsetMs: number;
 	endOffsetMs: number;
+	durationMs: number;
 };
+
+const SEGMENT_END_TOLERANCE_MS = 50;
 
 export function isCompleteAudioPlaylist(
 	segments: AudioPlaylistSegment[],
@@ -14,10 +17,26 @@ export function isCompleteAudioPlaylist(
 		segments.every(
 			(segment, index) =>
 				segment.endOffsetMs > segment.startOffsetMs &&
+				segment.endOffsetMs - segment.startOffsetMs === segment.durationMs &&
 				(index === 0 || segment.startOffsetMs === segments[index - 1].endOffsetMs)
 		) &&
 		segments[segments.length - 1].endOffsetMs === durationMs
 	);
+}
+
+export function isAudioPlaylistSegmentEndPause(
+	currentTimeMs: number,
+	durationMs: number,
+	ended: boolean
+): boolean {
+	return ended || (durationMs > 0 && currentTimeMs >= durationMs - SEGMENT_END_TOLERANCE_MS);
+}
+
+export function shouldForwardDeferredAudioPlaylistPause(
+	shouldStopAtBoundary: boolean,
+	hasNextSegment: boolean
+): boolean {
+	return shouldStopAtBoundary || !hasNextSegment;
 }
 
 export function audioPlaylistSegmentIndexAtOffset(

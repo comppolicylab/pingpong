@@ -1334,6 +1334,7 @@ async def test_lecture_slide_deck_view_exposes_pages_narration_and_captions(
     assert not hasattr(view.pages[0], "title")
     assert view.pages[0].image_stored_object_id == image.id
     assert view.pages[0].narration_url is not None
+    assert view.pages[0].narration_url.endswith(f"?v={page_audio.id}")
     assert view.pages[0].narration_duration_ms == 10_000
 
 
@@ -1393,7 +1394,144 @@ async def test_lecture_slide_page_narration_endpoint_streams_page_audio(
     assert response.media_type == "audio/ogg"
     assert response.headers["accept-ranges"] == "bytes"
     assert response.headers["content-length"] == "10"
+    assert response.headers["cache-control"] == ("private, max-age=31536000, immutable")
+    assert response.headers["etag"] == f'"{stored_object.id}"'
     assert b"".join(chunks) == b"page-audio"
+
+
+@with_institution(11, "Test Institution")
+async def test_lecture_slide_page_narration_endpoint_streams_translated_audio(
+    db, institution, monkeypatch
+):
+    class FakeAudioStore:
+        async def stream_file_range(self, *, key, start=None, end=None):
+            assert key == "slides/page-es.ogg"
+            assert start is None
+            assert end is None
+            yield b"translated"
+
+    monkeypatch.setattr(
+        config,
+        "lecture_video_audio_store",
+        SimpleNamespace(store=FakeAudioStore()),
+    )
+
+    async with db.async_session() as session:
+        class_, deck, assistant, thread, _ = await _create_slide_runtime_fixture(
+            session, institution
+        )
+        thread.interaction_mode = schemas.InteractionMode.LECTURE_SLIDES
+        assistant.interaction_mode = schemas.InteractionMode.LECTURE_SLIDES
+        page = models.LectureSlidePage(
+            lecture_slide_deck=deck,
+            position=1,
+            start_offset_ms=0,
+            end_offset_ms=10_000,
+        )
+        page_audio = models.LectureSlideNarrationStoredObject(
+            key="slides/page-es.ogg",
+            content_type="audio/ogg",
+            content_length=10,
+            duration_ms=2_000,
+        )
+        continuous_audio = models.LectureSlideNarrationStoredObject(
+            key="slides/continuous-es.ogg",
+            content_type="audio/ogg",
+            content_length=10,
+            duration_ms=2_000,
+        )
+        captions = models.LectureSlideCaptionStoredObject(
+            key="slides/captions-es.vtt",
+            content_type="text/vtt",
+            content_length=10,
+        )
+        translation = models.LectureSlideTranslation(
+            lecture_slide_deck=deck,
+            language_code="es",
+            language_name="Spanish",
+            openai_model="gpt-4o-mini",
+            status=schemas.LectureSlideTranslationStatus.READY,
+            stage=schemas.LectureSlideTranslationStage.COMPOSITE_ARTIFACTS,
+            total_duration_ms=2_000,
+            continuous_narration_stored_object=continuous_audio,
+            caption_stored_object=captions,
+        )
+        translated_page = models.LectureSlideTranslationPage(
+            translation=translation,
+            position=1,
+            narration_text="Narracion",
+            narration_stored_object=page_audio,
+            start_offset_ms=0,
+            end_offset_ms=2_000,
+        )
+        thread.lecture_slide_translation = translation
+        session.add_all(
+            [
+                page,
+                page_audio,
+                continuous_audio,
+                captions,
+                translation,
+                translated_page,
+            ]
+        )
+        await session.flush()
+
+        response = await server_module.get_thread_lecture_slide_page_narration(
+            str(class_.id),
+            str(thread.id),
+            page.id,
+            _server_request(session),
+        )
+
+    chunks = [chunk async for chunk in response.body_iterator]
+    assert response.status_code == 200
+    assert response.headers["etag"] == f'"{page_audio.id}"'
+    assert b"".join(chunks) == b"translated"
+
+
+@with_institution(11, "Test Institution")
+async def test_lecture_slide_page_narration_endpoint_rejects_page_from_other_deck(
+    db, institution, monkeypatch
+):
+    monkeypatch.setattr(
+        config,
+        "lecture_video_audio_store",
+        SimpleNamespace(store=SimpleNamespace()),
+    )
+
+    async with db.async_session() as session:
+        class_, _, assistant, thread, _ = await _create_slide_runtime_fixture(
+            session, institution
+        )
+        thread.interaction_mode = schemas.InteractionMode.LECTURE_SLIDES
+        assistant.interaction_mode = schemas.InteractionMode.LECTURE_SLIDES
+        other_source = models.LectureSlideSourceStoredObject(
+            key="other-slides.pdf",
+            original_filename="other-slides.pdf",
+            content_type="application/pdf",
+            content_length=128,
+        )
+        other_deck = _slide_deck(class_, other_source, id=2, display_name="Other")
+        other_page = models.LectureSlidePage(
+            lecture_slide_deck=other_deck,
+            position=1,
+            start_offset_ms=0,
+            end_offset_ms=10_000,
+        )
+        session.add_all([other_source, other_deck, other_page])
+        await session.flush()
+
+        with pytest.raises(HTTPException) as exc_info:
+            await server_module.get_thread_lecture_slide_page_narration(
+                str(class_.id),
+                str(thread.id),
+                other_page.id,
+                _server_request(session),
+            )
+
+    assert exc_info.value.status_code == 404
+    assert exc_info.value.detail == "Lecture slide page not found."
 
 
 @with_institution(11, "Test Institution")

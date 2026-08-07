@@ -68,6 +68,7 @@
 		src: string;
 		startOffsetMs: number;
 		endOffsetMs: number;
+		durationMs: number;
 	};
 	type LectureVideoPlayerHandle = {
 		setPlaybackPosition: (offsetMs: number) => void;

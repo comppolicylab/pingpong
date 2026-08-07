@@ -20,6 +20,8 @@
 	import LectureVideoControlButton from '$lib/components/lecture-video/LectureVideoControlButton.svelte';
 	import {
 		audioPlaylistSegmentIndexAtOffset,
+		isAudioPlaylistSegmentEndPause,
+		shouldForwardDeferredAudioPlaylistPause,
 		type AudioPlaylistSegment
 	} from '$lib/utils/audio-playlist';
 	import SkipForwardIcon from '$lib/assets/icons/SkipForwardIcon.svelte';
@@ -55,6 +57,7 @@
 	const VOLUME_SLIDER_EXPANDED_WIDTH_PX = 76;
 	const MARKER_CLUSTER_THRESHOLD_PX = 28;
 	const MARKER_CLUSTER_COLLAPSE_DELAY_MS = 120;
+	const SEGMENT_END_PAUSE_DEFER_MS = 100;
 	const OVERLAY_TEXT_SHADOW = 'text-shadow: rgb(0 0 0) 0 0 2px;';
 	const CAPTION_CONTROL_GAP_PX = 12;
 	const CAPTIONS_PREFERENCE_STORAGE_KEY = 'pingpong:lecture-video:captions-enabled';
@@ -242,7 +245,10 @@
 	let pendingPlayAfterSegmentLoad = false;
 	let suppressSegmentPauseEvent = false;
 	let suppressSegmentPlayEvent = false;
+	let deferredSegmentEndPause = false;
+	let deferredSegmentPauseTimeout: ReturnType<typeof setTimeout> | null = null;
 	let initialMediaPositionApplied = false;
+	let lastAudioPlaylistIdentity: string | null = null;
 	let playbackSpeedButtonElement: HTMLButtonElement | null = $state(null);
 	let playbackSpeedMenuElement: HTMLDivElement | null = $state(null);
 	let activeCaptionLines: string[] = $state([]);
@@ -705,6 +711,31 @@
 	}
 
 	$effect(() => {
+		const audioPlaylistIdentity = hasAudioPlaylist
+			? audioSegments
+					.map(
+						(segment) =>
+							`${segment.src}:${segment.startOffsetMs}:${segment.endOffsetMs}:${segment.durationMs}`
+					)
+					.join('|')
+			: `single:${src}`;
+		if (audioPlaylistIdentity === lastAudioPlaylistIdentity) return;
+
+		lastAudioPlaylistIdentity = audioPlaylistIdentity;
+		activeAudioSegmentIndex = 0;
+		pendingSegmentLocalOffsetMs = null;
+		pendingPlayAfterSegmentLoad = false;
+		suppressSegmentPauseEvent = false;
+		suppressSegmentPlayEvent = false;
+		deferredSegmentEndPause = false;
+		if (deferredSegmentPauseTimeout) {
+			clearTimeout(deferredSegmentPauseTimeout);
+			deferredSegmentPauseTimeout = null;
+		}
+		initialMediaPositionApplied = false;
+	});
+
+	$effect(() => {
 		if (!seekPreviewVisible) return;
 		syncPreviewVideo();
 	});
@@ -937,8 +968,6 @@
 		suppressSegmentPauseEvent = !videoElement.paused;
 		suppressSegmentPlayEvent = resumePlayback;
 		activeAudioSegmentIndex = segmentIndex;
-		videoElement.src = segment.src;
-		videoElement.load();
 	}
 
 	export function setPlaybackPosition(offsetMs: number) {
@@ -1014,6 +1043,10 @@
 			pendingPlayAfterSegmentLoad = false;
 			void videoElement.play().catch(() => {
 				suppressSegmentPlayEvent = false;
+				paused = true;
+				showControls = true;
+				syncMediaSessionState();
+				onpause?.();
 			});
 		}
 	}
@@ -1035,21 +1068,34 @@
 	}
 
 	function handleEnded() {
+		const shouldForwardDeferredPause = deferredSegmentEndPause;
+		deferredSegmentEndPause = false;
+		if (deferredSegmentPauseTimeout) {
+			clearTimeout(deferredSegmentPauseTimeout);
+			deferredSegmentPauseTimeout = null;
+		}
 		if (hasAudioPlaylist && activeAudioSegment) {
 			currentTimeMs = activeAudioSegment.endOffsetMs;
 			paused = true;
 			playbackCompleted = false;
 			syncActiveCaptionLines();
 			const shouldStopAtBoundary = onsegmentended?.(currentTimeMs) === true;
+			const hasNextSegment = activeAudioSegmentIndex + 1 < audioSegments.length;
 			ontimeupdate?.();
 			if (shouldStopAtBoundary) {
 				showControls = true;
 				syncMediaSessionState();
+				if (
+					shouldForwardDeferredPause &&
+					shouldForwardDeferredAudioPlaylistPause(shouldStopAtBoundary, hasNextSegment)
+				) {
+					onpause?.();
+				}
 				return;
 			}
 
 			const nextSegmentIndex = activeAudioSegmentIndex + 1;
-			if (nextSegmentIndex < audioSegments.length) {
+			if (hasNextSegment) {
 				switchAudioSegment(nextSegmentIndex, 0, { resumePlayback: true });
 				return;
 			}
@@ -1061,12 +1107,38 @@
 		playbackCompleted = true;
 		showControls = true;
 		syncMediaSessionState();
+		if (shouldForwardDeferredPause && shouldForwardDeferredAudioPlaylistPause(false, false)) {
+			onpause?.();
+		}
 		onended?.();
 	}
 
 	function handlePauseEvent() {
 		if (suppressSegmentPauseEvent) {
 			suppressSegmentPauseEvent = false;
+			return;
+		}
+		if (
+			hasAudioPlaylist &&
+			activeAudioSegment &&
+			videoElement &&
+			isAudioPlaylistSegmentEndPause(
+				videoElement.currentTime * 1000,
+				activeAudioSegment.durationMs,
+				videoElement.ended
+			)
+		) {
+			deferredSegmentEndPause = true;
+			currentTimeMs = activeAudioSegment.endOffsetMs;
+			paused = true;
+			deferredSegmentPauseTimeout = setTimeout(() => {
+				deferredSegmentPauseTimeout = null;
+				if (!deferredSegmentEndPause) return;
+				deferredSegmentEndPause = false;
+				showControls = true;
+				syncMediaSessionState();
+				onpause?.();
+			}, SEGMENT_END_PAUSE_DEFER_MS);
 			return;
 		}
 		if (videoElement) {
@@ -1098,6 +1170,15 @@
 	}
 
 	function handleError(e: Event) {
+		pendingSegmentLocalOffsetMs = null;
+		pendingPlayAfterSegmentLoad = false;
+		suppressSegmentPauseEvent = false;
+		suppressSegmentPlayEvent = false;
+		deferredSegmentEndPause = false;
+		if (deferredSegmentPauseTimeout) {
+			clearTimeout(deferredSegmentPauseTimeout);
+			deferredSegmentPauseTimeout = null;
+		}
 		onerror?.(e);
 	}
 
