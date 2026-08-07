@@ -6484,7 +6484,11 @@ class Assistant(Base):
 
     @classmethod
     async def delete(cls, session: AsyncSession, id_: int) -> None:
+        mcp_stmt = delete(mcp_server_tool_assistant_association).where(
+            mcp_server_tool_assistant_association.c.assistant_id == int(id_)
+        )
         stmt = delete(Assistant).where(Assistant.id == int(id_))
+        await session.execute(mcp_stmt)
         await session.execute(stmt)
 
     @classmethod
