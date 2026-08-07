@@ -809,6 +809,8 @@ class LectureSlidePageView(BaseModel):
     media_duration_ms: int | None = Field(None, ge=0)
     media_width_px: int | None = Field(None, ge=1)
     media_height_px: int | None = Field(None, ge=1)
+    narration_url: str | None = None
+    narration_duration_ms: int | None = Field(None, ge=0)
     user_notes: str | None = None
     narration_text: str | None = None
 

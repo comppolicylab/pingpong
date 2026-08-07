@@ -64,6 +64,15 @@
 	type LessonQuestionMarker = LectureVideoQuestionMarker | InteractiveLessonQuestionMarker;
 	type LessonContinuation = LectureVideoContinuation | InteractiveLessonContinuation;
 	type LessonInteractionPayload = api.LectureVideoInteractionRequest;
+	type AudioSegment = {
+		src: string;
+		startOffsetMs: number;
+		endOffsetMs: number;
+		durationMs: number;
+	};
+	type LectureVideoPlayerHandle = {
+		setPlaybackPosition: (offsetMs: number) => void;
+	};
 
 	let {
 		classId,
@@ -84,6 +93,7 @@
 		statusAction = undefined,
 		lessonMode = 'lecture_video',
 		mediaKind = 'video',
+		audioSegments = [],
 		durationMsOverride = null,
 		mediaAspectRatio = null,
 		visual = undefined
@@ -106,9 +116,10 @@
 		statusAction?: Snippet;
 		lessonMode?: LessonMode;
 		mediaKind?: 'video' | 'audio';
+		audioSegments?: AudioSegment[];
 		durationMsOverride?: number | null;
 		mediaAspectRatio?: number | null;
-		visual?: Snippet<[number, boolean, HTMLMediaElement | null, number | null]>;
+		visual?: Snippet<[number, boolean, HTMLMediaElement | null, number | null, number]>;
 	} = $props();
 	const dispatch = createEventDispatcher<{
 		sessionchange: LessonSession;
@@ -140,6 +151,7 @@
 
 	// --- Player state ---
 	let videoElement: HTMLMediaElement | null = $state(null);
+	let playerComponent: LectureVideoPlayerHandle | null = $state(null);
 	let currentTimeMs: number = $state(0);
 	let paused: boolean = $state(true);
 	let videoAtEnd: boolean = $state(false);
@@ -303,6 +315,7 @@
 			});
 	});
 	let playbackLocked = $derived(playerDisabled || questionPlaybackLocked);
+	let usesAudioSegmentBoundaries = $derived(mediaKind === 'audio' && audioSegments.length > 0);
 	let playbackInteractionAllowed = $derived(allowsPlaybackInteraction(sessionState));
 	let hasQuestionPrompt = $derived(hasVisibleQuestionPrompt(sessionState));
 	let isCompleted = $derived(isCompletedSession(sessionState));
@@ -1511,7 +1524,7 @@
 	function setVideoPosition(offsetMs: number) {
 		if (!videoElement) return;
 		currentTimeMs = offsetMs;
-		videoElement.currentTime = offsetMs / 1000;
+		playerComponent?.setPlaybackPosition(offsetMs);
 	}
 
 	function clearQuestionBoundaryTimer() {
@@ -1540,7 +1553,7 @@
 		presentCurrentQuestion();
 	}
 
-	function presentCurrentQuestion() {
+	function presentCurrentQuestion(shouldResumePlaybackOverride?: boolean) {
 		const question = currentQuestion;
 		if (
 			!question ||
@@ -1559,7 +1572,7 @@
 			sessionState,
 			subtitleText,
 			offsetMs: question.stop_offset_ms,
-			shouldResumePlayback: !videoElement.paused
+			shouldResumePlayback: shouldResumePlaybackOverride ?? !videoElement.paused
 		};
 
 		clearQuestionBoundaryTimer();
@@ -1576,6 +1589,7 @@
 
 	function scheduleQuestionBoundary() {
 		clearQuestionBoundaryTimer();
+		if (usesAudioSegmentBoundaries) return;
 		const question = currentQuestion;
 		const presentingQuestion = sessionState === 'playing' && !questionPlaybackLocked;
 		if (
@@ -1592,7 +1606,7 @@
 			return;
 		}
 
-		const remainingMediaMs = question.stop_offset_ms - videoElement.currentTime * 1000;
+		const remainingMediaMs = question.stop_offset_ms - currentTimeMs;
 		if (remainingMediaMs <= 0) {
 			reachQuestionBoundary();
 			return;
@@ -1612,7 +1626,6 @@
 				const activeQuestion = currentQuestion;
 				if (!activeQuestion || !videoElement) return;
 
-				currentTimeMs = videoElement.currentTime * 1000;
 				const remainingMs = activeQuestion.stop_offset_ms - currentTimeMs;
 				if (remainingMs > 0) {
 					scheduleQuestionBoundary();
@@ -1659,6 +1672,7 @@
 	}
 
 	function handleTimeUpdate() {
+		if (usesAudioSegmentBoundaries) return;
 		// The playhead already moved but currentQuestion still reflects the
 		// pre-seek session; acting now would auto-present the wrong question.
 		if (seekInteractionsInFlight > 0) return;
@@ -1675,6 +1689,29 @@
 		if (currentTimeMs >= currentQuestion.stop_offset_ms) {
 			presentCurrentQuestion();
 		}
+	}
+
+	function handleAudioSegmentEnded(offsetMs: number): boolean {
+		currentTimeMs = offsetMs;
+		const question = currentQuestion;
+		if (questionReviewPlaybackAllowed) {
+			if (question?.stop_offset_ms === offsetMs) {
+				stopQuestionReviewAtBoundary();
+				return true;
+			}
+			return false;
+		}
+		if (
+			question != null &&
+			sessionState === 'playing' &&
+			!playerDisabled &&
+			!answeredQuestions.has(question.id) &&
+			question.stop_offset_ms === offsetMs
+		) {
+			presentCurrentQuestion(true);
+			return true;
+		}
+		return false;
 	}
 
 	function handlePause() {
@@ -2327,10 +2364,12 @@
 							style={playerFrameStyle}
 						>
 							<LectureVideoPlayer
+								bind:this={playerComponent}
 								src={lectureVideoSrc}
 								{captionsSrc}
 								fullscreenTarget={lectureContainerElement}
 								{mediaKind}
+								{audioSegments}
 								{durationMsOverride}
 								{visualQuestionBoundaryMs}
 								{visual}
@@ -2361,6 +2400,7 @@
 								ontimeupdate={handleTimeUpdate}
 								onseek={handleSeek}
 								onended={handleVideoEnded}
+								onsegmentended={handleAudioSegmentEnded}
 								oncanplay={handleCanPlay}
 								onerror={() =>
 									failClosedControl(

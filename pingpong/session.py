@@ -19,6 +19,7 @@ ANONYMOUS_TOKEN_QUERY_PATH_ALLOWLIST = (
     re.compile(r"^/api/v1/class/[^/]+/thread/[^/]+/lecture-video/captions\.vtt$"),
     re.compile(r"^/api/v1/class/[^/]+/thread/[^/]+/lecture-slides/audio$"),
     re.compile(r"^/api/v1/class/[^/]+/thread/[^/]+/lecture-slides/captions\.vtt$"),
+    re.compile(r"^/api/v1/class/[^/]+/thread/[^/]+/lecture-slides/[^/]+/narration$"),
     re.compile(r"^/api/v1/class/[^/]+/thread/[^/]+/lecture-slides/[^/]+/image$"),
     re.compile(r"^/api/v1/class/[^/]+/thread/[^/]+/lecture-slides/narration/[^/]+$"),
     re.compile(r"^/api/v1/class/[^/]+/assistant/[^/]+/lecture-video/poster$"),

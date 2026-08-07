@@ -25,6 +25,7 @@ server_module = importlib.import_module("pingpong.server")
         "/api/v1/class/1/thread/109/lecture-video/captions.vtt",
         "/api/v1/class/1/thread/109/lecture-slides/audio",
         "/api/v1/class/1/thread/109/lecture-slides/captions.vtt",
+        "/api/v1/class/1/thread/109/lecture-slides/7/narration",
         "/api/v1/class/1/thread/109/lecture-slides/7/image",
         "/api/v1/class/1/assistant/3/lecture-video/poster",
         "/api/v1/class/1/assistant/3/lecture-slides/thumbnail",

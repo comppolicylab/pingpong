@@ -654,6 +654,37 @@ def _lecture_slide_deck_view(
             )
         )
 
+    def page_narration(
+        page: models.LectureSlidePage,
+    ) -> models.LectureSlideNarrationStoredObject | None:
+        translated_page = translated_pages.get(page.position)
+        if translated_page is not None:
+            return translated_page.narration_stored_object
+        if (
+            page.narration is None
+            or page.narration.status != schemas.LectureSlideNarrationStatus.READY
+        ):
+            return None
+        return page.narration.stored_object
+
+    page_narrations = {page.id: page_narration(page) for page in deck.pages}
+    page_narration_durations = {
+        page_id: narration.duration_ms if narration is not None else None
+        for page_id, narration in page_narrations.items()
+    }
+
+    def page_narration_url(page: models.LectureSlidePage) -> str | None:
+        narration = page_narrations[page.id]
+        if narration is None:
+            return None
+        url = request.url_for(
+            "get_thread_lecture_slide_page_narration",
+            class_id=str(thread.class_id),
+            thread_id=str(thread.id),
+            page_id=str(page.id),
+        )
+        return f"{url}?v={narration.id}"
+
     return schemas.LectureSlideDeckView(
         id=deck.id,
         display_name=deck.display_name,
@@ -719,6 +750,8 @@ def _lecture_slide_deck_view(
                     if page.media_stored_object is not None
                     else None
                 ),
+                narration_url=page_narration_url(page),
+                narration_duration_ms=page_narration_durations[page.id],
             )
             for page in sorted(deck.pages, key=lambda item: item.position)
         ],
@@ -5218,6 +5251,8 @@ async def _stream_audio_file_response(
     store_error_log: str,
     unexpected_error_log: str,
     retrieval_error_detail: str,
+    cache_control: str | None = None,
+    etag: str | None = None,
 ) -> StreamingResponse:
     total_length = content_length
     try:
@@ -5281,6 +5316,10 @@ async def _stream_audio_file_response(
             else total_length
         ),
     }
+    if cache_control is not None:
+        response_headers["Cache-Control"] = cache_control
+    if etag is not None:
+        response_headers["ETag"] = etag
     status_code = 200
     if is_partial and start is not None and end is not None:
         response_headers["Content-Range"] = f"bytes {start}-{end}/{total_length}"
@@ -5674,6 +5713,83 @@ async def get_thread_lecture_slide_continuous_narration(
         logger.exception(
             "get_thread_lecture_slide_continuous_narration: Exception occurred"
         )
+        raise HTTPException(
+            status_code=500,
+            detail="An internal error occurred while retrieving the lecture slide narration.",
+        ) from e
+
+
+@v1.get(
+    "/class/{class_id}/thread/{thread_id}/lecture-slides/{page_id}/narration",
+    dependencies=[Depends(Authz("can_view", "thread:{thread_id}"))],
+    response_class=StreamingResponse,
+)
+async def get_thread_lecture_slide_page_narration(
+    class_id: str,
+    thread_id: str,
+    page_id: int,
+    request: StateRequest,
+):
+    if not config.lecture_video_audio_store:
+        raise HTTPException(
+            status_code=404, detail="No Lecture Video Audio Store exists."
+        )
+
+    thread = await _get_lecture_slide_thread_with_deck_or_404(
+        request.state["db"], class_id, thread_id
+    )
+    deck = cast(models.LectureSlideDeck, thread.lecture_slide_deck)
+    page = next((item for item in deck.pages if item.id == page_id), None)
+    if page is None:
+        raise HTTPException(status_code=404, detail="Lecture slide page not found.")
+
+    translation = lecture_slide_runtime.usable_lecture_slide_translation(thread)
+    if translation is not None:
+        translated_page = next(
+            (item for item in translation.pages if item.position == page.position),
+            None,
+        )
+        narration = (
+            translated_page.narration_stored_object
+            if translated_page is not None
+            else None
+        )
+    else:
+        narration = (
+            page.narration.stored_object
+            if (
+                page.narration is not None
+                and page.narration.status == schemas.LectureSlideNarrationStatus.READY
+            )
+            else None
+        )
+    if narration is None:
+        raise HTTPException(
+            status_code=404, detail="Lecture slide narration not found."
+        )
+
+    try:
+        return await _stream_audio_file_response(
+            store=config.lecture_video_audio_store.store,
+            key=narration.key,
+            content_length=narration.content_length,
+            content_type=narration.content_type,
+            range_header=request.headers.get("range"),
+            store_error_log="AudioStoreError while streaming lecture slide page narration; aborting stream.",
+            unexpected_error_log="Unexpected error while streaming lecture slide page narration",
+            retrieval_error_detail="Unable to retrieve the lecture slide narration audio.",
+            cache_control="private, max-age=31536000, immutable",
+            etag=f'"{narration.id}"',
+        )
+    except HTTPException:
+        raise
+    except AudioStoreError as e:
+        raise HTTPException(
+            status_code=400,
+            detail="Unable to retrieve the lecture slide narration audio.",
+        ) from e
+    except Exception as e:
+        logger.exception("get_thread_lecture_slide_page_narration: Exception occurred")
         raise HTTPException(
             status_code=500,
             detail="An internal error occurred while retrieving the lecture slide narration.",
