@@ -75,6 +75,22 @@ def _text_upload(
     )
 
 
+def _context_file_input(
+    file_id: str = "file-context-1",
+    filename: str = "notes.md",
+    file_kind: str = schemas.LECTURE_SLIDE_CONTEXT_FILE_KIND_OTHER,
+    usage_mode: str = schemas.LECTURE_SLIDE_CONTEXT_FILE_USAGE_CUSTOM,
+    usage_note: str | None = None,
+) -> lecture_slide_processing.AdditionalContextFileInput:
+    return lecture_slide_processing.AdditionalContextFileInput(
+        file_id=file_id,
+        filename=filename,
+        file_kind=file_kind,
+        usage_mode=usage_mode,
+        usage_note=usage_note,
+    )
+
+
 def test_additional_context_generation_payload_is_separate_user_message():
     messages = lecture_slide_processing._append_additional_context_message(
         [
@@ -86,7 +102,15 @@ def test_additional_context_generation_payload_is_separate_user_message():
                 ],
             }
         ],
-        ["file-context-1", "file-context-2"],
+        [
+            _context_file_input(
+                file_id="file-context-1",
+                filename="transcript.txt",
+                file_kind=schemas.LECTURE_SLIDE_CONTEXT_FILE_KIND_TRANSCRIPT,
+                usage_mode=schemas.LECTURE_SLIDE_CONTEXT_FILE_USAGE_GUIDE,
+            ),
+            _context_file_input(file_id="file-context-2", filename="notes.md"),
+        ],
     )
 
     assert len(messages) == 2
@@ -95,12 +119,125 @@ def test_additional_context_generation_payload_is_separate_user_message():
         "file_id": "file-slides",
     }
     assert messages[1]["role"] == "user"
-    assert messages[1]["content"][0]["type"] == "input_text"
-    assert "additional context" in messages[1]["content"][0]["text"]
-    assert messages[1]["content"][1:] == [
-        {"type": "input_file", "file_id": "file-context-1"},
-        {"type": "input_file", "file_id": "file-context-2"},
+    preamble, *parts = messages[1]["content"]
+    assert preamble["type"] == "input_text"
+    assert "additional context" in preamble["text"]
+    assert [part["type"] for part in parts] == [
+        "input_text",
+        "input_file",
+        "input_text",
+        "input_file",
     ]
+    first_label, first_file, second_label, second_file = parts
+    assert "[Additional context file 1 of 2]" in first_label["text"]
+    assert "Filename: transcript.txt" in first_label["text"]
+    assert "Kind: transcript" in first_label["text"]
+    assert "Usage mode: guide" in first_label["text"]
+    assert first_file == {"type": "input_file", "file_id": "file-context-1"}
+    assert "[Additional context file 2 of 2]" in second_label["text"]
+    assert "Filename: notes.md" in second_label["text"]
+    assert "Kind: other" in second_label["text"]
+    assert second_file == {"type": "input_file", "file_id": "file-context-2"}
+
+
+def test_additional_context_user_message_empty_returns_none():
+    assert lecture_slide_processing._additional_context_user_message([]) is None
+    assert lecture_slide_processing._append_additional_context_message(
+        [{"role": "user", "content": []}], []
+    ) == [{"role": "user", "content": []}]
+
+
+def test_additional_context_user_message_faithful_transcript():
+    message = lecture_slide_processing._additional_context_user_message(
+        [
+            _context_file_input(
+                filename="transcript.txt",
+                file_kind=schemas.LECTURE_SLIDE_CONTEXT_FILE_KIND_TRANSCRIPT,
+                usage_mode=schemas.LECTURE_SLIDE_CONTEXT_FILE_USAGE_FAITHFUL,
+            )
+        ]
+    )
+
+    assert message is not None
+    preamble = message["content"][0]["text"]
+    assert "marked FAITHFUL" in preamble
+    label = message["content"][1]["text"]
+    assert "marked FAITHFUL" in label
+    assert "reproduce this transcript essentially verbatim" in label
+    assert "Instructor usage note:" not in label
+
+
+def test_additional_context_user_message_guide_transcript():
+    message = lecture_slide_processing._additional_context_user_message(
+        [
+            _context_file_input(
+                filename="transcript.txt",
+                file_kind=schemas.LECTURE_SLIDE_CONTEXT_FILE_KIND_TRANSCRIPT,
+                usage_mode=schemas.LECTURE_SLIDE_CONTEXT_FILE_USAGE_GUIDE,
+            )
+        ]
+    )
+
+    assert message is not None
+    preamble = message["content"][0]["text"]
+    assert "marked FAITHFUL" not in preamble
+    label = message["content"][1]["text"]
+    assert "marked GUIDE" in label
+    assert "guide content, emphasis, and pacing" in label
+
+
+def test_additional_context_user_message_custom_transcript_includes_note():
+    message = lecture_slide_processing._additional_context_user_message(
+        [
+            _context_file_input(
+                filename="transcript.txt",
+                file_kind=schemas.LECTURE_SLIDE_CONTEXT_FILE_KIND_TRANSCRIPT,
+                usage_mode=schemas.LECTURE_SLIDE_CONTEXT_FILE_USAGE_CUSTOM,
+                usage_note="Only use the introduction section.",
+            )
+        ]
+    )
+
+    assert message is not None
+    label = message["content"][1]["text"]
+    assert "Instructor usage note: Only use the introduction section." in label
+    assert "Follow the instructor's usage note above" in label
+
+
+def test_additional_context_user_message_other_file_without_note():
+    message = lecture_slide_processing._additional_context_user_message(
+        [_context_file_input(filename="syllabus.pdf")]
+    )
+
+    assert message is not None
+    preamble = message["content"][0]["text"]
+    assert "marked FAITHFUL" not in preamble
+    label = message["content"][1]["text"]
+    assert "Instructor usage note:" not in label
+    assert "background context" in label
+
+
+def test_has_faithful_transcript():
+    faithful = _context_file_input(
+        file_kind=schemas.LECTURE_SLIDE_CONTEXT_FILE_KIND_TRANSCRIPT,
+        usage_mode=schemas.LECTURE_SLIDE_CONTEXT_FILE_USAGE_FAITHFUL,
+    )
+    guide = _context_file_input(
+        file_kind=schemas.LECTURE_SLIDE_CONTEXT_FILE_KIND_TRANSCRIPT,
+        usage_mode=schemas.LECTURE_SLIDE_CONTEXT_FILE_USAGE_GUIDE,
+    )
+    other = _context_file_input()
+    faithful_other = _context_file_input(
+        usage_mode=schemas.LECTURE_SLIDE_CONTEXT_FILE_USAGE_FAITHFUL
+    )
+    unknown = _context_file_input(file_kind="summary", usage_mode="faithful-ish")
+
+    assert lecture_slide_processing._has_faithful_transcript([]) is False
+    assert lecture_slide_processing._has_faithful_transcript([faithful]) is True
+    assert lecture_slide_processing._has_faithful_transcript([guide, other]) is False
+    assert lecture_slide_processing._has_faithful_transcript([guide, faithful]) is True
+    assert lecture_slide_processing._has_faithful_transcript([faithful_other]) is False
+    assert lecture_slide_processing._has_faithful_transcript([unknown]) is False
 
 
 @pytest.mark.asyncio
@@ -520,6 +657,73 @@ async def test_create_lecture_slide_additional_context_file_uploads_as_user_data
         assert s3_file.key in store.stored_files
 
 
+@pytest.mark.asyncio
+@with_institution(11, "Test Institution")
+async def test_create_lecture_slide_additional_context_file_normalizes_metadata(
+    db, config, monkeypatch, institution
+):
+    store = FakeLectureSlideStore()
+    files = FakeOpenAIFiles()
+    monkeypatch.setattr(config, "file_store", SimpleNamespace(store=store))
+
+    async def fake_get_openai_client_by_class_id(session, class_id: int):
+        return SimpleNamespace(files=files)
+
+    monkeypatch.setattr(
+        lecture_slide_service,
+        "get_openai_client_by_class_id",
+        fake_get_openai_client_by_class_id,
+    )
+
+    async with db.async_session() as session:
+        user = models.User(id=123, email="owner@example.com")
+        class_ = models.Class(
+            id=1,
+            name="Test Class",
+            institution_id=institution.id,
+            api_key="test-key",
+        )
+        session.add_all([user, class_])
+        await session.flush()
+
+        blank_metadata = (
+            await lecture_slide_service.create_lecture_slide_additional_context_file(
+                session,
+                class_id=class_.id,
+                uploader_id=user.id,
+                upload=_text_upload(),
+                file_kind="  ",
+                usage_mode="",
+                usage_note="   ",
+            )
+        )
+        trimmed_metadata = (
+            await lecture_slide_service.create_lecture_slide_additional_context_file(
+                session,
+                class_id=class_.id,
+                uploader_id=user.id,
+                upload=_text_upload(filename="transcript.txt"),
+                file_kind=" transcript ",
+                usage_mode=" guide ",
+                usage_note="  Focus on section two.  ",
+            )
+        )
+
+    assert blank_metadata.file_kind == "other"
+    assert blank_metadata.usage_mode == "custom"
+    assert blank_metadata.usage_note is None
+    assert trimmed_metadata.file_kind == "transcript"
+    assert trimmed_metadata.usage_mode == "guide"
+    assert trimmed_metadata.usage_note == "Focus on section two."
+
+    summary = lecture_slide_service.lecture_slide_context_file_summary_from_model(
+        trimmed_metadata
+    )
+    assert summary.file_kind == "transcript"
+    assert summary.usage_mode == "guide"
+    assert summary.usage_note == "Focus on section two."
+
+
 def test_lecture_slide_additional_context_file_validation_uses_mime_type():
     accepted_mime_with_unknown_extension = _text_upload(
         filename="notes.unknown",
@@ -846,6 +1050,95 @@ async def test_apply_additional_context_files_preserves_existing_files_for_other
 
 @pytest.mark.asyncio
 @with_institution(11, "Test Institution")
+async def test_apply_additional_context_files_copies_metadata_from_snapshot(
+    db, institution
+):
+    async with db.async_session() as session:
+        user = models.User(id=123, email="owner@example.com")
+        class_ = models.Class(
+            id=1,
+            name="Test Class",
+            institution_id=institution.id,
+            api_key="test-key",
+        )
+        session.add_all([user, class_])
+        await session.flush()
+        file = await models.File.create(
+            session,
+            {
+                "file_id": "file-context",
+                "private": True,
+                "uploader_id": user.id,
+                "name": "transcript.txt",
+                "content_type": "text/plain",
+            },
+            class_id=class_.id,
+        )
+        source = await models.LectureSlideSourceStoredObject.create(
+            session,
+            key="slides.pdf",
+            original_filename="slides.pdf",
+            content_type="application/pdf",
+            content_length=1024,
+        )
+        source_deck = await models.LectureSlideDeck.create(
+            session,
+            class_id=class_.id,
+            source_stored_object_id=source.id,
+            uploader_id=user.id,
+            display_name="slides.pdf",
+            slide_count=1,
+        )
+        snapshot_context = await models.LectureSlideAdditionalContextFile.create(
+            session,
+            lecture_slide_deck_id=source_deck.id,
+            file_object_id=file.id,
+            class_id=class_.id,
+            uploader_id=user.id,
+            position=0,
+            original_filename="transcript.txt",
+            content_type="text/plain",
+            content_length=2048,
+            file_kind="transcript",
+            usage_mode="faithful",
+            usage_note="Skip the intro.",
+        )
+        cloned_deck = await models.LectureSlideDeck.create(
+            session,
+            class_id=class_.id,
+            source_stored_object_id=source.id,
+            uploader_id=user.id,
+            display_name="slides.pdf",
+            slide_count=1,
+            source_lecture_slide_deck_id_snapshot=source_deck.id,
+        )
+
+        changed = (
+            await lecture_slide_service.apply_lecture_slide_additional_context_files(
+                session,
+                cloned_deck,
+                [snapshot_context.id],
+                uploader_id=user.id,
+            )
+        )
+        await session.commit()
+        cloned_deck_id = cloned_deck.id
+
+    assert changed is True
+    async with db.async_session() as session:
+        attached_files = (
+            await models.LectureSlideAdditionalContextFile.get_all_by_deck_id_with_file(
+                session, cloned_deck_id
+            )
+        )
+        assert len(attached_files) == 1
+        assert attached_files[0].file_kind == "transcript"
+        assert attached_files[0].usage_mode == "faithful"
+        assert attached_files[0].usage_note == "Skip the intro."
+
+
+@pytest.mark.asyncio
+@with_institution(11, "Test Institution")
 async def test_delete_lecture_slide_deck_if_unused_removes_context_rows_explicitly(
     db, institution, config, monkeypatch
 ):
@@ -1058,10 +1351,92 @@ async def test_upload_assistant_lecture_slide_additional_context_allows_editor(
     assert body["size"] == len(b"# Instructor notes")
     assert body["content_type"] == "text/markdown"
     assert body["file_object_id"]
+    assert body["file_kind"] == "other"
+    assert body["usage_mode"] == "custom"
+    assert body["usage_note"] is None
     assert files.created_files == [
         (("notes.md", b"# Instructor notes", "text/markdown"), "user_data")
     ]
     assert list(store.stored_files.values()) == [b"# Instructor notes"]
+
+
+@pytest.mark.asyncio
+@with_user(123)
+@with_institution(11, "Test Institution")
+@with_authz(grants=[("user:123", "can_edit", "assistant:1")])
+async def test_upload_assistant_lecture_slide_additional_context_stores_metadata(
+    api, db, config, monkeypatch, institution, valid_user_token
+):
+    store = FakeLectureSlideStore()
+    files = FakeOpenAIFiles()
+    monkeypatch.setattr(config, "file_store", SimpleNamespace(store=store))
+
+    async def fake_get_openai_client_by_class_id(session, class_id: int):
+        return SimpleNamespace(files=files)
+
+    monkeypatch.setattr(
+        lecture_slide_service,
+        "get_openai_client_by_class_id",
+        fake_get_openai_client_by_class_id,
+    )
+
+    async with db.async_session() as session:
+        class_ = models.Class(
+            id=1,
+            name="Test Class",
+            institution_id=institution.id,
+            api_key="test-key",
+        )
+        session.add(class_)
+        await session.flush()
+        session.add(
+            models.Assistant(
+                id=1,
+                name="Lecture Slides Assistant",
+                class_id=class_.id,
+                creator_id=123,
+                interaction_mode=schemas.InteractionMode.LECTURE_SLIDES,
+                version=3,
+                model="gpt-4o-mini",
+                instructions="Teach the lecture.",
+                tools="[]",
+            )
+        )
+        await session.commit()
+
+    response = api.post(
+        "/api/v1/class/1/assistant/1/lecture-slides/additional-context/upload",
+        files={"upload": ("transcript.txt", b"Welcome to the lecture.", "text/plain")},
+        data={
+            "file_kind": "transcript",
+            "usage_mode": "faithful",
+            "usage_note": "Skip the announcements at the start.",
+        },
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["file_kind"] == "transcript"
+    assert body["usage_mode"] == "faithful"
+    assert body["usage_note"] == "Skip the announcements at the start."
+
+    async with db.async_session() as session:
+        context_file = await session.get(
+            models.LectureSlideAdditionalContextFile, body["id"]
+        )
+        assert context_file is not None
+        assert context_file.file_kind == "transcript"
+        assert context_file.usage_mode == "faithful"
+        assert context_file.usage_note == "Skip the announcements at the start."
+
+    over_length = api.post(
+        "/api/v1/class/1/assistant/1/lecture-slides/additional-context/upload",
+        files={"upload": ("notes.md", b"# Notes", "text/markdown")},
+        data={"usage_note": "x" * 4001},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert over_length.status_code == 422
 
 
 @pytest.mark.asyncio
@@ -1867,6 +2242,31 @@ async def test_clone_lecture_slide_deck_snapshot_returns_loaded_context_data(
             voice_id="voice-test-id",
             context_data={"manual_questions": []},
         )
+        file = await models.File.create(
+            session,
+            {
+                "file_id": "file-context",
+                "private": True,
+                "uploader_id": 123,
+                "name": "transcript.txt",
+                "content_type": "text/plain",
+            },
+            class_id=class_.id,
+        )
+        await models.LectureSlideAdditionalContextFile.create(
+            session,
+            lecture_slide_deck_id=deck.id,
+            file_object_id=file.id,
+            class_id=class_.id,
+            uploader_id=123,
+            position=0,
+            original_filename="transcript.txt",
+            content_type="text/plain",
+            content_length=2048,
+            file_kind="transcript",
+            usage_mode="guide",
+            usage_note="Use for pacing.",
+        )
         loaded_deck = await models.LectureSlideDeck.get_by_id_with_processing_context(
             session, deck.id
         )
@@ -1876,11 +2276,20 @@ async def test_clone_lecture_slide_deck_snapshot_returns_loaded_context_data(
             session, loaded_deck
         )
         await session.flush()
+        cloned_context_files = (
+            await models.LectureSlideAdditionalContextFile.get_all_by_deck_id_with_file(
+                session, cloned_deck.id
+            )
+        )
 
     assert "context_data" in cloned_deck.__dict__
     assert cloned_deck.context_data == {"manual_questions": []}
     assert cloned_deck.slide_count == 3
     assert cloned_deck.source_page_count == 1
+    assert len(cloned_context_files) == 1
+    assert cloned_context_files[0].file_kind == "transcript"
+    assert cloned_context_files[0].usage_mode == "guide"
+    assert cloned_context_files[0].usage_note == "Use for pacing."
 
 
 @pytest.mark.asyncio

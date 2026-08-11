@@ -97,6 +97,11 @@
 		type LectureSlideContentJson
 	} from '$lib/lectureSlideContentJson';
 	import { deriveLectureSlideProcessingTriggers } from '$lib/lectureSlideProcessing';
+	import {
+		lectureSlideContextFileBadgeLabel,
+		type LectureSlideContextFileEntry
+	} from '$lib/lectureSlideContextFiles';
+	import LectureSlideContextFileMetadataModal from '$lib/components/LectureSlideContextFileMetadataModal.svelte';
 	import { SvelteSet } from 'svelte/reactivity';
 	export let data;
 	$: lectureVideoDefaultInstructions = data.lectureLessonEditorConfig?.instructions || '';
@@ -653,6 +658,8 @@
 	let lectureSlideAdditionalContextUploadedFiles: api.LectureSlideAdditionalContextFileSummary[] =
 		[];
 	let hasSetLectureSlideAdditionalContextFiles = false;
+	let lectureSlideContextMetadataModalOpen = false;
+	let pendingLectureSlideContextFiles: File[] = [];
 	const uploadedLectureSlideContextFileObjectIds = () =>
 		new Set(lectureSlideAdditionalContextUploadedFiles.map((file) => file.file_object_id));
 	const lectureSlideOpenAIInputFileMaxBytes = 50 * 1024 * 1024;
@@ -3754,15 +3761,16 @@
 		selectedLectureSlideQuestionClientId = null;
 	};
 
-	const uploadLectureSlideAdditionalContextFiles = async (files: FileList | File[]) => {
-		const selectedFiles = Array.from(files);
-		if (selectedFiles.length === 0) {
+	const uploadLectureSlideAdditionalContextFiles = async (
+		entries: LectureSlideContextFileEntry[]
+	) => {
+		if (entries.length === 0) {
 			return;
 		}
 		uploadingLectureSlideContext = true;
 		lectureSlideContextUploadProgress = 0;
 		try {
-			for (const file of selectedFiles) {
+			for (const { file, metadata } of entries) {
 				if (!lectureSlideAdditionalContextFileFilter(file)) {
 					sadToast(`Could not upload ${file.name}:\nFile type is not supported.`);
 					continue;
@@ -3784,7 +3792,7 @@
 				}
 				const uploadInfo =
 					data.isCreating || !data.assistantId
-						? api.uploadLectureSlideAdditionalContextFile(fetch, data.class.id, file, {
+						? api.uploadLectureSlideAdditionalContextFile(fetch, data.class.id, file, metadata, {
 								onProgress: (progress) => {
 									lectureSlideContextUploadProgress = progress;
 								}
@@ -3794,6 +3802,7 @@
 								data.class.id,
 								data.assistantId,
 								file,
+								metadata,
 								{
 									onProgress: (progress) => {
 										lectureSlideContextUploadProgress = progress;
@@ -3840,13 +3849,23 @@
 		}
 	};
 
-	const handleLectureSlideAdditionalContextFileChange = async (event: Event) => {
+	const handleLectureSlideAdditionalContextFileChange = (event: Event) => {
 		const target = event.target as HTMLInputElement;
 		if (!target.files?.length) {
 			return;
 		}
-		await uploadLectureSlideAdditionalContextFiles(target.files);
+		pendingLectureSlideContextFiles = Array.from(target.files);
+		lectureSlideContextMetadataModalOpen = true;
 		target.value = '';
+	};
+
+	const confirmLectureSlideContextMetadata = async (entries: LectureSlideContextFileEntry[]) => {
+		pendingLectureSlideContextFiles = [];
+		await uploadLectureSlideAdditionalContextFiles(entries);
+	};
+
+	const cancelLectureSlideContextMetadata = () => {
+		pendingLectureSlideContextFiles = [];
 	};
 
 	const removeLectureSlideAdditionalContextFile = (contextFileId: number) => {
@@ -5816,9 +5835,22 @@
 										<div class="truncate text-sm font-medium text-gray-900">
 											{contextFile.filename}
 										</div>
-										<div class="text-xs text-gray-500">
-											{humanSize(contextFile.size)} &middot; {contextFile.content_type}
+										<div class="flex items-center gap-2 text-xs text-gray-500">
+											<span>
+												{humanSize(contextFile.size)} &middot; {contextFile.content_type}
+											</span>
+											<Badge color="dark" class="shrink-0">
+												{lectureSlideContextFileBadgeLabel(
+													contextFile.file_kind,
+													contextFile.usage_mode
+												)}
+											</Badge>
 										</div>
+										{#if contextFile.usage_note}
+											<div class="truncate text-xs text-gray-500" title={contextFile.usage_note}>
+												{contextFile.usage_note}
+											</div>
+										{/if}
 									</div>
 									<Button
 										type="button"
@@ -5856,6 +5888,12 @@
 								: '...'}</Helper
 						>
 					{/if}
+					<LectureSlideContextFileMetadataModal
+						bind:open={lectureSlideContextMetadataModalOpen}
+						files={pendingLectureSlideContextFiles}
+						onConfirm={confirmLectureSlideContextMetadata}
+						onCancel={cancelLectureSlideContextMetadata}
+					/>
 				</div>
 			{/if}
 			<div class="col-span-2 mb-4">

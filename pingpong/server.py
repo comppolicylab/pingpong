@@ -10529,9 +10529,21 @@ async def upload_lecture_slide_additional_context_file(
     class_id: str,
     request: StateRequest,
     upload: UploadFile,
+    file_kind: str = Form(
+        schemas.LECTURE_SLIDE_CONTEXT_FILE_KIND_OTHER, max_length=100
+    ),
+    usage_mode: str = Form(
+        schemas.LECTURE_SLIDE_CONTEXT_FILE_USAGE_CUSTOM, max_length=100
+    ),
+    usage_note: str | None = Form(None, max_length=4000),
 ):
     return await _create_lecture_slide_additional_context_file_response(
-        class_id, request, upload
+        class_id,
+        request,
+        upload,
+        file_kind=file_kind,
+        usage_mode=usage_mode,
+        usage_note=usage_note,
     )
 
 
@@ -10548,12 +10560,24 @@ async def upload_lecture_slide_additional_context_file_for_assistant(
     assistant_id: str,
     request: StateRequest,
     upload: UploadFile,
+    file_kind: str = Form(
+        schemas.LECTURE_SLIDE_CONTEXT_FILE_KIND_OTHER, max_length=100
+    ),
+    usage_mode: str = Form(
+        schemas.LECTURE_SLIDE_CONTEXT_FILE_USAGE_CUSTOM, max_length=100
+    ),
+    usage_note: str | None = Form(None, max_length=4000),
 ):
     await lecture_slide_service.get_lecture_slide_assistant_for_class(
         request.state["db"], int(assistant_id), int(class_id)
     )
     return await _create_lecture_slide_additional_context_file_response(
-        class_id, request, upload
+        class_id,
+        request,
+        upload,
+        file_kind=file_kind,
+        usage_mode=usage_mode,
+        usage_note=usage_note,
     )
 
 
@@ -10561,6 +10585,10 @@ async def _create_lecture_slide_additional_context_file_response(
     class_id: str,
     request: StateRequest,
     upload: UploadFile,
+    *,
+    file_kind: str = schemas.LECTURE_SLIDE_CONTEXT_FILE_KIND_OTHER,
+    usage_mode: str = schemas.LECTURE_SLIDE_CONTEXT_FILE_USAGE_CUSTOM,
+    usage_note: str | None = None,
 ) -> schemas.LectureSlideAdditionalContextFileSummary:
     context_file = (
         await lecture_slide_service.create_lecture_slide_additional_context_file(
@@ -10568,6 +10596,9 @@ async def _create_lecture_slide_additional_context_file_response(
             class_id=int(class_id),
             uploader_id=request.state["session"].user.id,
             upload=upload,
+            file_kind=file_kind,
+            usage_mode=usage_mode,
+            usage_note=usage_note,
         )
     )
     file_target = f"user_file:{context_file.file_object_id}"

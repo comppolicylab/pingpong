@@ -1949,12 +1949,27 @@ export type LectureSlideSummary = {
 	additional_context_files: LectureSlideAdditionalContextFileSummary[];
 };
 
+export const LECTURE_SLIDE_CONTEXT_FILE_KIND_TRANSCRIPT = 'transcript';
+export const LECTURE_SLIDE_CONTEXT_FILE_KIND_OTHER = 'other';
+export const LECTURE_SLIDE_CONTEXT_FILE_USAGE_FAITHFUL = 'faithful';
+export const LECTURE_SLIDE_CONTEXT_FILE_USAGE_GUIDE = 'guide';
+export const LECTURE_SLIDE_CONTEXT_FILE_USAGE_CUSTOM = 'custom';
+
 export type LectureSlideAdditionalContextFileSummary = {
 	id: number;
 	filename: string;
 	size: number;
 	content_type: string;
 	file_object_id: number;
+	file_kind: string;
+	usage_mode: string;
+	usage_note?: string | null;
+};
+
+export type LectureSlideAdditionalContextFileMetadata = {
+	file_kind: string;
+	usage_mode: string;
+	usage_note?: string;
 };
 
 export type LectureSlidePageNotes = {
@@ -2344,6 +2359,19 @@ export const deleteLectureSlideMedia = async (
 	return await DELETE<never, GenericStatus>(f, url);
 };
 
+const lectureSlideContextFileMetadataFormFields = (
+	metadata: LectureSlideAdditionalContextFileMetadata
+): Record<string, string> => {
+	const formFields: Record<string, string> = {
+		file_kind: metadata.file_kind,
+		usage_mode: metadata.usage_mode
+	};
+	if (metadata.usage_note?.trim()) {
+		formFields.usage_note = metadata.usage_note.trim();
+	}
+	return formFields;
+};
+
 /**
  * Upload an additional context file for lecture slide generation.
  */
@@ -2351,10 +2379,14 @@ export const uploadLectureSlideAdditionalContextFile = (
 	_f: Fetcher,
 	classId: number,
 	file: File,
+	metadata: LectureSlideAdditionalContextFileMetadata,
 	opts?: UploadOptions
 ) => {
 	const url = fullPath(`class/${classId}/lecture-slides/additional-context`);
-	return _doUpload<LectureSlideAdditionalContextFileSummary>(url, file, opts);
+	return _doUpload<LectureSlideAdditionalContextFileSummary>(url, file, {
+		...opts,
+		formFields: lectureSlideContextFileMetadataFormFields(metadata)
+	});
 };
 
 /**
@@ -2365,12 +2397,16 @@ export const uploadAssistantLectureSlideAdditionalContextFile = (
 	classId: number,
 	assistantId: number,
 	file: File,
+	metadata: LectureSlideAdditionalContextFileMetadata,
 	opts?: UploadOptions
 ) => {
 	const url = fullPath(
 		`class/${classId}/assistant/${assistantId}/lecture-slides/additional-context/upload`
 	);
-	return _doUpload<LectureSlideAdditionalContextFileSummary>(url, file, opts);
+	return _doUpload<LectureSlideAdditionalContextFileSummary>(url, file, {
+		...opts,
+		formFields: lectureSlideContextFileMetadataFormFields(metadata)
+	});
 };
 
 /**
@@ -3414,6 +3450,7 @@ export const deleteAssistantShareLink = async (
  */
 export interface UploadOptions {
 	onProgress?: (percent: number) => void;
+	formFields?: Record<string, string>;
 }
 
 export type FileUploadPurpose =
@@ -3574,6 +3611,9 @@ const _doUpload = <T extends BaseData = ServerFile>(
 	formData.append('purpose', purpose);
 	if (useImageDescriptions === true) {
 		formData.append('use_image_descriptions', 'true');
+	}
+	for (const [name, value] of Object.entries(opts?.formFields ?? {})) {
+		formData.append(name, value);
 	}
 	xhr.send(formData);
 

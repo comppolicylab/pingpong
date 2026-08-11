@@ -314,6 +314,9 @@ def lecture_slide_context_file_summary_from_model(
         size=context_file.content_length,
         content_type=context_file.content_type,
         file_object_id=context_file.file_object_id,
+        file_kind=context_file.file_kind,
+        usage_mode=context_file.usage_mode,
+        usage_note=context_file.usage_note,
     )
 
 
@@ -385,7 +388,13 @@ async def create_lecture_slide_additional_context_file(
     class_id: int,
     uploader_id: int,
     upload: UploadFile,
+    file_kind: str = schemas.LECTURE_SLIDE_CONTEXT_FILE_KIND_OTHER,
+    usage_mode: str = schemas.LECTURE_SLIDE_CONTEXT_FILE_USAGE_CUSTOM,
+    usage_note: str | None = None,
 ) -> models.LectureSlideAdditionalContextFile:
+    file_kind = file_kind.strip() or schemas.LECTURE_SLIDE_CONTEXT_FILE_KIND_OTHER
+    usage_mode = usage_mode.strip() or schemas.LECTURE_SLIDE_CONTEXT_FILE_USAGE_CUSTOM
+    usage_note = usage_note.strip() or None if usage_note is not None else None
     upload_size = get_upload_size(upload)
     _validate_openai_input_file_upload(upload, upload_size)
     if not config.file_store:
@@ -441,6 +450,9 @@ async def create_lecture_slide_additional_context_file(
             original_filename=filename,
             content_type=content_type,
             content_length=upload_size,
+            file_kind=file_kind,
+            usage_mode=usage_mode,
+            usage_note=usage_note,
         )
     except BaseException:
         try:
@@ -775,6 +787,9 @@ async def apply_lecture_slide_additional_context_files(
             original_filename=requested_file.original_filename,
             content_type=requested_file.content_type,
             content_length=requested_file.content_length,
+            file_kind=requested_file.file_kind,
+            usage_mode=requested_file.usage_mode,
+            usage_note=requested_file.usage_note,
         )
         changed = True
 
@@ -1963,6 +1978,9 @@ async def clone_lecture_slide_deck_snapshot(
                 original_filename=context_file.original_filename,
                 content_type=context_file.content_type,
                 content_length=context_file.content_length,
+                file_kind=context_file.file_kind,
+                usage_mode=context_file.usage_mode,
+                usage_note=context_file.usage_note,
             )
         )
     for question in deck.questions:

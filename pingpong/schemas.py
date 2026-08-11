@@ -1272,12 +1272,22 @@ class LectureVideoSummary(BaseModel):
     error_message: str | None = None
 
 
+LECTURE_SLIDE_CONTEXT_FILE_KIND_TRANSCRIPT = "transcript"
+LECTURE_SLIDE_CONTEXT_FILE_KIND_OTHER = "other"
+LECTURE_SLIDE_CONTEXT_FILE_USAGE_FAITHFUL = "faithful"
+LECTURE_SLIDE_CONTEXT_FILE_USAGE_GUIDE = "guide"
+LECTURE_SLIDE_CONTEXT_FILE_USAGE_CUSTOM = "custom"
+
+
 class LectureSlideAdditionalContextFileSummary(BaseModel):
     id: int
     filename: str
     size: int = Field(..., ge=0)
     content_type: str
     file_object_id: int
+    file_kind: str = LECTURE_SLIDE_CONTEXT_FILE_KIND_OTHER
+    usage_mode: str = LECTURE_SLIDE_CONTEXT_FILE_USAGE_CUSTOM
+    usage_note: str | None = None
 
 
 class LectureSlideSummary(BaseModel):
