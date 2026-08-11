@@ -3072,7 +3072,7 @@ class LectureSlideAdditionalContextFile(Base):
     usage_mode = Column(
         String,
         nullable=False,
-        server_default=schemas.LECTURE_SLIDE_CONTEXT_FILE_USAGE_CUSTOM,
+        server_default=schemas.LECTURE_SLIDE_CONTEXT_FILE_USAGE_GUIDE,
     )
     usage_note = Column(Text, nullable=True)
     created = Column(DateTime(timezone=True), server_default=func.now())
@@ -3092,7 +3092,7 @@ class LectureSlideAdditionalContextFile(Base):
         content_type: str,
         content_length: int,
         file_kind: str = schemas.LECTURE_SLIDE_CONTEXT_FILE_KIND_OTHER,
-        usage_mode: str = schemas.LECTURE_SLIDE_CONTEXT_FILE_USAGE_CUSTOM,
+        usage_mode: str = schemas.LECTURE_SLIDE_CONTEXT_FILE_USAGE_GUIDE,
         usage_note: str | None = None,
     ) -> "LectureSlideAdditionalContextFile":
         context_file = LectureSlideAdditionalContextFile(
@@ -6438,6 +6438,7 @@ class Assistant(Base):
         params.pop("lecture_slide_page_notes", None)
         params.pop("lecture_slide_content_items", None)
         params.pop("lecture_slide_additional_context_file_ids", None)
+        params.pop("lecture_slide_additional_context_file_metadata", None)
         params.pop("lecture_slide_questions", None)
         params.pop("narration_prompt", None)
         params.pop("voice_id", None)

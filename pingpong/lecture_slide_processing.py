@@ -664,19 +664,14 @@ def _additional_context_file_guidance_text(
                 "disfluencies, and misstatements the slides contradict. Do not "
                 "otherwise polish, condense, expand, or restructure it."
             )
-        if context_file.usage_mode == schemas.LECTURE_SLIDE_CONTEXT_FILE_USAGE_GUIDE:
-            return (
-                "This is the instructor's transcript for this lecture, marked "
-                "GUIDE. Use it to guide content, emphasis, and pacing, but you do "
-                "not need to follow its wording closely."
-            )
         return (
-            "This is the instructor's transcript for this lecture. Follow the "
-            "instructor's usage note above for how to use it."
+            "This is the instructor's transcript for this lecture, marked "
+            "GUIDE. Use it to guide content, emphasis, and pacing, but you do "
+            "not need to follow its wording closely."
         )
     return (
-        "Use this file as background context, following the instructor's usage "
-        "note above when present."
+        "Use this file as background context, following the instructor's "
+        "instructions above when present."
     )
 
 
@@ -690,10 +685,13 @@ def _additional_context_file_label_text(
         f"[Additional context file {index} of {total}]",
         f"Filename: {context_file.filename}",
         f"Kind: {context_file.file_kind}",
-        f"Usage mode: {context_file.usage_mode}",
     ]
+    # Usage modes describe how to follow a transcript, so they are meaningless
+    # for other kinds.
+    if context_file.file_kind == schemas.LECTURE_SLIDE_CONTEXT_FILE_KIND_TRANSCRIPT:
+        lines.append(f"Usage mode: {context_file.usage_mode}")
     if context_file.usage_note:
-        lines.append(f"Instructor usage note: {context_file.usage_note}")
+        lines.append(f"Instructor instructions: {context_file.usage_note}")
     lines.append(_additional_context_file_guidance_text(context_file))
     return "\n".join(lines)
 

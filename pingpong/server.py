@@ -10529,21 +10529,9 @@ async def upload_lecture_slide_additional_context_file(
     class_id: str,
     request: StateRequest,
     upload: UploadFile,
-    file_kind: str = Form(
-        schemas.LECTURE_SLIDE_CONTEXT_FILE_KIND_OTHER, max_length=100
-    ),
-    usage_mode: str = Form(
-        schemas.LECTURE_SLIDE_CONTEXT_FILE_USAGE_CUSTOM, max_length=100
-    ),
-    usage_note: str | None = Form(None, max_length=4000),
 ):
     return await _create_lecture_slide_additional_context_file_response(
-        class_id,
-        request,
-        upload,
-        file_kind=file_kind,
-        usage_mode=usage_mode,
-        usage_note=usage_note,
+        class_id, request, upload
     )
 
 
@@ -10560,24 +10548,12 @@ async def upload_lecture_slide_additional_context_file_for_assistant(
     assistant_id: str,
     request: StateRequest,
     upload: UploadFile,
-    file_kind: str = Form(
-        schemas.LECTURE_SLIDE_CONTEXT_FILE_KIND_OTHER, max_length=100
-    ),
-    usage_mode: str = Form(
-        schemas.LECTURE_SLIDE_CONTEXT_FILE_USAGE_CUSTOM, max_length=100
-    ),
-    usage_note: str | None = Form(None, max_length=4000),
 ):
     await lecture_slide_service.get_lecture_slide_assistant_for_class(
         request.state["db"], int(assistant_id), int(class_id)
     )
     return await _create_lecture_slide_additional_context_file_response(
-        class_id,
-        request,
-        upload,
-        file_kind=file_kind,
-        usage_mode=usage_mode,
-        usage_note=usage_note,
+        class_id, request, upload
     )
 
 
@@ -10585,10 +10561,6 @@ async def _create_lecture_slide_additional_context_file_response(
     class_id: str,
     request: StateRequest,
     upload: UploadFile,
-    *,
-    file_kind: str = schemas.LECTURE_SLIDE_CONTEXT_FILE_KIND_OTHER,
-    usage_mode: str = schemas.LECTURE_SLIDE_CONTEXT_FILE_USAGE_CUSTOM,
-    usage_note: str | None = None,
 ) -> schemas.LectureSlideAdditionalContextFileSummary:
     context_file = (
         await lecture_slide_service.create_lecture_slide_additional_context_file(
@@ -10596,9 +10568,6 @@ async def _create_lecture_slide_additional_context_file_response(
             class_id=int(class_id),
             uploader_id=request.state["session"].user.id,
             upload=upload,
-            file_kind=file_kind,
-            usage_mode=usage_mode,
-            usage_note=usage_note,
         )
     )
     file_target = f"user_file:{context_file.file_object_id}"
@@ -12488,6 +12457,9 @@ async def create_assistant(
     lecture_slide_additional_context_file_ids = (
         req.lecture_slide_additional_context_file_ids
     )
+    lecture_slide_additional_context_file_metadata = (
+        req.lecture_slide_additional_context_file_metadata
+    )
     lecture_slide_questions = req.lecture_slide_questions
 
     if is_video:
@@ -12596,6 +12568,9 @@ async def create_assistant(
         lecture_slide_narration_prompt = req.narration_prompt
         lecture_slide_additional_context_file_ids = (
             req.lecture_slide_additional_context_file_ids
+        )
+        lecture_slide_additional_context_file_metadata = (
+            req.lecture_slide_additional_context_file_metadata
         )
         try:
             await validate_lecture_video_voice_id_or_raise(
@@ -12708,6 +12683,7 @@ async def create_assistant(
         del req.lecture_slide_page_notes
         del req.lecture_slide_content_items
         del req.lecture_slide_additional_context_file_ids
+        del req.lecture_slide_additional_context_file_metadata
         del req.lecture_slide_questions
         del req.voice_id
         del req.generation_prompt
@@ -12818,6 +12794,7 @@ async def create_assistant(
                         lecture_slide_deck,
                         lecture_slide_additional_context_file_ids,
                         uploader_id=request.state["session"].user.id,
+                        metadata=lecture_slide_additional_context_file_metadata,
                     )
                 )
             if lecture_slide_questions_present:
@@ -14940,6 +14917,7 @@ async def update_assistant(
                     target_lecture_slide_deck,
                     req.lecture_slide_additional_context_file_ids or [],
                     uploader_id=request.state["session"].user.id,
+                    metadata=req.lecture_slide_additional_context_file_metadata,
                 )
             if questions_present:
                 question_update_result = (
