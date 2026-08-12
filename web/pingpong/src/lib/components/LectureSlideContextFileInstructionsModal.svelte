@@ -38,6 +38,9 @@
 	<div class="space-y-4">
 		<div>
 			<h3 class="text-lg font-semibold text-gray-900 dark:text-white">Custom instructions</h3>
+			{#if filename}
+				<p class="truncate text-sm text-gray-500 dark:text-gray-400">{filename}</p>
+			{/if}
 		</div>
 		<div>
 			<Label for="lecture-slide-context-instructions" class="mb-1">
