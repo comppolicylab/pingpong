@@ -184,6 +184,7 @@ chroma/
 
 # Node.js / JavaScript stuff
 node_modules/
+.pnpm-store/
 
 # SQLite database files
 *.sqlite3
