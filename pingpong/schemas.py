@@ -1276,6 +1276,8 @@ LECTURE_SLIDE_CONTEXT_FILE_KIND_TRANSCRIPT = "transcript"
 LECTURE_SLIDE_CONTEXT_FILE_KIND_OTHER = "other"
 LECTURE_SLIDE_CONTEXT_FILE_USAGE_FAITHFUL = "faithful"
 LECTURE_SLIDE_CONTEXT_FILE_USAGE_GUIDE = "guide"
+LectureSlideContextFileKind: TypeAlias = Literal["transcript", "other"]
+LectureSlideContextFileUsageMode: TypeAlias = Literal["faithful", "guide"]
 
 
 class LectureSlideAdditionalContextFileSummary(BaseModel):
@@ -1297,9 +1299,14 @@ class LectureSlideAdditionalContextFileMetadataInput(BaseModel):
     """
 
     id: int
-    file_kind: str = Field(LECTURE_SLIDE_CONTEXT_FILE_KIND_OTHER, max_length=100)
-    usage_mode: str = Field(LECTURE_SLIDE_CONTEXT_FILE_USAGE_GUIDE, max_length=100)
+    file_kind: LectureSlideContextFileKind = LECTURE_SLIDE_CONTEXT_FILE_KIND_OTHER
+    usage_mode: LectureSlideContextFileUsageMode = LECTURE_SLIDE_CONTEXT_FILE_USAGE_GUIDE
     usage_note: str | None = Field(None, max_length=4000)
+
+    @field_validator("file_kind", "usage_mode", mode="before")
+    @classmethod
+    def strip_metadata_values(cls, value: str) -> str:
+        return value.strip()
 
 
 class LectureSlideSummary(BaseModel):

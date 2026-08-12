@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import humanize
 import pytest
 from fastapi import HTTPException, UploadFile
+from pydantic import ValidationError
 from pypdf import PdfWriter
 from sqlalchemy import func, select
 
@@ -245,6 +246,31 @@ def test_context_file_metadata_must_describe_submitted_files():
             lecture_slide_additional_context_file_metadata=[
                 schemas.LectureSlideAdditionalContextFileMetadataInput(id=1)
             ],
+        )
+
+
+def test_context_file_metadata_rejects_unsupported_values():
+    normalized = schemas.LectureSlideAdditionalContextFileMetadataInput(
+        id=1,
+        file_kind=" transcript ",
+        usage_mode=" faithful ",
+    )
+
+    assert normalized.file_kind == schemas.LECTURE_SLIDE_CONTEXT_FILE_KIND_TRANSCRIPT
+    assert normalized.usage_mode == schemas.LECTURE_SLIDE_CONTEXT_FILE_USAGE_FAITHFUL
+
+    with pytest.raises(ValidationError):
+        schemas.LectureSlideAdditionalContextFileMetadataInput(
+            id=1,
+            file_kind="transcript",
+            usage_mode="faithful-ish",
+        )
+
+    with pytest.raises(ValidationError):
+        schemas.LectureSlideAdditionalContextFileMetadataInput(
+            id=1,
+            file_kind="subtitle",
+            usage_mode="guide",
         )
 
 
