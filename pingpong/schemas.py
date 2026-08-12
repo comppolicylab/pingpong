@@ -1272,12 +1272,12 @@ class LectureVideoSummary(BaseModel):
     error_message: str | None = None
 
 
-LECTURE_SLIDE_CONTEXT_FILE_KIND_TRANSCRIPT = "transcript"
-LECTURE_SLIDE_CONTEXT_FILE_KIND_OTHER = "other"
-LECTURE_SLIDE_CONTEXT_FILE_USAGE_FAITHFUL = "faithful"
-LECTURE_SLIDE_CONTEXT_FILE_USAGE_GUIDE = "guide"
 LectureSlideContextFileKind: TypeAlias = Literal["transcript", "other"]
 LectureSlideContextFileUsageMode: TypeAlias = Literal["faithful", "guide"]
+LECTURE_SLIDE_CONTEXT_FILE_KIND_TRANSCRIPT: LectureSlideContextFileKind = "transcript"
+LECTURE_SLIDE_CONTEXT_FILE_KIND_OTHER: LectureSlideContextFileKind = "other"
+LECTURE_SLIDE_CONTEXT_FILE_USAGE_FAITHFUL: LectureSlideContextFileUsageMode = "faithful"
+LECTURE_SLIDE_CONTEXT_FILE_USAGE_GUIDE: LectureSlideContextFileUsageMode = "guide"
 
 
 class LectureSlideAdditionalContextFileSummary(BaseModel):
@@ -1300,7 +1300,9 @@ class LectureSlideAdditionalContextFileMetadataInput(BaseModel):
 
     id: int
     file_kind: LectureSlideContextFileKind = LECTURE_SLIDE_CONTEXT_FILE_KIND_OTHER
-    usage_mode: LectureSlideContextFileUsageMode = LECTURE_SLIDE_CONTEXT_FILE_USAGE_GUIDE
+    usage_mode: LectureSlideContextFileUsageMode = (
+        LECTURE_SLIDE_CONTEXT_FILE_USAGE_GUIDE
+    )
     usage_note: str | None = Field(None, max_length=4000)
 
     @field_validator("file_kind", "usage_mode", mode="before")
