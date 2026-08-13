@@ -1272,12 +1272,43 @@ class LectureVideoSummary(BaseModel):
     error_message: str | None = None
 
 
+LectureSlideContextFileKind: TypeAlias = Literal["transcript", "other"]
+LectureSlideContextFileUsageMode: TypeAlias = Literal["faithful", "guide"]
+LECTURE_SLIDE_CONTEXT_FILE_KIND_TRANSCRIPT: LectureSlideContextFileKind = "transcript"
+LECTURE_SLIDE_CONTEXT_FILE_KIND_OTHER: LectureSlideContextFileKind = "other"
+LECTURE_SLIDE_CONTEXT_FILE_USAGE_FAITHFUL: LectureSlideContextFileUsageMode = "faithful"
+LECTURE_SLIDE_CONTEXT_FILE_USAGE_GUIDE: LectureSlideContextFileUsageMode = "guide"
+
+
 class LectureSlideAdditionalContextFileSummary(BaseModel):
     id: int
     filename: str
     size: int = Field(..., ge=0)
     content_type: str
     file_object_id: int
+    file_kind: str = LECTURE_SLIDE_CONTEXT_FILE_KIND_OTHER
+    usage_mode: str = LECTURE_SLIDE_CONTEXT_FILE_USAGE_GUIDE
+    usage_note: str | None = None
+
+
+class LectureSlideAdditionalContextFileMetadataInput(BaseModel):
+    """Metadata edited in the assistant editor and saved with the assistant.
+
+    Uploading a context file only stages it; the instructor can retag it in the
+    file row afterwards, so the tags that matter are the ones submitted here.
+    """
+
+    id: int
+    file_kind: LectureSlideContextFileKind = LECTURE_SLIDE_CONTEXT_FILE_KIND_OTHER
+    usage_mode: LectureSlideContextFileUsageMode = (
+        LECTURE_SLIDE_CONTEXT_FILE_USAGE_GUIDE
+    )
+    usage_note: str | None = Field(None, max_length=4000)
+
+    @field_validator("file_kind", "usage_mode", mode="before")
+    @classmethod
+    def strip_metadata_values(cls, value: str) -> str:
+        return value.strip()
 
 
 class LectureSlideSummary(BaseModel):
@@ -1738,6 +1769,20 @@ def temperature_validator(self):
     return self
 
 
+def validate_lecture_slide_context_file_metadata(self):
+    """Metadata is only meaningful for files that the same save also attaches."""
+    metadata = self.lecture_slide_additional_context_file_metadata or []
+    if not metadata:
+        return self
+    submitted_ids = set(self.lecture_slide_additional_context_file_ids or [])
+    if not submitted_ids >= {item.id for item in metadata}:
+        raise ValueError(
+            "lecture_slide_additional_context_file_metadata can only describe files "
+            "listed in lecture_slide_additional_context_file_ids."
+        )
+    return self
+
+
 def lecture_video_validator_create_assistant(self):
     overwrite_manifest = (
         self.overwrite_manifest
@@ -1772,6 +1817,7 @@ def lecture_video_validator_create_assistant(self):
             self.lecture_slide_deck_id is not None
             or self.lecture_slide_questions
             or self.lecture_slide_additional_context_file_ids
+            or self.lecture_slide_additional_context_file_metadata
             or self.lecture_slide_content_items
         ):
             raise ValueError(
@@ -1804,6 +1850,7 @@ def lecture_video_validator_create_assistant(self):
         or self.lecture_slide_page_notes
         or self.lecture_slide_content_items
         or self.lecture_slide_additional_context_file_ids
+        or self.lecture_slide_additional_context_file_metadata
         or self.lecture_slide_questions
         or self.voice_id is not None
         or self.generation_prompt is not None
@@ -1859,6 +1906,7 @@ def lecture_video_validator_update_assistant(self):
     )
     lecture_slide_additional_context_files_present = (
         "lecture_slide_additional_context_file_ids" in self.model_fields_set
+        or "lecture_slide_additional_context_file_metadata" in self.model_fields_set
     )
     lecture_slide_questions_present = "lecture_slide_questions" in self.model_fields_set
     regenerate_narration_requested_present = (
@@ -2068,6 +2116,9 @@ class CreateAssistant(BaseModel):
         default_factory=list
     )
     lecture_slide_additional_context_file_ids: list[int] = Field(default_factory=list)
+    lecture_slide_additional_context_file_metadata: list[
+        LectureSlideAdditionalContextFileMetadataInput
+    ] = Field(default_factory=list)
     lecture_slide_questions: list[LectureSlideQuestionInput] = Field(
         default_factory=list
     )
@@ -2121,6 +2172,9 @@ class CreateAssistant(BaseModel):
     _lecture_video_check = model_validator(mode="after")(
         lecture_video_validator_create_assistant
     )
+    _lecture_slide_context_file_metadata_check = model_validator(mode="after")(
+        validate_lecture_slide_context_file_metadata
+    )
 
 
 class AssistantInstructionsPreviewRequest(BaseModel):
@@ -2167,6 +2221,9 @@ class UpdateAssistant(BaseModel):
     lecture_slide_page_notes: list[LectureSlidePageNotes] | None = None
     lecture_slide_content_items: list[LectureSlideContentItemInput] | None = None
     lecture_slide_additional_context_file_ids: list[int] | None = None
+    lecture_slide_additional_context_file_metadata: (
+        list[LectureSlideAdditionalContextFileMetadataInput] | None
+    ) = None
     lecture_slide_questions: list[LectureSlideQuestionInput] | None = None
     voice_id: str | None = None
     generation_prompt: str | None = Field(None, max_length=20000)
@@ -2241,6 +2298,9 @@ class UpdateAssistant(BaseModel):
     _temperature_check = model_validator(mode="after")(temperature_validator)
     _lecture_video_check = model_validator(mode="after")(
         lecture_video_validator_update_assistant
+    )
+    _lecture_slide_context_file_metadata_check = model_validator(mode="after")(
+        validate_lecture_slide_context_file_metadata
     )
 
 

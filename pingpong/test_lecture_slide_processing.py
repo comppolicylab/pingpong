@@ -1624,6 +1624,87 @@ async def test_generate_narration_text_requires_exact_slide_count(
     assert "Narration prompt" not in payload
 
 
+async def test_generate_narration_text_appends_faithful_transcript_addendum(db):
+    await _create_class_and_deck(db)
+    async with db.async_session() as session:
+        session.add(models.LectureSlidePage(lecture_slide_deck_id=1, position=0))
+        file = await models.File.create(
+            session,
+            {
+                "file_id": "file-transcript",
+                "private": True,
+                "uploader_id": None,
+                "name": "transcript.txt",
+                "content_type": "text/plain",
+            },
+            class_id=1,
+        )
+        await models.LectureSlideAdditionalContextFile.create(
+            session,
+            lecture_slide_deck_id=1,
+            file_object_id=file.id,
+            class_id=1,
+            uploader_id=None,
+            position=0,
+            original_filename="transcript.txt",
+            content_type="text/plain",
+            content_length=1024,
+            file_kind=schemas.LECTURE_SLIDE_CONTEXT_FILE_KIND_TRANSCRIPT,
+            usage_mode=schemas.LECTURE_SLIDE_CONTEXT_FILE_USAGE_FAITHFUL,
+        )
+        run = models.LectureSlideProcessingRun(
+            lecture_slide_deck_id=1,
+            lecture_slide_deck_id_snapshot=1,
+            class_id=1,
+            stage=schemas.LectureSlideProcessingStage.NARRATION_TEXT,
+            attempt_number=1,
+            status=schemas.LectureSlideProcessingRunStatus.RUNNING,
+            lease_token="lease",
+        )
+        session.add(run)
+        await session.commit()
+        run_id = run.id
+
+    captured: dict[str, object] = {}
+
+    class FakeResponses:
+        async def parse(self, **kwargs):
+            captured.update(kwargs)
+            response_model = kwargs["text_format"]
+            return SimpleNamespace(
+                output_parsed=response_model(
+                    slides=[
+                        lecture_slide_processing.GeneratedSlideNarration(
+                            slide_position=0,
+                            narration_text="Slide narration.",
+                        ),
+                    ]
+                )
+            )
+
+    fake_client = SimpleNamespace(responses=FakeResponses())
+
+    narration_set = await lecture_slide_processing._generate_narration_text(
+        run_id,
+        "lease",
+        1,
+        "file-pdf",
+        "assistant-chat-model",
+        fake_client,
+    )
+
+    assert narration_set is not None
+    instructions = captured["instructions"]
+    assert instructions.startswith("Narration prompt")
+    assert instructions.endswith(
+        lecture_slide_processing.FAITHFUL_TRANSCRIPT_NARRATION_ADDENDUM
+    )
+    payload = json.dumps(captured["input"])
+    assert "Filename: transcript.txt" in payload
+    assert "marked FAITHFUL" in payload
+    assert "file-transcript" in payload
+
+
 async def test_generated_narration_model_requires_each_requested_position_once():
     response_model = lecture_slide_processing._generated_slide_narration_set_model(
         [0, 2]
@@ -2686,6 +2767,49 @@ async def test_slide_manifest_generation_window_prompt_matches_filter_contract()
         "requested generation window"
     ) in instructions
     assert "from 1000ms through 2000ms" not in instructions
+
+
+async def test_slide_generation_instructions_honor_context_file_labels():
+    manifest_instructions = (
+        lecture_slide_processing._build_slide_manifest_generation_instructions(
+            "Manifest prompt",
+            total_duration_ms=2000,
+        )
+    )
+    context_instructions = (
+        lecture_slide_processing._build_slide_context_generation_instructions(
+            "Manifest prompt",
+            total_duration_ms=2000,
+        )
+    )
+
+    for instructions in (manifest_instructions, context_instructions):
+        assert (
+            "Each additional context file is labeled with the instructor's "
+            "intended usage; honor those labels." in instructions
+        )
+        assert "marked FAITHFUL" not in instructions
+
+    faithful_manifest_instructions = (
+        lecture_slide_processing._build_slide_manifest_generation_instructions(
+            "Manifest prompt",
+            total_duration_ms=2000,
+            has_faithful_transcript=True,
+        )
+    )
+    faithful_context_instructions = (
+        lecture_slide_processing._build_slide_context_generation_instructions(
+            "Manifest prompt",
+            total_duration_ms=2000,
+            has_faithful_transcript=True,
+        )
+    )
+    for instructions in (
+        faithful_manifest_instructions,
+        faithful_context_instructions,
+    ):
+        assert "instructor transcripts marked FAITHFUL" in instructions
+        assert "reliable narration source material" in instructions
 
 
 async def test_slide_manifest_question_request_prompt_limits_unmarked_questions():

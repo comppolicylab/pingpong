@@ -179,7 +179,7 @@ Critical rules:
 - Write narration as if you are speaking live to students while each slide is visible.
 - Teach the material on the slide; do not merely describe the slide's layout.
 - Stay grounded in what appears on the current slide and the necessary connective context from earlier slides.
-- Additional context files may clarify terminology, course emphasis, or background, but the visible slide or inserted media remains the source of truth for what students can see.
+- Additional context files are labeled with how the instructor wants them used; follow each file's usage label. Unless labeled otherwise, they may clarify terminology, course emphasis, or background, but the visible slide or inserted media remains the source of truth for what students can see.
 - Do not invent facts, examples, equations, citations, or course context that are not supported by the deck or instructor-provided additional context.
 - Do not mention the PDF, the prompt, the model, schemas, extraction, or any implementation details.
 
@@ -195,6 +195,23 @@ Output requirements:
 - Return one narration item per slide.
 - Use zero-based slide_position values.
 - Keep narration_text as plain spoken prose, with no markdown, bullets, slide labels, or stage directions."""
+
+FAITHFUL_TRANSCRIPT_NARRATION_ADDENDUM = """FAITHFUL TRANSCRIPT OVERRIDE:
+An instructor transcript marked FAITHFUL is included in the additional context. For every slide the transcript covers, reproduce the transcript as the narration. The narration must be essentially identical to the transcript: keep its exact wording, sentences, order, examples, numbers, terminology, and pacing.
+
+The only edits allowed are glaring mistakes:
+- Obvious transcription errors, such as misheard words, wrong homophones, or garbled names and terms that the slides make unambiguous.
+- Disfluencies and false starts, such as "um", "uh", stutters, accidentally repeated words, and abandoned fragments the speaker immediately restarts.
+- Clear factual misstatements that the slides contradict, such as a wrong number, label, or term.
+- The minimum punctuation or word-boundary fixes needed for the sentence to be read aloud correctly by text-to-speech.
+
+Do not otherwise improve, polish, condense, expand, reorder, or restructure the transcript. Do not summarize it, do not add explanations, transitions, definitions, examples, takeaways, or knowledge-check setup, and do not drop content because it seems redundant, informal, or off-topic. Prefer the instructor's phrasing over more fluent or more standard phrasing even when your own would read better.
+
+This override supersedes any earlier instruction in this prompt about narration structure, style, voice, or length, and any general guidance to treat additional context as background only. The length of a covered slide's narration is whatever the transcript says for that slide; the usual per-slide length targets do not apply.
+
+Split the transcript across slides where its content moves on to the next slide's material, and assign every part of the transcript to exactly one slide, without dropping or duplicating text. For slides the transcript does not cover, follow the general narration instructions above.
+
+The slides remain the source of truth for what is visible; do not narrate transcript content as if it were visible on a slide when it is not."""
 
 LECTURE_SLIDE_TRANSLATION_PROMPT = """Translate the supplied lecture narration into the requested target language.
 
@@ -354,6 +371,7 @@ def _build_slide_manifest_generation_instructions(
     generation_end_ms: int | None = None,
     context_start_ms: int | None = None,
     context_end_ms: int | None = None,
+    has_faithful_transcript: bool = False,
 ) -> str:
     duration_text = (
         f"\nThe combined slide narration duration is {total_duration_ms} milliseconds."
@@ -383,6 +401,14 @@ This is one chunk from a longer slide lesson.{context_range_text}
 Generate questions only for {generation_window_interval_text}.
 Use surrounding context to avoid boundary artifacts, but keep generated offsets inside the requested generation window.
 """
+    faithful_transcript_text = (
+        " One or more additional context files are instructor transcripts marked"
+        " FAITHFUL; the narration was written to closely follow them, so treat"
+        " their content as reliable narration source material — still not"
+        " slide-visible content."
+        if has_faithful_transcript
+        else ""
+    )
     manual_question_positions = sorted(
         {question.slide_position for question in manual_questions or []}
     )
@@ -430,7 +456,7 @@ You will be given the source PDF, an ordered content map, optional instructor-pr
 {manual_question_guidance}
 {question_request_guidance}
 
-Use the ordered content map to distinguish PDF pages from inserted images, GIFs, and videos at each timeline position. For PDF slide entries, the mapped PDF page is the visual source of truth. For inserted media entries, use the supplied media visuals when present together with the transcript and media metadata. The transcript is the spoken narration timeline. Additional context may clarify terminology, course emphasis, or background, but it is not slide-visible content unless also supported by the mapped lesson content or transcript.
+Use the ordered content map to distinguish PDF pages from inserted images, GIFs, and videos at each timeline position. For PDF slide entries, the mapped PDF page is the visual source of truth. For inserted media entries, use the supplied media visuals when present together with the transcript and media metadata. The transcript is the spoken narration timeline. Each additional context file is labeled with the instructor's intended usage; honor those labels. Additional context may clarify terminology, course emphasis, or background, but it is not slide-visible content unless also supported by the mapped lesson content or transcript.{faithful_transcript_text}
 
 GENERATION GUIDANCE SPECIFIC TO THIS LESSON:
 {content_section.strip() or DEFAULT_GENERATION_PROMPT_CONTENT}
@@ -490,6 +516,7 @@ def _build_slide_context_generation_instructions(
     generation_end_ms: int | None = None,
     context_start_ms: int | None = None,
     context_end_ms: int | None = None,
+    has_faithful_transcript: bool = False,
 ) -> str:
     duration_text = (
         f"\nThe combined slide narration duration is {total_duration_ms} milliseconds."
@@ -519,13 +546,21 @@ This is one chunk from a longer slide lesson.{context_range_text}
 Create context only for {generation_window_interval_text}.
 Use surrounding context to avoid boundary artifacts, but keep generated offsets inside the requested generation window.
 """
+    faithful_transcript_text = (
+        " One or more additional context files are instructor transcripts marked"
+        " FAITHFUL; the narration was written to closely follow them, so treat"
+        " their content as reliable narration source material — still not"
+        " slide-visible content."
+        if has_faithful_transcript
+        else ""
+    )
 
     return f"""You are an expert educational content designer creating chat context for an interactive slide lesson from a PDF deck.
 
 You will be given the PDF, optional instructor-provided additional context files, slide timing source data, and word-level narration transcript source data.{duration_text}
 {generation_window_text}
 
-Use the PDF, additional context, slide timing source data, and transcript together. The PDF is the visual source of truth; the transcript is the spoken narration timeline. Additional context may clarify terminology, course emphasis, or background, but it is not slide-visible content unless also supported by the PDF or transcript.
+Use the PDF, additional context, slide timing source data, and transcript together. The PDF is the visual source of truth; the transcript is the spoken narration timeline. Each additional context file is labeled with the instructor's intended usage; honor those labels. Additional context may clarify terminology, course emphasis, or background, but it is not slide-visible content unless also supported by the PDF or transcript.{faithful_transcript_text}
 
 GENERATION GUIDANCE SPECIFIC TO THIS LESSON:
 {content_section.strip() or DEFAULT_GENERATION_PROMPT_CONTENT}
@@ -597,38 +632,119 @@ def _slide_context_generation_final_task_text() -> str:
     )
 
 
+@dataclass(frozen=True)
+class AdditionalContextFileInput:
+    file_id: str
+    filename: str
+    file_kind: str
+    usage_mode: str
+    usage_note: str | None
+
+
+def _has_faithful_transcript(
+    additional_context_files: Sequence[AdditionalContextFileInput],
+) -> bool:
+    return any(
+        context_file.file_kind == schemas.LECTURE_SLIDE_CONTEXT_FILE_KIND_TRANSCRIPT
+        and context_file.usage_mode == schemas.LECTURE_SLIDE_CONTEXT_FILE_USAGE_FAITHFUL
+        for context_file in additional_context_files
+    )
+
+
+def _additional_context_file_guidance_text(
+    context_file: AdditionalContextFileInput,
+) -> str:
+    if context_file.file_kind == schemas.LECTURE_SLIDE_CONTEXT_FILE_KIND_TRANSCRIPT:
+        if context_file.usage_mode == schemas.LECTURE_SLIDE_CONTEXT_FILE_USAGE_FAITHFUL:
+            return (
+                "This is the instructor's transcript for this lecture, marked "
+                "FAITHFUL. When generating narration, reproduce this transcript "
+                "essentially verbatim: keep its exact wording, order, and pacing, "
+                "and change only glaring mistakes such as transcription errors, "
+                "disfluencies, and misstatements the slides contradict. Do not "
+                "otherwise polish, condense, expand, or restructure it."
+            )
+        return (
+            "This is the instructor's transcript for this lecture, marked "
+            "GUIDE. Use it to guide content, emphasis, and pacing, but you do "
+            "not need to follow its wording closely."
+        )
+    return (
+        "Use this file as background context, following the instructor's "
+        "instructions above when present."
+    )
+
+
+def _additional_context_file_label_text(
+    context_file: AdditionalContextFileInput,
+    *,
+    index: int,
+    total: int,
+) -> str:
+    lines = [
+        f"[Additional context file {index} of {total}]",
+        f"Filename: {context_file.filename}",
+        f"Kind: {context_file.file_kind}",
+    ]
+    # Usage modes describe how to follow a transcript, so they are meaningless
+    # for other kinds.
+    if context_file.file_kind == schemas.LECTURE_SLIDE_CONTEXT_FILE_KIND_TRANSCRIPT:
+        lines.append(f"Usage mode: {context_file.usage_mode}")
+    if context_file.usage_note:
+        lines.append(f"Instructor instructions: {context_file.usage_note}")
+    lines.append(_additional_context_file_guidance_text(context_file))
+    return "\n".join(lines)
+
+
 def _additional_context_user_message(
-    additional_context_file_ids: Sequence[str],
+    additional_context_files: Sequence[AdditionalContextFileInput],
 ) -> dict[str, object] | None:
-    if not additional_context_file_ids:
+    if not additional_context_files:
         return None
+    faithful_clause = (
+        " One or more files are instructor transcripts marked FAITHFUL: for "
+        "those, the label's guidance takes precedence over background-only "
+        "treatment, and the transcript text is narration to reproduce rather "
+        "than background to draw on."
+        if _has_faithful_transcript(additional_context_files)
+        else ""
+    )
+    preamble = (
+        "The following files are instructor-provided additional context. Each "
+        "file is preceded by a label describing what it is and how the "
+        "instructor wants it used; honor each file's label. Unless a label says "
+        "otherwise, use these files only to clarify terminology, course "
+        f"emphasis, or background.{faithful_clause} Do not treat these files as "
+        "lecture slides, and do not invent slide-visible content from them."
+    )
+    file_parts: list[dict[str, object]] = []
+    for index, context_file in enumerate(additional_context_files, start=1):
+        file_parts.append(
+            {
+                "type": "input_text",
+                "text": _additional_context_file_label_text(
+                    context_file,
+                    index=index,
+                    total=len(additional_context_files),
+                ),
+            }
+        )
+        file_parts.append({"type": "input_file", "file_id": context_file.file_id})
     return {
         "role": "user",
         "content": [
-            {
-                "type": "input_text",
-                "text": (
-                    "The following files are instructor-provided additional context. "
-                    "Use them only to clarify terminology, course emphasis, or background "
-                    "that helps generate better narration and questions. Do not treat "
-                    "these files as lecture slides, and do not invent slide-visible "
-                    "content from them."
-                ),
-            },
-            *[
-                {"type": "input_file", "file_id": additional_context_file_id}
-                for additional_context_file_id in additional_context_file_ids
-            ],
+            {"type": "input_text", "text": preamble},
+            *file_parts,
         ],
     }
 
 
 def _append_additional_context_message(
     input_messages: list[dict[str, object]],
-    additional_context_file_ids: Sequence[str],
+    additional_context_files: Sequence[AdditionalContextFileInput],
 ) -> list[dict[str, object]]:
     additional_context_message = _additional_context_user_message(
-        additional_context_file_ids
+        additional_context_files
     )
     if additional_context_message is None:
         return input_messages
@@ -2795,7 +2911,7 @@ async def _generate_narration_text(
         narratable_positions = [page.position for page in narratable_pages]
         author_comments_guidance = _slide_author_comments_guidance_text(deck.pages)
         response_model = _generated_slide_narration_set_model(narratable_positions)
-        additional_context_file_ids = _additional_context_file_ids(deck)
+        additional_context_files = _additional_context_file_inputs(deck)
         content_map = [
             {
                 "slide_position": page.position,
@@ -2825,6 +2941,8 @@ async def _generate_narration_text(
         ]
 
     media_content = await _lecture_slide_media_input_images(visual_media)
+    if _has_faithful_transcript(additional_context_files):
+        prompt = f"{prompt}\n\n{FAITHFUL_TRANSCRIPT_NARRATION_ADDENDUM}"
 
     return await _await_with_run_lease_heartbeat(
         run_id,
@@ -2852,7 +2970,7 @@ async def _generate_narration_text(
                         ],
                     }
                 ],
-                additional_context_file_ids,
+                additional_context_files,
             ),
         ),
     )
@@ -2884,8 +3002,10 @@ def _slide_author_comments_guidance_text(
     )
 
 
-def _additional_context_file_ids(deck: models.LectureSlideDeck) -> list[str]:
-    file_ids: list[str] = []
+def _additional_context_file_inputs(
+    deck: models.LectureSlideDeck,
+) -> list[AdditionalContextFileInput]:
+    file_inputs: list[AdditionalContextFileInput] = []
     for context_file in sorted(
         deck.additional_context_files, key=lambda item: item.position
     ):
@@ -2898,8 +3018,16 @@ def _additional_context_file_ids(deck: models.LectureSlideDeck) -> list[str]:
                 context_file.file_object_id,
             )
             continue
-        file_ids.append(str(context_file.file.file_id))
-    return file_ids
+        file_inputs.append(
+            AdditionalContextFileInput(
+                file_id=str(context_file.file.file_id),
+                filename=context_file.original_filename,
+                file_kind=context_file.file_kind,
+                usage_mode=context_file.usage_mode,
+                usage_note=context_file.usage_note,
+            )
+        )
+    return file_inputs
 
 
 def _build_narration_generation_user_message(
@@ -4057,7 +4185,7 @@ async def _generate_slide_manifest(
             deck.context_data
         )
         manual_questions = _manual_slide_questions_from_context(deck.context_data)
-        additional_context_file_ids = _additional_context_file_ids(deck)
+        additional_context_files = _additional_context_file_inputs(deck)
         ordered_pages = sorted(deck.pages, key=lambda item: item.position)
         page_ranges: list[SlidePageRange] = [
             {
@@ -4115,7 +4243,7 @@ async def _generate_slide_manifest(
             total_duration_ms=total_duration_ms,
             manual_questions=manual_questions,
             question_requests=question_requests,
-            additional_context_file_ids=additional_context_file_ids,
+            additional_context_files=additional_context_files,
             content_map=content_map,
             media_content=media_content,
         ),
@@ -4131,7 +4259,7 @@ async def generate_slide_context_v5(
     page_ranges: list[SlidePageRange],
     transcript: list[schemas.LectureVideoManifestWordV3],
     total_duration_ms: int | None,
-    additional_context_file_ids: Sequence[str] = (),
+    additional_context_files: Sequence[AdditionalContextFileInput] = (),
 ) -> schemas.LectureSlideContextV5:
     prompt = generation_prompt or DEFAULT_GENERATION_PROMPT_CONTENT
     resolved_total_duration_ms = _slide_manifest_total_duration_ms(
@@ -4147,7 +4275,7 @@ async def generate_slide_context_v5(
         page_ranges=page_ranges,
         transcript=transcript,
         total_duration_ms=resolved_total_duration_ms,
-        additional_context_file_ids=additional_context_file_ids,
+        additional_context_files=additional_context_files,
     )
     return schemas.LectureSlideContextV5.model_validate(
         {
@@ -4173,7 +4301,7 @@ async def _generate_slide_context_v5_with_optional_chunks(
     page_ranges: list[SlidePageRange],
     transcript: list[schemas.LectureVideoManifestWordV3],
     total_duration_ms: int | None,
-    additional_context_file_ids: Sequence[str] = (),
+    additional_context_files: Sequence[AdditionalContextFileInput] = (),
 ) -> GeneratedSlideContext:
     if total_duration_ms is None:
         context = await _generate_slide_context_v5_for_window(
@@ -4184,7 +4312,7 @@ async def _generate_slide_context_v5_with_optional_chunks(
             page_ranges=page_ranges,
             transcript=transcript,
             total_duration_ms=None,
-            additional_context_file_ids=additional_context_file_ids,
+            additional_context_files=additional_context_files,
         )
         if context is None:
             raise ValueError("Generated full lecture slide v5 context was empty.")
@@ -4207,7 +4335,7 @@ async def _generate_slide_context_v5_with_optional_chunks(
                 page_ranges=page_ranges,
                 transcript=transcript,
                 total_duration_ms=total_duration_ms,
-                additional_context_file_ids=additional_context_file_ids,
+                additional_context_files=additional_context_files,
             )
             if context is None:
                 raise ValueError("Generated full lecture slide v5 context was empty.")
@@ -4244,7 +4372,7 @@ async def _generate_slide_context_v5_with_optional_chunks(
                 transcript=transcript,
                 total_duration_ms=total_duration_ms,
                 chunk=chunk,
-                additional_context_file_ids=additional_context_file_ids,
+                additional_context_files=additional_context_files,
             )
         )
     return _merge_slide_context_chunks(chunk_contexts)
@@ -4260,7 +4388,7 @@ async def _generate_slide_context_v5_chunks(
     transcript: list[schemas.LectureVideoManifestWordV3],
     total_duration_ms: int,
     chunk: SlideManifestGenerationChunk,
-    additional_context_file_ids: Sequence[str] = (),
+    additional_context_files: Sequence[AdditionalContextFileInput] = (),
 ) -> list[GeneratedSlideContext]:
     try:
         context = await _generate_slide_context_v5_for_window(
@@ -4272,7 +4400,7 @@ async def _generate_slide_context_v5_chunks(
             transcript=transcript,
             total_duration_ms=total_duration_ms,
             chunk=chunk,
-            additional_context_file_ids=additional_context_file_ids,
+            additional_context_files=additional_context_files,
         )
         return [context] if context is not None else []
     except Exception as exc:
@@ -4305,7 +4433,7 @@ async def _generate_slide_context_v5_chunks(
                     transcript=transcript,
                     total_duration_ms=total_duration_ms,
                     chunk=child_chunk,
-                    additional_context_file_ids=additional_context_file_ids,
+                    additional_context_files=additional_context_files,
                 )
             )
         return contexts
@@ -4322,7 +4450,7 @@ async def _generate_slide_manifest_with_optional_chunks(
     total_duration_ms: int | None,
     manual_questions: list[GeneratedSlideQuestion] | None = None,
     question_requests: list[schemas.LectureSlideQuestionInput] | None = None,
-    additional_context_file_ids: Sequence[str] = (),
+    additional_context_files: Sequence[AdditionalContextFileInput] = (),
     content_map: Sequence[dict[str, object]] = (),
     media_content: Sequence[dict[str, object]] = (),
 ) -> GeneratedSlideManifest:
@@ -4337,7 +4465,7 @@ async def _generate_slide_manifest_with_optional_chunks(
             total_duration_ms=None,
             manual_questions=manual_questions,
             question_requests=question_requests,
-            additional_context_file_ids=additional_context_file_ids,
+            additional_context_files=additional_context_files,
             content_map=content_map,
             media_content=media_content,
         )
@@ -4361,7 +4489,7 @@ async def _generate_slide_manifest_with_optional_chunks(
                 total_duration_ms=total_duration_ms,
                 manual_questions=manual_questions,
                 question_requests=question_requests,
-                additional_context_file_ids=additional_context_file_ids,
+                additional_context_files=additional_context_files,
                 content_map=content_map,
                 media_content=media_content,
             )
@@ -4399,7 +4527,7 @@ async def _generate_slide_manifest_with_optional_chunks(
                 chunk=chunk,
                 manual_questions=manual_questions,
                 question_requests=question_requests,
-                additional_context_file_ids=additional_context_file_ids,
+                additional_context_files=additional_context_files,
                 content_map=content_map,
                 media_content=media_content,
             )
@@ -4419,7 +4547,7 @@ async def _generate_slide_manifest_chunks(
     chunk: SlideManifestGenerationChunk,
     manual_questions: list[GeneratedSlideQuestion] | None = None,
     question_requests: list[schemas.LectureSlideQuestionInput] | None = None,
-    additional_context_file_ids: Sequence[str] = (),
+    additional_context_files: Sequence[AdditionalContextFileInput] = (),
     content_map: Sequence[dict[str, object]] = (),
     media_content: Sequence[dict[str, object]] = (),
 ) -> list[GeneratedSlideManifest]:
@@ -4435,7 +4563,7 @@ async def _generate_slide_manifest_chunks(
             chunk=chunk,
             manual_questions=manual_questions,
             question_requests=question_requests,
-            additional_context_file_ids=additional_context_file_ids,
+            additional_context_files=additional_context_files,
             content_map=content_map,
             media_content=media_content,
         )
@@ -4472,7 +4600,7 @@ async def _generate_slide_manifest_chunks(
                     chunk=child_chunk,
                     manual_questions=manual_questions,
                     question_requests=question_requests,
-                    additional_context_file_ids=additional_context_file_ids,
+                    additional_context_files=additional_context_files,
                     content_map=content_map,
                     media_content=media_content,
                 )
@@ -4490,7 +4618,7 @@ async def _generate_slide_context_v5_for_window(
     transcript: list[schemas.LectureVideoManifestWordV3],
     total_duration_ms: int | None,
     chunk: SlideManifestGenerationChunk | None = None,
-    additional_context_file_ids: Sequence[str] = (),
+    additional_context_files: Sequence[AdditionalContextFileInput] = (),
 ) -> GeneratedSlideContext | None:
     chunk_transcript = transcript
     chunk_page_ranges = page_ranges
@@ -4524,6 +4652,7 @@ async def _generate_slide_context_v5_for_window(
             generation_end_ms=generation_end_ms,
             context_start_ms=context_start_ms,
             context_end_ms=context_end_ms,
+            has_faithful_transcript=_has_faithful_transcript(additional_context_files),
         ),
         response_model=GeneratedSlideContext,
         input_messages=_append_additional_context_message(
@@ -4550,7 +4679,7 @@ async def _generate_slide_context_v5_for_window(
                     ],
                 }
             ],
-            additional_context_file_ids,
+            additional_context_files,
         ),
     )
     if chunk is not None:
@@ -4598,7 +4727,7 @@ async def _generate_slide_manifest_for_window(
     manual_questions: list[GeneratedSlideQuestion] | None = None,
     question_requests: list[schemas.LectureSlideQuestionInput] | None = None,
     chunk: SlideManifestGenerationChunk | None = None,
-    additional_context_file_ids: Sequence[str] = (),
+    additional_context_files: Sequence[AdditionalContextFileInput] = (),
     content_map: Sequence[dict[str, object]] = (),
     media_content: Sequence[dict[str, object]] = (),
 ) -> GeneratedSlideManifest:
@@ -4636,6 +4765,7 @@ async def _generate_slide_manifest_for_window(
             generation_end_ms=generation_end_ms,
             context_start_ms=context_start_ms,
             context_end_ms=context_end_ms,
+            has_faithful_transcript=_has_faithful_transcript(additional_context_files),
         ),
         response_model=GeneratedSlideManifest,
         input_messages=_append_additional_context_message(
@@ -4688,7 +4818,7 @@ async def _generate_slide_manifest_for_window(
                     ],
                 }
             ],
-            additional_context_file_ids,
+            additional_context_files,
         ),
     )
     if chunk is not None:

@@ -12457,6 +12457,9 @@ async def create_assistant(
     lecture_slide_additional_context_file_ids = (
         req.lecture_slide_additional_context_file_ids
     )
+    lecture_slide_additional_context_file_metadata = (
+        req.lecture_slide_additional_context_file_metadata
+    )
     lecture_slide_questions = req.lecture_slide_questions
 
     if is_video:
@@ -12565,6 +12568,9 @@ async def create_assistant(
         lecture_slide_narration_prompt = req.narration_prompt
         lecture_slide_additional_context_file_ids = (
             req.lecture_slide_additional_context_file_ids
+        )
+        lecture_slide_additional_context_file_metadata = (
+            req.lecture_slide_additional_context_file_metadata
         )
         try:
             await validate_lecture_video_voice_id_or_raise(
@@ -12677,6 +12683,7 @@ async def create_assistant(
         del req.lecture_slide_page_notes
         del req.lecture_slide_content_items
         del req.lecture_slide_additional_context_file_ids
+        del req.lecture_slide_additional_context_file_metadata
         del req.lecture_slide_questions
         del req.voice_id
         del req.generation_prompt
@@ -12787,6 +12794,7 @@ async def create_assistant(
                         lecture_slide_deck,
                         lecture_slide_additional_context_file_ids,
                         uploader_id=request.state["session"].user.id,
+                        metadata=lecture_slide_additional_context_file_metadata,
                     )
                 )
             if lecture_slide_questions_present:
@@ -14909,6 +14917,7 @@ async def update_assistant(
                     target_lecture_slide_deck,
                     req.lecture_slide_additional_context_file_ids or [],
                     uploader_id=request.state["session"].user.id,
+                    metadata=req.lecture_slide_additional_context_file_metadata,
                 )
             if questions_present:
                 question_update_result = (

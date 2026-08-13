@@ -8,6 +8,7 @@
 		Heading,
 		Textarea,
 		Modal,
+		Select,
 		type SelectOptionType,
 		Badge,
 		Accordion,
@@ -97,6 +98,16 @@
 		type LectureSlideContentJson
 	} from '$lib/lectureSlideContentJson';
 	import { deriveLectureSlideProcessingTriggers } from '$lib/lectureSlideProcessing';
+	import {
+		defaultLectureSlideContextFileMetadata,
+		lectureSlideContextFileInstructionsLabel,
+		lectureSlideContextFileMetadataSignature,
+		lectureSlideContextFileUsageHint,
+		usesLectureSlideContextFileUsageMode,
+		LECTURE_SLIDE_CONTEXT_FILE_KIND_OPTIONS,
+		LECTURE_SLIDE_CONTEXT_FILE_USAGE_OPTIONS
+	} from '$lib/lectureSlideContextFiles';
+	import LectureSlideContextFileInstructionsModal from '$lib/components/LectureSlideContextFileInstructionsModal.svelte';
 	import { SvelteSet } from 'svelte/reactivity';
 	export let data;
 	$: lectureVideoDefaultInstructions = data.lectureLessonEditorConfig?.instructions || '';
@@ -653,6 +664,8 @@
 	let lectureSlideAdditionalContextUploadedFiles: api.LectureSlideAdditionalContextFileSummary[] =
 		[];
 	let hasSetLectureSlideAdditionalContextFiles = false;
+	let lectureSlideContextInstructionsModalOpen = false;
+	let lectureSlideContextInstructionsFileId: number | null = null;
 	const uploadedLectureSlideContextFileObjectIds = () =>
 		new Set(lectureSlideAdditionalContextUploadedFiles.map((file) => file.file_object_id));
 	const lectureSlideOpenAIInputFileMaxBytes = 50 * 1024 * 1024;
@@ -1573,15 +1586,22 @@
 		lectureSlideQuestionDrafts.some((question) => question.mode !== 'complete');
 	$: lectureSlideCompleteQuestionsChanged =
 		lectureSlideQuestionsChanged && !lectureSlideQuestionDraftsRequireGeneration;
-	$: currentLectureSlideAdditionalContextFileIds = JSON.stringify(
-		(currentLectureSlideDeck?.additional_context_files || []).map((file) => file.id)
+	$: currentLectureSlideAdditionalContextFileSignature = JSON.stringify(
+		(currentLectureSlideDeck?.additional_context_files || []).map(
+			lectureSlideContextFileMetadataSignature
+		)
 	);
-	$: lectureSlideAdditionalContextFileIds = JSON.stringify(
-		lectureSlideAdditionalContextFiles.map((file) => file.id)
+	$: lectureSlideAdditionalContextFileSignature = JSON.stringify(
+		lectureSlideAdditionalContextFiles.map(lectureSlideContextFileMetadataSignature)
 	);
 	$: lectureSlideAdditionalContextFilesChanged =
 		hasSetLectureSlideAdditionalContextFiles &&
-		lectureSlideAdditionalContextFileIds !== currentLectureSlideAdditionalContextFileIds;
+		lectureSlideAdditionalContextFileSignature !==
+			currentLectureSlideAdditionalContextFileSignature;
+	$: lectureSlideContextInstructionsFile =
+		lectureSlideAdditionalContextFiles.find(
+			(file) => file.id === lectureSlideContextInstructionsFileId
+		) || null;
 	$: lectureSlideAdditionalContextTotalSize =
 		(selectedLectureSlideDeck?.size || 0) +
 		lectureSlideAdditionalContextFiles.reduce((total, file) => total + file.size, 0);
@@ -3320,6 +3340,9 @@
 			lecture_slide_additional_context_file_ids: isLectureSlideMode
 				? lectureSlideAdditionalContextFiles.map((file) => file.id)
 				: undefined,
+			lecture_slide_additional_context_file_metadata: isLectureSlideMode
+				? lectureSlideAdditionalContextFiles.map(lectureSlideContextFileMetadataSignature)
+				: undefined,
 			lecture_slide_questions: isLectureSlideMode
 				? lectureSlideQuestionDrafts.map(lectureSlideQuestionDraftToInput)
 				: undefined,
@@ -3825,13 +3848,17 @@
 					);
 					continue;
 				}
+				const taggedContextFile = {
+					...uploadedContextFile,
+					...defaultLectureSlideContextFileMetadata(uploadedContextFile.filename)
+				};
 				lectureSlideAdditionalContextFiles = [
 					...lectureSlideAdditionalContextFiles,
-					uploadedContextFile
+					taggedContextFile
 				];
 				lectureSlideAdditionalContextUploadedFiles = [
 					...lectureSlideAdditionalContextUploadedFiles,
-					uploadedContextFile
+					taggedContextFile
 				];
 			}
 		} finally {
@@ -3845,8 +3872,38 @@
 		if (!target.files?.length) {
 			return;
 		}
-		await uploadLectureSlideAdditionalContextFiles(target.files);
+		const selectedFiles = Array.from(target.files);
 		target.value = '';
+		await uploadLectureSlideAdditionalContextFiles(selectedFiles);
+	};
+
+	const updateLectureSlideAdditionalContextFile = (
+		contextFileId: number,
+		changes: Partial<api.LectureSlideAdditionalContextFileSummary>
+	) => {
+		const applyChanges = (file: api.LectureSlideAdditionalContextFileSummary) =>
+			file.id === contextFileId ? { ...file, ...changes } : file;
+		lectureSlideAdditionalContextFiles = lectureSlideAdditionalContextFiles.map(applyChanges);
+		lectureSlideAdditionalContextUploadedFiles =
+			lectureSlideAdditionalContextUploadedFiles.map(applyChanges);
+	};
+
+	const openLectureSlideContextInstructions = (contextFileId: number) => {
+		lectureSlideContextInstructionsFileId = contextFileId;
+		lectureSlideContextInstructionsModalOpen = true;
+	};
+
+	const saveLectureSlideContextInstructions = (usage_note: string) => {
+		if (lectureSlideContextInstructionsFileId !== null) {
+			updateLectureSlideAdditionalContextFile(lectureSlideContextInstructionsFileId, {
+				usage_note
+			});
+		}
+		lectureSlideContextInstructionsFileId = null;
+	};
+
+	const cancelLectureSlideContextInstructions = () => {
+		lectureSlideContextInstructionsFileId = null;
 	};
 
 	const removeLectureSlideAdditionalContextFile = (contextFileId: number) => {
@@ -4389,6 +4446,8 @@
 				params.lecture_slide_additional_context_file_ids = lectureSlideAdditionalContextFiles.map(
 					(file) => file.id
 				);
+				params.lecture_slide_additional_context_file_metadata =
+					lectureSlideAdditionalContextFiles.map(lectureSlideContextFileMetadataSignature);
 				if (shouldSubmitLectureSlideQuestions) {
 					params.lecture_slide_questions = lectureSlideQuestionDrafts.map(
 						lectureSlideQuestionDraftToInput
@@ -4407,6 +4466,7 @@
 				delete params.lecture_slide_page_notes;
 				delete params.lecture_slide_content_items;
 				delete params.lecture_slide_additional_context_file_ids;
+				delete params.lecture_slide_additional_context_file_metadata;
 				delete params.lecture_slide_questions;
 				delete params.voice_id;
 				delete params.generation_prompt;
@@ -5809,28 +5869,86 @@
 					{#if lectureSlideAdditionalContextFiles.length > 0}
 						<div class="mb-3 flex flex-col gap-2">
 							{#each lectureSlideAdditionalContextFiles as contextFile (contextFile.id)}
+								{@const contextFileEditsDisabled = preventEdits || uploadingLectureSlideContext}
+								{@const usageModeEditable = usesLectureSlideContextFileUsageMode(
+									contextFile.file_kind
+								)}
 								<div
-									class="flex items-center justify-between gap-3 rounded-lg border border-gray-200 bg-white px-3 py-2"
+									class="flex flex-col gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 lg:flex-row lg:items-center lg:justify-between lg:gap-3"
 								>
 									<div class="min-w-0">
 										<div class="truncate text-sm font-medium text-gray-900">
 											{contextFile.filename}
 										</div>
-										<div class="text-xs text-gray-500">
+										<div class="truncate text-xs text-gray-500">
 											{humanSize(contextFile.size)} &middot; {contextFile.content_type}
 										</div>
+										{#if contextFile.usage_note}
+											<div class="truncate text-xs text-gray-500" title={contextFile.usage_note}>
+												{contextFile.usage_note}
+											</div>
+										{/if}
 									</div>
-									<Button
-										type="button"
-										color="light"
-										size="xs"
-										disabled={preventEdits || uploadingLectureSlideContext}
-										aria-label={`Remove ${contextFile.filename}`}
-										title={`Remove ${contextFile.filename}`}
-										onclick={() => removeLectureSlideAdditionalContextFile(contextFile.id)}
-									>
-										<TrashBinOutline class="h-4 w-4" />
-									</Button>
+									<div class="flex shrink-0 flex-wrap items-center gap-2 lg:justify-end">
+										<ButtonGroup>
+											{#each LECTURE_SLIDE_CONTEXT_FILE_KIND_OPTIONS as kindOption (kindOption.value)}
+												<RadioButton
+													size="xs"
+													name={`lecture-slide-context-kind-${contextFile.id}`}
+													value={kindOption.value}
+													group={contextFile.file_kind}
+													disabled={contextFileEditsDisabled}
+													onchange={() =>
+														updateLectureSlideAdditionalContextFile(contextFile.id, {
+															file_kind: kindOption.value
+														})}
+													class={`${contextFileEditsDisabled ? 'hover:bg-transparent' : ''} ${contextFile.file_kind === kindOption.value ? '!border-blue-300 !bg-blue-100 font-semibold !text-blue-800 !shadow-blue-200' : ''} select-none`}
+													>{kindOption.label}</RadioButton
+												>
+											{/each}
+										</ButtonGroup>
+										<div id={`lecture-slide-context-usage-${contextFile.id}`}>
+											<Select
+												size="sm"
+												class="w-40 p-2 text-xs disabled:cursor-not-allowed disabled:bg-gray-100"
+												placeholder=""
+												items={LECTURE_SLIDE_CONTEXT_FILE_USAGE_OPTIONS}
+												value={contextFile.usage_mode}
+												disabled={contextFileEditsDisabled || !usageModeEditable}
+												aria-label={`How narration should use ${contextFile.filename}`}
+												onchange={(event: Event) =>
+													updateLectureSlideAdditionalContextFile(contextFile.id, {
+														usage_mode: (event.currentTarget as HTMLSelectElement).value
+													})}
+											/>
+										</div>
+										<Tooltip
+											triggeredBy={`#lecture-slide-context-usage-${contextFile.id}`}
+											class="z-100 max-w-xs text-sm font-light"
+											arrow={false}
+											>{lectureSlideContextFileUsageHint(contextFile.file_kind)}</Tooltip
+										>
+										<Button
+											type="button"
+											color="light"
+											size="xs"
+											disabled={contextFileEditsDisabled}
+											onclick={() => openLectureSlideContextInstructions(contextFile.id)}
+										>
+											{lectureSlideContextFileInstructionsLabel(contextFile.usage_note)}
+										</Button>
+										<Button
+											type="button"
+											color="light"
+											size="xs"
+											disabled={contextFileEditsDisabled}
+											aria-label={`Remove ${contextFile.filename}`}
+											title={`Remove ${contextFile.filename}`}
+											onclick={() => removeLectureSlideAdditionalContextFile(contextFile.id)}
+										>
+											<TrashBinOutline class="h-4 w-4" />
+										</Button>
+									</div>
 								</div>
 							{/each}
 						</div>
@@ -5856,6 +5974,13 @@
 								: '...'}</Helper
 						>
 					{/if}
+					<LectureSlideContextFileInstructionsModal
+						bind:open={lectureSlideContextInstructionsModalOpen}
+						filename={lectureSlideContextInstructionsFile?.filename || ''}
+						instructions={lectureSlideContextInstructionsFile?.usage_note || ''}
+						onSave={saveLectureSlideContextInstructions}
+						onCancel={cancelLectureSlideContextInstructions}
+					/>
 				</div>
 			{/if}
 			<div class="col-span-2 mb-4">

@@ -1949,13 +1949,32 @@ export type LectureSlideSummary = {
 	additional_context_files: LectureSlideAdditionalContextFileSummary[];
 };
 
+export const LECTURE_SLIDE_CONTEXT_FILE_KIND_TRANSCRIPT = 'transcript';
+export const LECTURE_SLIDE_CONTEXT_FILE_KIND_OTHER = 'other';
+export const LECTURE_SLIDE_CONTEXT_FILE_USAGE_FAITHFUL = 'faithful';
+export const LECTURE_SLIDE_CONTEXT_FILE_USAGE_GUIDE = 'guide';
+
 export type LectureSlideAdditionalContextFileSummary = {
 	id: number;
 	filename: string;
 	size: number;
 	content_type: string;
 	file_object_id: number;
+	file_kind: string;
+	usage_mode: string;
+	usage_note?: string | null;
 };
+
+export type LectureSlideAdditionalContextFileMetadata = {
+	file_kind: string;
+	usage_mode: string;
+	usage_note?: string;
+};
+
+export type LectureSlideAdditionalContextFileMetadataInput =
+	LectureSlideAdditionalContextFileMetadata & {
+		id: number;
+	};
 
 export type LectureSlidePageNotes = {
 	position: number;
@@ -3114,6 +3133,7 @@ export type CreateAssistantRequest = {
 	lecture_slide_page_notes?: LectureSlidePageNotes[];
 	lecture_slide_content_items?: LectureSlideContentItemInput[];
 	lecture_slide_additional_context_file_ids?: number[];
+	lecture_slide_additional_context_file_metadata?: LectureSlideAdditionalContextFileMetadataInput[];
 	lecture_slide_questions?: LectureSlideQuestionInput[];
 	voice_id?: string | null;
 	generation_prompt?: string | null;
@@ -3189,6 +3209,8 @@ export type UpdateAssistantRequest = {
 	lecture_slide_page_notes?: LectureSlidePageNotes[] | null;
 	lecture_slide_content_items?: LectureSlideContentItemInput[] | null;
 	lecture_slide_additional_context_file_ids?: number[] | null;
+	lecture_slide_additional_context_file_metadata?:
+		LectureSlideAdditionalContextFileMetadataInput[] | null;
 	lecture_slide_questions?: LectureSlideQuestionInput[] | null;
 	voice_id?: string | null;
 	generation_prompt?: string | null;

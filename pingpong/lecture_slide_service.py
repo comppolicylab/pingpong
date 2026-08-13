@@ -314,6 +314,9 @@ def lecture_slide_context_file_summary_from_model(
         size=context_file.content_length,
         content_type=context_file.content_type,
         file_object_id=context_file.file_object_id,
+        file_kind=context_file.file_kind,
+        usage_mode=context_file.usage_mode,
+        usage_note=context_file.usage_note,
     )
 
 
@@ -660,13 +663,56 @@ async def ensure_lecture_slide_deck_is_unassigned(
         )
 
 
+def _normalized_context_file_metadata(
+    metadata: schemas.LectureSlideAdditionalContextFileMetadataInput,
+) -> tuple[str, str, str | None]:
+    file_kind = (
+        metadata.file_kind.strip() or schemas.LECTURE_SLIDE_CONTEXT_FILE_KIND_OTHER
+    )
+    usage_mode = (
+        metadata.usage_mode.strip() or schemas.LECTURE_SLIDE_CONTEXT_FILE_USAGE_GUIDE
+    )
+    usage_note = (metadata.usage_note or "").strip() or None
+    return file_kind, usage_mode, usage_note
+
+
+def _apply_context_file_metadata(
+    session: AsyncSession,
+    context_file: models.LectureSlideAdditionalContextFile,
+    metadata: schemas.LectureSlideAdditionalContextFileMetadataInput | None,
+) -> bool:
+    """Retag a context file, reporting whether anything actually changed.
+
+    A retag alone is enough to make previously generated narration and
+    questions stale, so the caller uses the return value to requeue processing.
+    """
+    if metadata is None:
+        return False
+    file_kind, usage_mode, usage_note = _normalized_context_file_metadata(metadata)
+    if (
+        context_file.file_kind == file_kind
+        and context_file.usage_mode == usage_mode
+        and context_file.usage_note == usage_note
+    ):
+        return False
+    context_file.file_kind = file_kind
+    context_file.usage_mode = usage_mode
+    context_file.usage_note = usage_note
+    session.add(context_file)
+    return True
+
+
 async def apply_lecture_slide_additional_context_files(
     session: AsyncSession,
     deck: models.LectureSlideDeck,
     context_file_ids: Iterable[int],
     *,
     uploader_id: int,
+    metadata: (
+        Iterable[schemas.LectureSlideAdditionalContextFileMetadataInput] | None
+    ) = None,
 ) -> bool:
+    metadata_by_id = {item.id: item for item in metadata or []}
     requested_ids = list(dict.fromkeys(int(file_id) for file_id in context_file_ids))
     requested_files = (
         await models.LectureSlideAdditionalContextFile.get_all_by_ids_with_file(
@@ -745,6 +791,7 @@ async def apply_lecture_slide_additional_context_files(
             changed = True
 
     for position, requested_file in enumerate(requested_files):
+        requested_metadata = metadata_by_id.get(requested_file.id)
         matched_existing_file = existing_by_file_object_id.get(
             requested_file.file_object_id
         )
@@ -752,6 +799,10 @@ async def apply_lecture_slide_additional_context_files(
             if matched_existing_file.position != position:
                 matched_existing_file.position = position
                 session.add(matched_existing_file)
+                changed = True
+            if _apply_context_file_metadata(
+                session, matched_existing_file, requested_metadata
+            ):
                 changed = True
             if requested_file.lecture_slide_deck_id is None:
                 await models.LectureSlideAdditionalContextFile.delete(
@@ -762,9 +813,17 @@ async def apply_lecture_slide_additional_context_files(
         if requested_file.lecture_slide_deck_id is None:
             requested_file.lecture_slide_deck_id = deck.id
             requested_file.position = position
+            _apply_context_file_metadata(session, requested_file, requested_metadata)
             session.add(requested_file)
             changed = True
             continue
+        file_kind = requested_file.file_kind
+        usage_mode = requested_file.usage_mode
+        usage_note = requested_file.usage_note
+        if requested_metadata is not None:
+            file_kind, usage_mode, usage_note = _normalized_context_file_metadata(
+                requested_metadata
+            )
         await models.LectureSlideAdditionalContextFile.create(
             session,
             lecture_slide_deck_id=deck.id,
@@ -775,6 +834,9 @@ async def apply_lecture_slide_additional_context_files(
             original_filename=requested_file.original_filename,
             content_type=requested_file.content_type,
             content_length=requested_file.content_length,
+            file_kind=file_kind,
+            usage_mode=usage_mode,
+            usage_note=usage_note,
         )
         changed = True
 
@@ -1963,6 +2025,9 @@ async def clone_lecture_slide_deck_snapshot(
                 original_filename=context_file.original_filename,
                 content_type=context_file.content_type,
                 content_length=context_file.content_length,
+                file_kind=context_file.file_kind,
+                usage_mode=context_file.usage_mode,
+                usage_note=context_file.usage_note,
             )
         )
     for question in deck.questions:

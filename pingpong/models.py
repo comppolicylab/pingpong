@@ -3064,6 +3064,17 @@ class LectureSlideAdditionalContextFile(Base):
     original_filename = Column(String, nullable=False)
     content_type = Column(String, nullable=False)
     content_length = Column(Integer, nullable=False, server_default="0")
+    file_kind = Column(
+        String,
+        nullable=False,
+        server_default=schemas.LECTURE_SLIDE_CONTEXT_FILE_KIND_OTHER,
+    )
+    usage_mode = Column(
+        String,
+        nullable=False,
+        server_default=schemas.LECTURE_SLIDE_CONTEXT_FILE_USAGE_GUIDE,
+    )
+    usage_note = Column(Text, nullable=True)
     created = Column(DateTime(timezone=True), server_default=func.now())
     updated = Column(DateTime(timezone=True), onupdate=func.now())
 
@@ -3080,6 +3091,9 @@ class LectureSlideAdditionalContextFile(Base):
         original_filename: str,
         content_type: str,
         content_length: int,
+        file_kind: str = schemas.LECTURE_SLIDE_CONTEXT_FILE_KIND_OTHER,
+        usage_mode: str = schemas.LECTURE_SLIDE_CONTEXT_FILE_USAGE_GUIDE,
+        usage_note: str | None = None,
     ) -> "LectureSlideAdditionalContextFile":
         context_file = LectureSlideAdditionalContextFile(
             lecture_slide_deck_id=lecture_slide_deck_id,
@@ -3090,6 +3104,9 @@ class LectureSlideAdditionalContextFile(Base):
             original_filename=original_filename,
             content_type=content_type,
             content_length=content_length,
+            file_kind=file_kind,
+            usage_mode=usage_mode,
+            usage_note=usage_note,
         )
         session.add(context_file)
         await session.flush()
@@ -6421,6 +6438,7 @@ class Assistant(Base):
         params.pop("lecture_slide_page_notes", None)
         params.pop("lecture_slide_content_items", None)
         params.pop("lecture_slide_additional_context_file_ids", None)
+        params.pop("lecture_slide_additional_context_file_metadata", None)
         params.pop("lecture_slide_questions", None)
         params.pop("narration_prompt", None)
         params.pop("voice_id", None)
