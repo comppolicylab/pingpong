@@ -10948,6 +10948,36 @@ class LTIRegistration(Base):
         return await session.scalar(stmt)
 
     @classmethod
+    async def get_canvas_quickstart_candidates(
+        cls,
+        session: AsyncSession,
+        issuer: str,
+        canvas_account_lti_guid: str,
+    ) -> list["LTIRegistration"]:
+        stmt = (
+            select(LTIRegistration)
+            .where(
+                LTIRegistration.issuer == issuer,
+                LTIRegistration.lms_platform == schemas.LMSPlatform.CANVAS,
+                LTIRegistration.canvas_account_lti_guid == canvas_account_lti_guid,
+                LTIRegistration.client_id.is_not(None),
+                or_(
+                    LTIRegistration.review_status
+                    == schemas.LTIRegistrationReviewStatus.PENDING,
+                    and_(
+                        LTIRegistration.review_status
+                        == schemas.LTIRegistrationReviewStatus.APPROVED,
+                        LTIRegistration.enabled.is_(True),
+                    ),
+                ),
+            )
+            .options(selectinload(LTIRegistration.institutions))
+            .order_by(LTIRegistration.updated.desc(), LTIRegistration.id.desc())
+        )
+        result = await session.execute(stmt)
+        return list(result.scalars().all())
+
+    @classmethod
     async def get_all(cls, session: AsyncSession) -> list["LTIRegistration"]:
         stmt = (
             select(LTIRegistration)

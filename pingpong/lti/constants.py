@@ -28,6 +28,9 @@ LTI_TOOL_CONFIGURATION_KEY = "https://purl.imsglobal.org/spec/lti-tool-configura
 
 CANVAS_ACCOUNT_NAME_KEY = "https://canvas.instructure.com/lti/account_name"
 CANVAS_ACCOUNT_LTI_GUID_KEY = "https://canvas.instructure.com/lti/account_lti_guid"
+CANVAS_COURSE_NAVIGATION_DEFAULT_ENABLED_KEY = (
+    "https://canvas.instructure.com/lti/course_navigation/default_enabled"
+)
 
 LTI_DEPLOYMENT_ID_CLAIM = "https://purl.imsglobal.org/spec/lti/claim/deployment_id"
 LTI_CLAIM_CUSTOM_KEY = "https://purl.imsglobal.org/spec/lti/claim/custom"
