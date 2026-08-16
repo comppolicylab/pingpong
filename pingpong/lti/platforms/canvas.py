@@ -18,6 +18,7 @@ from pingpong.lti.constants import (
     LTI_TOOL_CONFIGURATION_KEY,
     MESSAGE_TYPE,
     NO_SSO_PROVIDER_ID,
+    PINGPONG_LTI_TOOL_VERSION,
     SSO_FIELD_FULL_NAME,
 )
 from pingpong.lti.lti_course import (
@@ -200,7 +201,7 @@ class CanvasPlatformHandler(LTIPlatformHandler):
 
         tool_config["custom_parameters"] = {
             "platform": self.platform.value,
-            "pingpong_lti_tool_version": "1.0",
+            "pingpong_lti_tool_version": PINGPONG_LTI_TOOL_VERSION,
             LTI_CUSTOM_SSO_PROVIDER_ID_KEY: str(data.provider_id),
             LTI_CUSTOM_SSO_VALUE_KEY: (
                 f"${sso_field_full_name}" if sso_field_full_name else ""

@@ -19,6 +19,7 @@ from pingpong.lti.constants import (
     LTI_TOOL_CONFIGURATION_KEY,
     MESSAGE_TYPE,
     NO_SSO_PROVIDER_ID,
+    PINGPONG_LTI_TOOL_VERSION,
 )
 from pingpong.lti.lti_course import find_class_by_course_id
 from pingpong.lti.platforms.base import (
@@ -80,7 +81,7 @@ class HarvardLxpPlatformHandler(LTIPlatformHandler):
 
         tool_config["custom_parameters"] = {
             "platform": self.platform.value,
-            "pingpong_lti_tool_version": "1.0",
+            "pingpong_lti_tool_version": PINGPONG_LTI_TOOL_VERSION,
         }
         target_link_uri = tool_config["target_link_uri"]
         tool_config["messages"] = [
