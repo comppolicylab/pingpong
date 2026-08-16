@@ -5219,6 +5219,7 @@ async def test_register_lti_instance_harvard_lxp_success(monkeypatch):
     post_calls = [call for session in sessions for call in session.post_calls]
     assert post_calls, "expected POST to registration_endpoint"
     posted_payload = post_calls[0][1]["json"]
+    assert server_module.LTI_REGISTRATION_SCOPE not in posted_payload["scope"].split()
     serialized = json.dumps(posted_payload)
     assert "$Canvas" not in serialized
     assert "canvas_course_id" not in serialized
