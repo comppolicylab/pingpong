@@ -12,6 +12,7 @@
 	$: externalLoginProviders = registrationSetup?.providers ?? [];
 	$: institutions = registrationSetup?.institutions ?? [];
 	$: showCourseNavigationControl = registrationSetup?.show_course_navigation_control ?? false;
+	$: quickstartRegistrations = registrationSetup?.quickstart_registrations ?? [];
 
 	let openid_configuration: string | null = null;
 	let registration_token: string | null = null;
@@ -19,13 +20,54 @@
 	let showModal = false;
 
 	let ssoProviderId = api.NO_SSO_PROVIDER_ID_VALUE;
+	let ssoField: api.LTISSOField = 'canvas.sisIntegrationId';
 	let institutionIds: number[] = [];
 	let showInCourseNavigation = true;
+	let quickstartClientId = '0';
+	let instanceName = '';
+	let adminName = '';
+	let adminEmail = '';
 
 	const isValidSsoField = (value: string): value is api.LTISSOField =>
 		value === 'canvas.sisIntegrationId' ||
 		value === 'canvas.sisSourceId' ||
 		value === 'person.sourcedId';
+
+	const applyQuickstart = (clientId: string) => {
+		quickstartClientId = clientId;
+		if (!clientId) {
+			instanceName = '';
+			adminName = '';
+			adminEmail = '';
+			ssoProviderId = api.NO_SSO_PROVIDER_ID_VALUE;
+			ssoField = 'canvas.sisIntegrationId';
+			institutionIds = [];
+			showInCourseNavigation = true;
+			return;
+		}
+
+		const registration = quickstartRegistrations.find(
+			(candidate) => candidate.client_id === clientId
+		);
+		if (!registration) {
+			instanceName = '';
+			adminName = '';
+			adminEmail = '';
+			ssoProviderId = api.NO_SSO_PROVIDER_ID_VALUE;
+			ssoField = 'canvas.sisIntegrationId';
+			institutionIds = [];
+			showInCourseNavigation = true;
+			return;
+		}
+
+		instanceName = registration.name;
+		adminName = registration.admin_name;
+		adminEmail = registration.admin_email;
+		ssoProviderId = `${registration.provider_id}`;
+		ssoField = registration.sso_field ?? 'canvas.sisIntegrationId';
+		institutionIds = [...registration.institution_ids];
+		showInCourseNavigation = registration.show_in_course_navigation;
+	};
 
 	onMount(() => {
 		const params = new URLSearchParams(window.location.search);
@@ -129,23 +171,51 @@
 				{registrationSetupError}
 			</div>
 		{/if}
+		{#if quickstartRegistrations.length > 0}
+			<div>
+				<Label for="quickstart_registration" class="mb-1">Quickstart</Label>
+				<Helper class="mb-2"
+					>Start with values from an active or pending PingPong registration for this Canvas
+					account. You can edit the copied values before submitting.</Helper
+				>
+				<Select
+					id="quickstart_registration"
+					disabled={$loading}
+					bind:value={quickstartClientId}
+					onchange={(event) => applyQuickstart((event.currentTarget as HTMLSelectElement).value)}
+				>
+					<option value="0">Start from scratch</option>
+					{#each quickstartRegistrations as registration (registration.client_id)}
+						<option value={registration.client_id}
+							>{registration.name || 'Existing registration'} ({registration.client_id})</option
+						>
+					{/each}
+				</Select>
+			</div>
+		{/if}
 		<div>
 			<Label for="name" class="mb-1">Instance name</Label>
 			<Helper class="mb-2"
 				>Use this field to give your LTI instance a name to help us identify it in the future.</Helper
 			>
-			<Input id="name" name="name" placeholder="Example University LMS" />
+			<Input id="name" name="name" placeholder="Example University LMS" bind:value={instanceName} />
 		</div>
 		<div>
 			<Label for="admin_name" class="mb-1">Administrator Name</Label>
 			<Helper class="mb-2"
 				>Let us know who we should contact if we need to troubleshoot your integration.</Helper
 			>
-			<Input id="admin_name" name="admin_name" placeholder="John Doe" />
+			<Input id="admin_name" name="admin_name" placeholder="John Doe" bind:value={adminName} />
 		</div>
 		<div>
 			<Label for="admin_email" class="mb-1">Administrator Email</Label>
-			<Input id="admin_email" name="admin_email" placeholder="john.doe@example.com" type="email" />
+			<Input
+				id="admin_email"
+				name="admin_email"
+				placeholder="john.doe@example.com"
+				type="email"
+				bind:value={adminEmail}
+			/>
 		</div>
 		{#if showCourseNavigationControl}
 			<div>
@@ -185,7 +255,7 @@
 					>Select the field where PingPong should expect SSO identifiers. If the field where your
 					SSO identifiers are stored isn’t listed, please contact us.</Helper
 				>
-				<Select name="sso_field" id="sso_field" disabled={$loading}>
+				<Select name="sso_field" id="sso_field" disabled={$loading} bind:value={ssoField}>
 					<option value="canvas.sisIntegrationId">Canvas.user.sisIntegrationId</option>
 					<option value="canvas.sisSourceId">Canvas.user.sisSourceId</option>
 					<option value="person.sourcedId">Person.sourcedId</option>

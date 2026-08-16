@@ -770,11 +770,41 @@ async def test_get_lti_register_setup_canvas(monkeypatch):
     institutions = [
         SimpleNamespace(id=2, name="B", default_api_key_id=5),
     ]
+    registration = SimpleNamespace(
+        client_id="client-42",
+        friendly_name="Existing PingPong",
+        admin_name="Existing Admin",
+        admin_email="admin@example.com",
+        institutions=[SimpleNamespace(id=2), SimpleNamespace(id=99)],
+        registration_data=json.dumps(
+            {
+                server_module.LTI_TOOL_CONFIGURATION_KEY: {
+                    "custom_parameters": {
+                        server_module.LTI_CUSTOM_SSO_PROVIDER_ID_KEY: "2",
+                        server_module.LTI_CUSTOM_SSO_VALUE_KEY: "$Canvas.user.sisSourceId",
+                    },
+                    "messages": [
+                        {
+                            "type": server_module.MESSAGE_TYPE,
+                            "placements": ["course_navigation"],
+                            canvas_module.CANVAS_COURSE_NAVIGATION_DEFAULT_ENABLED_KEY: False,
+                        }
+                    ],
+                }
+            }
+        ),
+    )
+    openid_payload = {
+        server_module.ISSUER_KEY: "https://platform.example.com",
+        server_module.PLATFORM_CONFIGURATION_KEY: {
+            canvas_module.CANVAS_ACCOUNT_LTI_GUID_KEY: "account-guid"
+        },
+    }
     monkeypatch.setattr(
         server_module,
         "_resolve_platform",
         lambda openid_configuration, registration_token: _async_return(
-            (LMSPlatform.CANVAS, {})
+            (LMSPlatform.CANVAS, openid_payload)
         ),
     )
     monkeypatch.setattr(
@@ -787,6 +817,11 @@ async def test_get_lti_register_setup_canvas(monkeypatch):
         "get_all_with_default_api_key",
         lambda db: _async_return(institutions),
     )
+    monkeypatch.setattr(
+        server_module.LTIRegistration,
+        "get_canvas_quickstart_candidates",
+        lambda db, issuer, account_lti_guid: _async_return([registration]),
+    )
     request = FakeRequest(state=SimpleNamespace(db="db"))
     result = await server_module.get_lti_register_setup(
         request,
@@ -798,6 +833,18 @@ async def test_get_lti_register_setup_canvas(monkeypatch):
     assert result["providers"] == [{"id": 2, "name": "saml", "display_name": "SAML"}]
     assert result["institutions"] == [{"id": 2, "name": "B"}]
     assert result["show_course_navigation_control"] is True
+    assert result["quickstart_registrations"] == [
+        {
+            "client_id": "client-42",
+            "name": "Existing PingPong",
+            "admin_name": "Existing Admin",
+            "admin_email": "admin@example.com",
+            "provider_id": 2,
+            "sso_field": "canvas.sisSourceId",
+            "institution_ids": [2],
+            "show_in_course_navigation": False,
+        }
+    ]
 
 
 @pytest.mark.asyncio
@@ -837,6 +884,7 @@ async def test_get_lti_register_setup_harvard_lxp(monkeypatch):
     assert result["providers"] == []
     assert result["institutions"] == [{"id": 2, "name": "B"}]
     assert result["show_course_navigation_control"] is False
+    assert result["quickstart_registrations"] == []
 
 
 @pytest.mark.asyncio

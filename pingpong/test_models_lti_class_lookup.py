@@ -9,6 +9,9 @@ async def _create_registration(
     session,
     registration_id: int,
     canvas_account_lti_guid: str,
+    *,
+    review_status: schemas.LTIRegistrationReviewStatus = schemas.LTIRegistrationReviewStatus.APPROVED,
+    enabled: bool = True,
 ) -> models.LTIRegistration:
     registration = models.LTIRegistration(
         id=registration_id,
@@ -20,12 +23,47 @@ async def _create_registration(
         token_algorithm=schemas.LTITokenAlgorithm.RS256,
         lms_platform=schemas.LMSPlatform.CANVAS,
         canvas_account_lti_guid=canvas_account_lti_guid,
-        review_status=schemas.LTIRegistrationReviewStatus.APPROVED,
-        enabled=True,
+        review_status=review_status,
+        enabled=enabled,
     )
     session.add(registration)
     await session.flush()
     return registration
+
+
+async def test_canvas_quickstarts_include_only_active_or_pending_registrations(db):
+    async with db.async_session() as session:
+        active = await _create_registration(session, 3303, "acct-guid-3")
+        pending = await _create_registration(
+            session,
+            3304,
+            "acct-guid-3",
+            review_status=schemas.LTIRegistrationReviewStatus.PENDING,
+            enabled=False,
+        )
+        disabled = await _create_registration(
+            session, 3305, "acct-guid-3", enabled=False
+        )
+        rejected = await _create_registration(
+            session,
+            3306,
+            "acct-guid-3",
+            review_status=schemas.LTIRegistrationReviewStatus.REJECTED,
+            enabled=False,
+        )
+        pending.issuer = active.issuer
+        disabled.issuer = active.issuer
+        rejected.issuer = active.issuer
+        await session.flush()
+
+        registrations = await models.LTIRegistration.get_canvas_quickstart_candidates(
+            session, active.issuer, "acct-guid-3"
+        )
+
+        assert {registration.id for registration in registrations} == {
+            active.id,
+            pending.id,
+        }
 
 
 async def test_get_linked_by_canvas_account_lti_guid_and_course_id_includes_error_status(

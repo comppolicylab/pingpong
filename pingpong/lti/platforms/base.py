@@ -78,6 +78,18 @@ class LTIPlatformHandler(ABC):
         """Whether the registration UI should show the course-navigation toggle."""
         return False
 
+    async def get_registration_quickstarts(
+        self,
+        session: AsyncSession,
+        *,
+        issuer: str,
+        platform_config: dict[str, Any],
+        allowed_provider_ids: set[int],
+        allowed_institution_ids: set[int],
+    ) -> list[dict[str, Any]]:
+        """Return reusable registration values for the current platform account."""
+        return []
+
     @abstractmethod
     def extract_registration_fields(
         self, platform_config: dict[str, Any]

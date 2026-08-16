@@ -379,7 +379,7 @@ async def get_jwks(key_manager: LTIKeyManager = Depends(get_lti_key_manager)):
 
 @lti_router.post("/register/setup", response_model=LTIRegisterSetupResponse)
 async def get_lti_register_setup(request: StateRequest, data: LTIRegisterSetupRequest):
-    platform, _ = await _resolve_platform(
+    platform, response_data = await _resolve_platform(
         data.openid_configuration, data.registration_token
     )
     handler = get_handler(platform)
@@ -388,6 +388,17 @@ async def get_lti_register_setup(request: StateRequest, data: LTIRegisterSetupRe
     public_providers = [p for p in all_providers if _is_public_sso_provider(p)]
     allowed = handler.filter_sso_providers(public_providers)
     institutions = await Institution.get_all_with_default_api_key(request.state["db"])
+    issuer = response_data.get(ISSUER_KEY)
+    platform_config = response_data.get(PLATFORM_CONFIGURATION_KEY)
+    quickstart_registrations = []
+    if isinstance(issuer, str) and issuer and isinstance(platform_config, dict):
+        quickstart_registrations = await handler.get_registration_quickstarts(
+            request.state["db"],
+            issuer=issuer,
+            platform_config=platform_config,
+            allowed_provider_ids={provider.id for provider in allowed},
+            allowed_institution_ids={institution.id for institution in institutions},
+        )
     return {
         "platform": platform,
         "providers": [
@@ -396,6 +407,7 @@ async def get_lti_register_setup(request: StateRequest, data: LTIRegisterSetupRe
         ],
         "institutions": [{"id": inst.id, "name": inst.name} for inst in institutions],
         "show_course_navigation_control": handler.show_course_navigation_control(),
+        "quickstart_registrations": quickstart_registrations,
     }
 
 

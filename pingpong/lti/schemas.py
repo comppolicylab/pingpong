@@ -20,18 +20,30 @@ class LTIPublicInstitution(BaseModel):
     name: str
 
 
-class LTIRegisterSetupResponse(BaseModel):
-    platform: LMSPlatform
-    providers: list[LTIPublicSSOProvider]
-    institutions: list[LTIPublicInstitution]
-    show_course_navigation_control: bool
-
-
 LTISSOField = Literal[
     "canvas.sisIntegrationId",
     "canvas.sisSourceId",
     "person.sourcedId",
 ]
+
+
+class LTIRegistrationQuickstart(BaseModel):
+    client_id: str
+    name: str
+    admin_name: str
+    admin_email: str
+    provider_id: int
+    sso_field: LTISSOField | None
+    institution_ids: list[int]
+    show_in_course_navigation: bool
+
+
+class LTIRegisterSetupResponse(BaseModel):
+    platform: LMSPlatform
+    providers: list[LTIPublicSSOProvider]
+    institutions: list[LTIPublicInstitution]
+    show_course_navigation_control: bool
+    quickstart_registrations: list[LTIRegistrationQuickstart]
 
 
 class LTIRegisterRequest(BaseModel):

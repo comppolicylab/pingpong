@@ -561,6 +561,18 @@ export type LTIRegisterSetup = {
 	providers: LTIPublicSSOProvider[];
 	institutions: LTIPublicInstitution[];
 	show_course_navigation_control: boolean;
+	quickstart_registrations: LTIRegistrationQuickstart[];
+};
+
+export type LTIRegistrationQuickstart = {
+	client_id: string;
+	name: string;
+	admin_name: string;
+	admin_email: string;
+	provider_id: number;
+	sso_field: LTISSOField | null;
+	institution_ids: number[];
+	show_in_course_navigation: boolean;
 };
 
 export const getLTIRegisterSetup = async (f: Fetcher, data: LTIRegisterSetupRequest) => {

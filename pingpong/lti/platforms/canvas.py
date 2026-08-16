@@ -1,5 +1,6 @@
 """Canvas-specific LTI platform handler."""
 
+import json
 from typing import Any
 
 from fastapi import HTTPException
@@ -9,12 +10,15 @@ from pingpong.lti.claims import get_claim_object
 from pingpong.lti.constants import (
     CANVAS_ACCOUNT_LTI_GUID_KEY,
     CANVAS_ACCOUNT_NAME_KEY,
+    CANVAS_COURSE_NAVIGATION_DEFAULT_ENABLED_KEY,
     CANVAS_MESSAGE_PLACEMENT,
     LTI_CLAIM_CONTEXT_KEY,
     LTI_CUSTOM_SSO_PROVIDER_ID_KEY,
     LTI_CUSTOM_SSO_VALUE_KEY,
     LTI_TOOL_CONFIGURATION_KEY,
     MESSAGE_TYPE,
+    NO_SSO_PROVIDER_ID,
+    SSO_FIELD_FULL_NAME,
 )
 from pingpong.lti.lti_course import (
     find_class_by_course_id,
@@ -41,6 +45,121 @@ class CanvasPlatformHandler(LTIPlatformHandler):
 
     def show_course_navigation_control(self) -> bool:
         return True
+
+    async def get_registration_quickstarts(
+        self,
+        session: AsyncSession,
+        *,
+        issuer: str,
+        platform_config: dict[str, Any],
+        allowed_provider_ids: set[int],
+        allowed_institution_ids: set[int],
+    ) -> list[dict[str, Any]]:
+        account_lti_guid = platform_config.get(CANVAS_ACCOUNT_LTI_GUID_KEY)
+        if not isinstance(account_lti_guid, str) or not account_lti_guid:
+            return []
+
+        registrations = await LTIRegistration.get_canvas_quickstart_candidates(
+            session, issuer, account_lti_guid
+        )
+        quickstarts: list[dict[str, Any]] = []
+        seen_client_ids: set[str] = set()
+        for registration in registrations:
+            if not registration.client_id or registration.client_id in seen_client_ids:
+                continue
+            seen_client_ids.add(registration.client_id)
+            quickstarts.append(
+                self._registration_quickstart(
+                    registration,
+                    allowed_provider_ids=allowed_provider_ids,
+                    allowed_institution_ids=allowed_institution_ids,
+                )
+            )
+        return quickstarts
+
+    def _registration_quickstart(
+        self,
+        registration: LTIRegistration,
+        *,
+        allowed_provider_ids: set[int],
+        allowed_institution_ids: set[int],
+    ) -> dict[str, Any]:
+        provider_id = NO_SSO_PROVIDER_ID
+        sso_field = None
+        show_in_course_navigation = True
+        try:
+            registration_data = json.loads(registration.registration_data or "{}")
+        except (json.JSONDecodeError, TypeError):
+            registration_data = {}
+
+        if isinstance(registration_data, dict):
+            tool_configuration = registration_data.get(LTI_TOOL_CONFIGURATION_KEY)
+            if isinstance(tool_configuration, dict):
+                custom_parameters = tool_configuration.get("custom_parameters")
+                if isinstance(custom_parameters, dict):
+                    raw_provider_id = custom_parameters.get(
+                        LTI_CUSTOM_SSO_PROVIDER_ID_KEY
+                    )
+                    try:
+                        parsed_provider_id = (
+                            int(raw_provider_id)
+                            if isinstance(raw_provider_id, (str, int))
+                            else NO_SSO_PROVIDER_ID
+                        )
+                    except (TypeError, ValueError):
+                        parsed_provider_id = NO_SSO_PROVIDER_ID
+
+                    raw_sso_value = custom_parameters.get(LTI_CUSTOM_SSO_VALUE_KEY)
+                    if isinstance(raw_sso_value, str) and raw_sso_value.startswith("$"):
+                        full_name = raw_sso_value[1:]
+                        sso_field = next(
+                            (
+                                field
+                                for field, configured_name in SSO_FIELD_FULL_NAME.items()
+                                if configured_name == full_name
+                            ),
+                            None,
+                        )
+                    if (
+                        parsed_provider_id in allowed_provider_ids
+                        and sso_field is not None
+                    ):
+                        provider_id = parsed_provider_id
+                    else:
+                        sso_field = None
+
+                messages = tool_configuration.get("messages")
+                if isinstance(messages, list):
+                    for message in messages:
+                        if not isinstance(message, dict):
+                            continue
+                        placements = message.get("placements")
+                        if (
+                            message.get("type") == MESSAGE_TYPE
+                            and isinstance(placements, list)
+                            and "course_navigation" in placements
+                        ):
+                            default_enabled = message.get(
+                                CANVAS_COURSE_NAVIGATION_DEFAULT_ENABLED_KEY
+                            )
+                            if isinstance(default_enabled, bool):
+                                show_in_course_navigation = default_enabled
+                            break
+
+        return {
+            "client_id": registration.client_id,
+            "name": registration.friendly_name or "",
+            "admin_name": registration.admin_name or "",
+            "admin_email": registration.admin_email or "",
+            "provider_id": provider_id,
+            "sso_field": sso_field,
+            "institution_ids": [
+                institution.id
+                for institution in registration.institutions
+                if institution.id in allowed_institution_ids
+            ],
+            "show_in_course_navigation": show_in_course_navigation,
+        }
 
     def validate_platform_config(
         self,
@@ -107,7 +226,7 @@ class CanvasPlatformHandler(LTIPlatformHandler):
                     ][0],
                 },
                 "https://canvas.instructure.com/lti/display_type": "full_width_in_context",
-                "https://canvas.instructure.com/lti/course_navigation/default_enabled": data.show_in_course_navigation,
+                CANVAS_COURSE_NAVIGATION_DEFAULT_ENABLED_KEY: data.show_in_course_navigation,
                 "https://canvas.instructure.com/lti/visibility": "members",
             }
         ]
