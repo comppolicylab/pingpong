@@ -125,9 +125,7 @@ export const load: LayoutLoad = async ({ fetch, url }) => {
 			openAllLinksInNewTab = true;
 			logoIsClickable = false;
 			if (url.pathname === LTI_REGISTER) {
-				forceShowSidebarButton = false;
-				forceCollapsedLayout = true;
-				showSidebarItems = false;
+				doNotShowSidebar = true;
 			}
 		} else if (url.pathname === NO_GROUP || url.pathname.startsWith(SETUP)) {
 			doNotShowSidebar = true;

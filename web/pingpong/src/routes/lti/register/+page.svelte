@@ -1,8 +1,9 @@
 <script lang="ts">
 	import * as api from '$lib/api';
+	import PingPongLogo from '$lib/components/PingPongLogo.svelte';
 	import { loading } from '$lib/stores/general';
 	import { happyToast, sadToast } from '$lib/toast';
-	import { Button, Heading, Helper, Input, Label, Select, Modal, Checkbox } from 'flowbite-svelte';
+	import { Button, Helper, Input, Label, Select, Modal, Checkbox } from 'flowbite-svelte';
 	import { onMount } from 'svelte';
 	import { ExclamationCircleOutline } from 'flowbite-svelte-icons';
 
@@ -155,152 +156,188 @@
 	};
 </script>
 
-<div class="flex w-full flex-col items-center gap-8 p-8">
-	<Heading tag="h2" class="serif">Set up your LTI instance with PingPong</Heading>
-	<form class="flex max-w-lg flex-col gap-4 sm:min-w-[32rem]" onsubmit={handleSubmit}>
-		{#if registrationSetupError}
-			<div class="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
-				{registrationSetupError}
+<div class="min-h-full w-full bg-blue-dark-50 px-3 py-2 sm:px-6 sm:py-3">
+	<div class="mx-auto max-w-3xl">
+		<header class="mb-2 flex items-end justify-between gap-4 px-2">
+			<div class="w-28 sm:w-32">
+				<PingPongLogo size="full" extraClass="registration-logo" />
 			</div>
-		{/if}
-		{#if quickstartRegistrations.length > 0}
-			<div>
-				<Label for="quickstart_registration" class="mb-1">Quickstart</Label>
-				<Helper class="mb-2"
-					>Start with values from an active or pending PingPong registration for this Canvas
-					account. You can edit the copied values before submitting.</Helper
-				>
-				<Select
-					id="quickstart_registration"
-					disabled={$loading}
-					bind:value={quickstartClientId}
-					onchange={(event) => applyQuickstart((event.currentTarget as HTMLSelectElement).value)}
-				>
-					<option value="0">Start from scratch</option>
-					{#each quickstartRegistrations as registration (registration.client_id)}
-						<option value={registration.client_id}
-							>{registration.name || 'Existing registration'} ({registration.client_id})</option
+			<h1 class="serif pb-1 text-right text-xl leading-none font-light text-white">
+				Set up CourseBridge
+			</h1>
+		</header>
+
+		<main class="rounded-3xl bg-white px-5 py-5 shadow-sm sm:px-8 sm:py-6">
+			<div class="mx-auto max-w-xl">
+				<form class="flex flex-col gap-5" onsubmit={handleSubmit}>
+					{#if registrationSetupError}
+						<div class="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+							{registrationSetupError}
+						</div>
+					{/if}
+					{#if quickstartRegistrations.length > 0}
+						<section
+							class="rounded-lg border-2 border-blue-200 bg-blue-50 p-4 text-blue-900 sm:p-5"
+							class:border-blue-500={quickstartClientId !== '0'}
 						>
-					{/each}
-				</Select>
-			</div>
-		{/if}
-		<div>
-			<Label for="name" class="mb-1">Instance name</Label>
-			<Helper class="mb-2"
-				>Use this field to give your LTI instance a name to help us identify it in the future.</Helper
-			>
-			<Input id="name" name="name" placeholder="Example University LMS" bind:value={instanceName} />
-		</div>
-		<div>
-			<Label for="admin_name" class="mb-1">Administrator Name</Label>
-			<Helper class="mb-2"
-				>Let us know who we should contact if we need to troubleshoot your integration.</Helper
-			>
-			<Input id="admin_name" name="admin_name" placeholder="John Doe" bind:value={adminName} />
-		</div>
-		<div>
-			<Label for="admin_email" class="mb-1">Administrator Email</Label>
-			<Input
-				id="admin_email"
-				name="admin_email"
-				placeholder="john.doe@example.com"
-				type="email"
-				bind:value={adminEmail}
-			/>
-		</div>
-		{#if showCourseNavigationControl}
-			<div>
-				<Label for="show_in_course_navigation" class="mb-1">Show in Course Navigation</Label>
-				<Helper class="mb-2"
-					>By default, PingPong will be shown in the course navigation menu.</Helper
-				>
-				<Checkbox
-					id="show_in_course_navigation"
-					name="show_in_course_navigation"
-					color="blue"
-					bind:checked={showInCourseNavigation}>Show PingPong app in Course Navigation</Checkbox
-				>
-			</div>
-		{/if}
-		{#if externalLoginProviders.length > 0}
-			<div>
-				<Label for="sso_id" class="mb-1">SSO Provider</Label>
-				<Helper class="mb-2"
-					>Choose the SSO identifier your LTI instance will provide to PingPong. If PingPong doesn’t
-					support your SSO identifier, select "No SSO." PingPong will use SSO identifiers and fall
-					back to email addresses to identify users.</Helper
-				>
-				<Select name="sso_id" id="sso_id" disabled={$loading} bind:value={ssoProviderId}>
-					{#each externalLoginProviders as provider (provider.id)}
-						<option value={`${provider.id}`}>{provider.display_name || provider.name}</option>
-					{/each}
-					<option disabled>──────────</option>
-					<option value={api.NO_SSO_PROVIDER_ID_VALUE}>No SSO</option>
-				</Select>
-			</div>
-		{/if}
-		{#if externalLoginProviders.length > 0 && parseInt(ssoProviderId, 10) !== api.NO_SSO_PROVIDER_ID}
-			<div>
-				<Label for="sso_field" class="mb-1">SSO Field</Label>
-				<Helper class="mb-2"
-					>Select the field where PingPong should expect SSO identifiers. If the field where your
-					SSO identifiers are stored isn’t listed, please contact us.</Helper
-				>
-				<Select name="sso_field" id="sso_field" disabled={$loading} bind:value={ssoField}>
-					<option value="canvas.sisIntegrationId">Canvas.user.sisIntegrationId</option>
-					<option value="canvas.sisSourceId">Canvas.user.sisSourceId</option>
-					<option value="person.sourcedId">Person.sourcedId</option>
-				</Select>
-			</div>
-		{/if}
-		<div>
-			<Label class="mb-1">Institutions</Label>
-			<Helper class="mb-2"
-				>Select the institutions where your instructors should be able to create groups. When
-				PingPong is first launched from Canvas, instructors can either associate an existing group
-				from any institution or create a new one in the institutions you’ve selected. If an
-				institution you anticipate is not listed, please contact us.</Helper
-			>
-			{#if institutions.length > 0}
-				<div class="max-h-64 overflow-y-auto rounded-lg border border-gray-200 bg-gray-50 p-3">
-					<div class="flex flex-col gap-2">
-						{#each institutions as inst (inst.id)}
-							<label class="flex items-start gap-3">
-								<input
-									type="checkbox"
-									class="mt-1 h-4 w-4 rounded border-gray-300"
-									bind:group={institutionIds}
-									value={inst.id}
-									disabled={$loading}
-								/>
-								<div class="flex flex-col">
-									<div class="text-sm font-medium text-gray-900">{inst.name}</div>
-								</div>
-							</label>
-						{/each}
+							<div class="mb-2">
+								<Label for="quickstart_registration" class="text-lg font-medium text-blue-900"
+									>Reuse existing settings</Label
+								>
+							</div>
+							<Helper class="mb-3 text-blue-900"
+								>Select the previous PingPong installation for this Canvas account. You can review
+								and edit its settings below.</Helper
+							>
+							<Select
+								id="quickstart_registration"
+								class="bg-white"
+								disabled={$loading}
+								bind:value={quickstartClientId}
+								onchange={(event) =>
+									applyQuickstart((event.currentTarget as HTMLSelectElement).value)}
+							>
+								<option value="0">Start with new settings</option>
+								{#each quickstartRegistrations as registration (registration.client_id)}
+									<option value={registration.client_id}
+										>{registration.name || 'Existing registration'} ({registration.client_id})</option
+									>
+								{/each}
+							</Select>
+						</section>
+					{/if}
+					<div>
+						<Label for="name" class="mb-1">Instance name</Label>
+						<Helper class="mb-2"
+							>Use this field to give your LTI instance a name to help us identify it in the future.</Helper
+						>
+						<Input
+							id="name"
+							name="name"
+							placeholder="Example University LMS"
+							bind:value={instanceName}
+						/>
 					</div>
-				</div>
-			{:else}
-				<div class="rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm text-gray-600">
-					No institutions with default API keys are available to your account.
-				</div>
-			{/if}
-		</div>
-		<div class="text-sm text-gray-600">
-			<b>Note:</b> After completing the LTI registration process, your integration will require review
-			by a PingPong staff member before activation. You’ll receive an email notification once your integration
-			is approved.
-		</div>
-		<div class="flex items-center justify-between">
-			<Button
-				pill
-				class="bg-orange text-white hover:bg-orange-dark"
-				type="submit"
-				disabled={$loading || !!registrationSetupError}>Submit</Button
-			>
-		</div>
-	</form>
+					<div>
+						<Label for="admin_name" class="mb-1">Administrator Name</Label>
+						<Helper class="mb-2"
+							>Let us know who we should contact if we need to troubleshoot your integration.</Helper
+						>
+						<Input
+							id="admin_name"
+							name="admin_name"
+							placeholder="John Doe"
+							bind:value={adminName}
+						/>
+					</div>
+					<div>
+						<Label for="admin_email" class="mb-1">Administrator Email</Label>
+						<Input
+							id="admin_email"
+							name="admin_email"
+							placeholder="john.doe@example.com"
+							type="email"
+							bind:value={adminEmail}
+						/>
+					</div>
+					{#if showCourseNavigationControl}
+						<div>
+							<Label for="show_in_course_navigation" class="mb-1">Show in Course Navigation</Label>
+							<Helper class="mb-2"
+								>By default, PingPong will be shown in the course navigation menu.</Helper
+							>
+							<Checkbox
+								id="show_in_course_navigation"
+								name="show_in_course_navigation"
+								color="blue"
+								bind:checked={showInCourseNavigation}
+								>Show PingPong app in Course Navigation</Checkbox
+							>
+						</div>
+					{/if}
+					{#if externalLoginProviders.length > 0}
+						<div>
+							<Label for="sso_id" class="mb-1">SSO Provider</Label>
+							<Helper class="mb-2"
+								>Choose the SSO identifier your LTI instance will provide to PingPong. If PingPong
+								doesn’t support your SSO identifier, select "No SSO." PingPong will use SSO
+								identifiers and fall back to email addresses to identify users.</Helper
+							>
+							<Select name="sso_id" id="sso_id" disabled={$loading} bind:value={ssoProviderId}>
+								{#each externalLoginProviders as provider (provider.id)}
+									<option value={`${provider.id}`}>{provider.display_name || provider.name}</option>
+								{/each}
+								<option disabled>──────────</option>
+								<option value={api.NO_SSO_PROVIDER_ID_VALUE}>No SSO</option>
+							</Select>
+						</div>
+					{/if}
+					{#if externalLoginProviders.length > 0 && parseInt(ssoProviderId, 10) !== api.NO_SSO_PROVIDER_ID}
+						<div>
+							<Label for="sso_field" class="mb-1">SSO Field</Label>
+							<Helper class="mb-2"
+								>Select the field where PingPong should expect SSO identifiers. If the field where
+								your SSO identifiers are stored isn’t listed, please contact us.</Helper
+							>
+							<Select name="sso_field" id="sso_field" disabled={$loading} bind:value={ssoField}>
+								<option value="canvas.sisIntegrationId">Canvas.user.sisIntegrationId</option>
+								<option value="canvas.sisSourceId">Canvas.user.sisSourceId</option>
+								<option value="person.sourcedId">Person.sourcedId</option>
+							</Select>
+						</div>
+					{/if}
+					<div>
+						<Label class="mb-1">Institutions</Label>
+						<Helper class="mb-2"
+							>Select the institutions where your instructors should be able to create groups. When
+							PingPong is first launched from Canvas, instructors can either associate an existing
+							group from any institution or create a new one in the institutions you’ve selected. If
+							an institution you anticipate is not listed, please contact us.</Helper
+						>
+						{#if institutions.length > 0}
+							<div
+								class="max-h-64 overflow-y-auto rounded-lg border border-gray-200 bg-gray-50 p-3"
+							>
+								<div class="flex flex-col gap-2">
+									{#each institutions as inst (inst.id)}
+										<label class="flex items-center gap-3">
+											<input
+												type="checkbox"
+												class="h-4 w-4 rounded border-gray-300"
+												bind:group={institutionIds}
+												value={inst.id}
+												disabled={$loading}
+											/>
+											<div class="flex flex-col">
+												<div class="text-sm font-medium text-gray-900">{inst.name}</div>
+											</div>
+										</label>
+									{/each}
+								</div>
+							</div>
+						{:else}
+							<div class="rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm text-gray-600">
+								No institutions with default API keys are available to your account.
+							</div>
+						{/if}
+					</div>
+					<div class="text-sm text-gray-600">
+						<b>Note:</b> After completing the LTI registration process, your integration will require
+						review by a PingPong staff member before activation. You’ll receive an email notification
+						once your integration is approved.
+					</div>
+					<div class="flex items-center justify-between">
+						<Button
+							pill
+							class="bg-orange text-white hover:bg-orange-dark"
+							type="submit"
+							disabled={$loading || !!registrationSetupError}>Submit</Button
+						>
+					</div>
+				</form>
+			</div>
+		</main>
+	</div>
 </div>
 
 <!-- Modal for missing parameters -->
@@ -327,3 +364,11 @@
 		{/if}
 	</div>
 </Modal>
+
+<style>
+	:global(.registration-logo svg) {
+		display: block;
+		height: auto;
+		width: 100%;
+	}
+</style>
