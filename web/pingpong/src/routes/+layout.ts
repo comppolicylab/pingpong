@@ -85,6 +85,7 @@ export const load: LayoutLoad = async ({ fetch, url }) => {
 	const needsOnboarding = !!meData.user && (!meData.user.first_name || !meData.user.last_name);
 	const needsAgreements = meData.agreement_id !== null;
 	const isEmbedded = typeof window !== 'undefined' && window.self !== window.top;
+	const isLTIRegister = url.pathname === LTI_REGISTER;
 	let doNotShowSidebar = false;
 	let forceShowSidebarButton = hasAuthenticatedContext;
 	let forceCollapsedLayout = hasAuthenticatedContext;
@@ -124,7 +125,7 @@ export const load: LayoutLoad = async ({ fetch, url }) => {
 			isPublicPage = true;
 			openAllLinksInNewTab = true;
 			logoIsClickable = false;
-			if (url.pathname === LTI_REGISTER) {
+			if (isLTIRegister) {
 				doNotShowSidebar = true;
 			}
 		} else if (url.pathname === NO_GROUP || url.pathname.startsWith(SETUP)) {
@@ -327,6 +328,7 @@ export const load: LayoutLoad = async ({ fetch, url }) => {
 
 	return {
 		isPublicPage,
+		isLTIRegister,
 		needsOnboarding,
 		needsAgreements,
 		doNotShowSidebar,

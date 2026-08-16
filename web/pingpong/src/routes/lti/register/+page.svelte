@@ -3,7 +3,7 @@
 	import PingPongLogo from '$lib/components/PingPongLogo.svelte';
 	import { loading } from '$lib/stores/general';
 	import { happyToast, sadToast } from '$lib/toast';
-	import { Button, Helper, Input, Label, Select, Modal, Checkbox } from 'flowbite-svelte';
+	import { Button, Helper, Input, Label, Select, Modal, Checkbox, Spinner } from 'flowbite-svelte';
 	import { onMount } from 'svelte';
 	import { ExclamationCircleOutline } from 'flowbite-svelte-icons';
 
@@ -177,8 +177,10 @@
 					{/if}
 					{#if quickstartRegistrations.length > 0}
 						<section
-							class="rounded-lg border-2 border-blue-200 bg-blue-50 p-4 text-blue-900 sm:p-5"
-							class:border-blue-500={quickstartClientId !== '0'}
+							class="rounded-lg border-2 bg-blue-50 p-4 text-blue-900 sm:p-5 {quickstartClientId !==
+							'0'
+								? 'border-blue-500'
+								: 'border-blue-200'}"
 						>
 							<div class="mb-2">
 								<Label for="quickstart_registration" class="text-lg font-medium text-blue-900"
@@ -331,8 +333,15 @@
 							pill
 							class="bg-orange text-white hover:bg-orange-dark"
 							type="submit"
-							disabled={$loading || !!registrationSetupError}>Submit</Button
+							disabled={$loading || !!registrationSetupError}
 						>
+							{#if $loading}
+								<Spinner color="custom" customColor="fill-white" class="mr-2 h-4 w-4" />
+								Submitting…
+							{:else}
+								Submit
+							{/if}
+						</Button>
 					</div>
 				</form>
 			</div>

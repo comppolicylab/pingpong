@@ -37,6 +37,7 @@
 	$: simpleView = data.simpleView;
 	$: if (typeof document !== 'undefined') {
 		document.body.classList.toggle('simple-view', simpleView);
+		document.documentElement.classList.toggle('lti-register', data.isLTIRegister);
 	}
 </script>
 
