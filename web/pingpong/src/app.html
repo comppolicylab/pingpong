@@ -19,6 +19,9 @@
 		<script>
 			try {
 				const view = new URLSearchParams(location.search).get('view');
+				if (location.pathname.replace(/\/+$/, '') === '/lti/register') {
+					document.documentElement.classList.add('lti-register');
+				}
 				if (
 					(view === 'simple' || view === 'disagreementproject') &&
 					location.pathname.indexOf('/shared/') !== -1
@@ -37,6 +40,10 @@
 			html.simple-view #loading-screen-spinner {
 				border-color: rgba(0, 0, 0, 0.1) !important;
 				border-top-color: #fc624d !important;
+			}
+			html.lti-register #app-shell {
+				margin-top: 0 !important;
+				height: 100dvh;
 			}
 		</style>
 		%sveltekit.head%
@@ -91,6 +98,6 @@
 				}
 			</style>
 		</div>
-		<div class="mx-auto mt-12 lg:h-[calc(100vh-3rem)]">%sveltekit.body%</div>
+		<div id="app-shell" class="mx-auto mt-12 lg:h-[calc(100vh-3rem)]">%sveltekit.body%</div>
 	</body>
 </html>
