@@ -87,11 +87,11 @@ export const load: LayoutLoad = async ({ fetch, url }) => {
 	const isEmbedded = typeof window !== 'undefined' && window.self !== window.top;
 	const isLTIRegister = url.pathname === LTI_REGISTER;
 	let doNotShowSidebar = false;
-	let forceShowSidebarButton = hasAuthenticatedContext;
-	let forceCollapsedLayout = hasAuthenticatedContext;
+	const forceShowSidebarButton = hasAuthenticatedContext;
+	const forceCollapsedLayout = hasAuthenticatedContext;
 	let openAllLinksInNewTab = isEmbedded && !isLTIContext;
 	let logoIsClickable = true;
-	let showSidebarItems = true;
+	const showSidebarItems = true;
 
 	// If the page is public, don't redirect to the login page.
 	let isPublicPage = false;
