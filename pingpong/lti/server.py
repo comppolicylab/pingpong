@@ -640,10 +640,10 @@ async def register_lti_instance(request: StateRequest, data: LTIRegisterRequest)
         )
     else:
         await LTIRegistration.update(
-            request.state["db"], existing_registration.id, new_registration
-        )
-        await LTIRegistration.set_institutions(
-            request.state["db"], existing_registration.id, data.institution_ids
+            request.state["db"],
+            existing_registration.id,
+            new_registration,
+            institution_ids=data.institution_ids,
         )
 
     try:

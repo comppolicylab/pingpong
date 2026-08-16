@@ -10978,6 +10978,7 @@ class LTIRegistration(Base):
         id_: int,
         data: dict,
         reviewer_id: int | None = None,
+        institution_ids: list[int] | None = None,
     ) -> "LTIRegistration | None":
         registration = await cls.get_by_id(session, id_)
         if not registration:
@@ -10987,6 +10988,10 @@ class LTIRegistration(Base):
                 setattr(registration, key, value)
         if reviewer_id is not None:
             registration.review_by_id = reviewer_id
+        if institution_ids is not None:
+            registration.institutions = await Institution.get_all_by_id(
+                session, institution_ids
+            )
         session.add(registration)
         await session.flush()
         await session.refresh(registration)

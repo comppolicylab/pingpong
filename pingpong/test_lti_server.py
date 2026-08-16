@@ -888,11 +888,11 @@ async def test_register_lti_instance_success(monkeypatch, reinstall):
         created["data"] = data
         created["institution_ids"] = institution_ids
 
-    async def _update(db, registration_id, data):
+    async def _update(
+        db, registration_id, data, reviewer_id=None, institution_ids=None
+    ):
         updated["registration_id"] = registration_id
         updated["data"] = data
-
-    async def _set_institutions(db, registration_id, institution_ids):
         updated["institution_ids"] = institution_ids
 
     monkeypatch.setattr(
@@ -902,9 +902,6 @@ async def test_register_lti_instance_success(monkeypatch, reinstall):
     )
     monkeypatch.setattr(server_module.LTIRegistration, "create", _create)
     monkeypatch.setattr(server_module.LTIRegistration, "update", _update)
-    monkeypatch.setattr(
-        server_module.LTIRegistration, "set_institutions", _set_institutions
-    )
     monkeypatch.setattr(
         server_module,
         "send_lti_registration_submitted",

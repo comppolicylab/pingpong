@@ -85,3 +85,26 @@ async def test_get_linked_by_canvas_account_lti_guid_and_course_id_excludes_pend
         )
 
         assert result is None
+
+
+async def test_registration_lookup_matches_both_issuer_and_client_id(db):
+    async with db.async_session() as session:
+        first = await _create_registration(
+            session,
+            registration_id=3303,
+            canvas_account_lti_guid="acct-guid-3",
+        )
+        second = await _create_registration(
+            session,
+            registration_id=3304,
+            canvas_account_lti_guid="acct-guid-4",
+        )
+        second.client_id = first.client_id
+        await session.flush()
+
+        result = await models.LTIRegistration.get_by_issuer_and_client_id(
+            session, second.issuer, first.client_id
+        )
+
+        assert result is not None
+        assert result.id == second.id
