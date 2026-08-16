@@ -10935,10 +10935,16 @@ class LTIRegistration(Base):
         return registration
 
     @classmethod
-    async def get_by_client_id(
-        cls, session: AsyncSession, client_id: str
-    ) -> "LTIRegistration":
-        stmt = select(LTIRegistration).where(LTIRegistration.client_id == client_id)
+    async def get_by_issuer_and_client_id(
+        cls,
+        session: AsyncSession,
+        issuer: str,
+        client_id: str,
+    ) -> "LTIRegistration | None":
+        stmt = select(LTIRegistration).where(
+            LTIRegistration.issuer == issuer,
+            LTIRegistration.client_id == client_id,
+        )
         return await session.scalar(stmt)
 
     @classmethod

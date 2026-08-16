@@ -840,7 +840,8 @@ async def test_get_lti_register_setup_harvard_lxp(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_register_lti_instance_success(monkeypatch):
+@pytest.mark.parametrize("reinstall", [False, True])
+async def test_register_lti_instance_success(monkeypatch, reinstall):
     platform_config = {
         "product_family_code": "canvas",
         "messages_supported": [
@@ -876,12 +877,34 @@ async def test_register_lti_instance_success(monkeypatch):
         lambda db, ids: _async_return(True),
     )
     created = {}
+    updated = {}
+    existing_registration = SimpleNamespace(id=42) if reinstall else None
+
+    async def _get_existing(db, issuer, client_id):
+        updated["identity"] = (issuer, client_id)
+        return existing_registration
 
     async def _create(db, data, institution_ids):
         created["data"] = data
         created["institution_ids"] = institution_ids
 
+    async def _update(db, registration_id, data):
+        updated["registration_id"] = registration_id
+        updated["data"] = data
+
+    async def _set_institutions(db, registration_id, institution_ids):
+        updated["institution_ids"] = institution_ids
+
+    monkeypatch.setattr(
+        server_module.LTIRegistration,
+        "get_by_issuer_and_client_id",
+        _get_existing,
+    )
     monkeypatch.setattr(server_module.LTIRegistration, "create", _create)
+    monkeypatch.setattr(server_module.LTIRegistration, "update", _update)
+    monkeypatch.setattr(
+        server_module.LTIRegistration, "set_institutions", _set_institutions
+    )
     monkeypatch.setattr(
         server_module,
         "send_lti_registration_submitted",
@@ -913,8 +936,16 @@ async def test_register_lti_instance_success(monkeypatch):
     result = await server_module.register_lti_instance(request, data)
 
     assert result == {"status": "ok"}
-    assert created["data"]["client_id"] == "client"
-    assert created["institution_ids"] == [1]
+    assert updated["identity"] == ("issuer", "client")
+    if reinstall:
+        assert created == {}
+        assert updated["registration_id"] == 42
+        assert updated["data"]["client_id"] == "client"
+        assert updated["institution_ids"] == [1]
+    else:
+        assert created["data"]["client_id"] == "client"
+        assert created["institution_ids"] == [1]
+        assert "registration_id" not in updated
 
 
 @pytest.mark.asyncio
@@ -1196,6 +1227,11 @@ async def test_register_lti_instance_does_not_forward_auth_to_openid_redirect(
         lambda db, data, institution_ids: _async_return(None),
     )
     monkeypatch.setattr(
+        server_module.LTIRegistration,
+        "get_by_issuer_and_client_id",
+        lambda db, issuer, client_id: _async_return(None),
+    )
+    monkeypatch.setattr(
         server_module,
         "send_lti_registration_submitted",
         lambda *args, **kwargs: _async_return(None),
@@ -1285,6 +1321,11 @@ async def test_register_lti_instance_preserves_auth_on_same_origin_openid_redire
         server_module.LTIRegistration,
         "create",
         lambda db, data, institution_ids: _async_return(None),
+    )
+    monkeypatch.setattr(
+        server_module.LTIRegistration,
+        "get_by_issuer_and_client_id",
+        lambda db, issuer, client_id: _async_return(None),
     )
     monkeypatch.setattr(
         server_module,
@@ -1442,6 +1483,11 @@ async def test_register_lti_instance_converts_post_302_redirect_to_get(
         lambda db, data, institution_ids: _async_return(None),
     )
     monkeypatch.setattr(
+        server_module.LTIRegistration,
+        "get_by_issuer_and_client_id",
+        lambda db, issuer, client_id: _async_return(None),
+    )
+    monkeypatch.setattr(
         server_module,
         "send_lti_registration_submitted",
         lambda *args, **kwargs: _async_return(None),
@@ -1592,8 +1638,8 @@ async def test_lti_login_redirect(monkeypatch):
     registration = _make_registration()
     monkeypatch.setattr(
         server_module.LTIRegistration,
-        "get_by_client_id",
-        lambda db, client_id: _async_return(registration),
+        "get_by_issuer_and_client_id",
+        lambda db, issuer, client_id: _async_return(registration),
     )
     monkeypatch.setattr(
         server_module.LTIOIDCSession,
@@ -1631,8 +1677,8 @@ async def test_lti_login_rejects_missing_authorization_endpoint(monkeypatch):
     registration = _make_registration(auth_login_url=None)
     monkeypatch.setattr(
         server_module.LTIRegistration,
-        "get_by_client_id",
-        lambda db, client_id: _async_return(registration),
+        "get_by_issuer_and_client_id",
+        lambda db, issuer, client_id: _async_return(registration),
     )
     monkeypatch.setattr(
         server_module.LTIOIDCSession,
@@ -1671,8 +1717,8 @@ async def test_lti_login_redirect_post(monkeypatch):
     registration = _make_registration()
     monkeypatch.setattr(
         server_module.LTIRegistration,
-        "get_by_client_id",
-        lambda db, client_id: _async_return(registration),
+        "get_by_issuer_and_client_id",
+        lambda db, issuer, client_id: _async_return(registration),
     )
     monkeypatch.setattr(
         server_module.LTIOIDCSession,
@@ -1742,8 +1788,8 @@ async def test_lti_launch_inactive_redirect(monkeypatch):
     )
     monkeypatch.setattr(
         server_module.LTIRegistration,
-        "get_by_client_id",
-        lambda db, client_id: _async_return(registration),
+        "get_by_issuer_and_client_id",
+        lambda db, issuer, client_id: _async_return(registration),
     )
     monkeypatch.setattr(
         server_module,
@@ -2257,8 +2303,8 @@ async def test_lti_launch_unknown_client_id(monkeypatch):
     )
     monkeypatch.setattr(
         server_module.LTIRegistration,
-        "get_by_client_id",
-        lambda db, client_id: _async_return(None),
+        "get_by_issuer_and_client_id",
+        lambda db, issuer, client_id: _async_return(None),
     )
     monkeypatch.setattr(
         server_module, "get_now_fn", lambda request: lambda: datetime.now(timezone.utc)
@@ -2272,11 +2318,10 @@ async def test_lti_launch_unknown_client_id(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_lti_launch_issuer_mismatch(monkeypatch):
+async def test_lti_launch_unknown_issuer_client_pair(monkeypatch):
     oidc_session = _make_oidc_session(
         redirect_uri=server_module.config.url("/api/v1/lti/launch")
     )
-    registration = _make_registration(issuer="other")
     monkeypatch.setattr(
         server_module.LTIOIDCSession,
         "get_by_state",
@@ -2284,8 +2329,8 @@ async def test_lti_launch_issuer_mismatch(monkeypatch):
     )
     monkeypatch.setattr(
         server_module.LTIRegistration,
-        "get_by_client_id",
-        lambda db, client_id: _async_return(registration),
+        "get_by_issuer_and_client_id",
+        lambda db, issuer, client_id: _async_return(None),
     )
     monkeypatch.setattr(
         server_module, "get_now_fn", lambda request: lambda: datetime.now(timezone.utc)
@@ -2295,7 +2340,7 @@ async def test_lti_launch_issuer_mismatch(monkeypatch):
     )
     with pytest.raises(HTTPException) as excinfo:
         await server_module.lti_launch(request, tasks=SimpleNamespace())
-    assert excinfo.value.status_code == 400
+    assert excinfo.value.status_code == 404
 
 
 @pytest.mark.asyncio
@@ -2311,8 +2356,8 @@ async def test_lti_launch_missing_nonce(monkeypatch):
     )
     monkeypatch.setattr(
         server_module.LTIRegistration,
-        "get_by_client_id",
-        lambda db, client_id: _async_return(registration),
+        "get_by_issuer_and_client_id",
+        lambda db, issuer, client_id: _async_return(registration),
     )
     monkeypatch.setattr(
         server_module,
@@ -2344,8 +2389,8 @@ async def test_lti_launch_missing_deployment_id(monkeypatch):
     )
     monkeypatch.setattr(
         server_module.LTIRegistration,
-        "get_by_client_id",
-        lambda db, client_id: _async_return(registration),
+        "get_by_issuer_and_client_id",
+        lambda db, issuer, client_id: _async_return(registration),
     )
     monkeypatch.setattr(
         server_module,
@@ -2376,8 +2421,8 @@ async def test_lti_launch_deployment_id_invalid_type(monkeypatch):
     )
     monkeypatch.setattr(
         server_module.LTIRegistration,
-        "get_by_client_id",
-        lambda db, client_id: _async_return(registration),
+        "get_by_issuer_and_client_id",
+        lambda db, issuer, client_id: _async_return(registration),
     )
     monkeypatch.setattr(
         server_module,
@@ -2423,8 +2468,8 @@ async def test_lti_launch_deployment_id_valid(monkeypatch):
     )
     monkeypatch.setattr(
         server_module.LTIRegistration,
-        "get_by_client_id",
-        lambda db, client_id: _async_return(registration),
+        "get_by_issuer_and_client_id",
+        lambda db, issuer, client_id: _async_return(registration),
     )
     monkeypatch.setattr(
         server_module,
@@ -2462,8 +2507,8 @@ async def test_lti_launch_validate_and_consume_failed(monkeypatch):
     )
     monkeypatch.setattr(
         server_module.LTIRegistration,
-        "get_by_client_id",
-        lambda db, client_id: _async_return(registration),
+        "get_by_issuer_and_client_id",
+        lambda db, issuer, client_id: _async_return(registration),
     )
     monkeypatch.setattr(
         server_module,
@@ -2501,8 +2546,8 @@ async def test_lti_launch_missing_course_id(monkeypatch):
     )
     monkeypatch.setattr(
         server_module.LTIRegistration,
-        "get_by_client_id",
-        lambda db, client_id: _async_return(registration),
+        "get_by_issuer_and_client_id",
+        lambda db, issuer, client_id: _async_return(registration),
     )
     monkeypatch.setattr(
         server_module,
@@ -2554,8 +2599,8 @@ async def test_lti_launch_rejects_invalid_context_memberships_url(monkeypatch):
     )
     monkeypatch.setattr(
         server_module.LTIRegistration,
-        "get_by_client_id",
-        lambda db, client_id: _async_return(registration),
+        "get_by_issuer_and_client_id",
+        lambda db, issuer, client_id: _async_return(registration),
     )
     monkeypatch.setattr(
         server_module,
@@ -2623,8 +2668,8 @@ async def test_lti_launch_no_recognized_roles(monkeypatch):
     )
     monkeypatch.setattr(
         server_module.LTIRegistration,
-        "get_by_client_id",
-        lambda db, client_id: _async_return(registration),
+        "get_by_issuer_and_client_id",
+        lambda db, issuer, client_id: _async_return(registration),
     )
     monkeypatch.setattr(
         server_module,
@@ -2678,8 +2723,8 @@ async def test_lti_launch_missing_email(monkeypatch):
     )
     monkeypatch.setattr(
         server_module.LTIRegistration,
-        "get_by_client_id",
-        lambda db, client_id: _async_return(registration),
+        "get_by_issuer_and_client_id",
+        lambda db, issuer, client_id: _async_return(registration),
     )
     monkeypatch.setattr(
         server_module,
@@ -2734,8 +2779,8 @@ async def test_lti_launch_unknown_sso_provider(monkeypatch):
     )
     monkeypatch.setattr(
         server_module.LTIRegistration,
-        "get_by_client_id",
-        lambda db, client_id: _async_return(registration),
+        "get_by_issuer_and_client_id",
+        lambda db, issuer, client_id: _async_return(registration),
     )
     monkeypatch.setattr(
         server_module,
@@ -2801,8 +2846,8 @@ async def test_lti_launch_instructor_pending_class_redirect(monkeypatch):
     )
     monkeypatch.setattr(
         server_module.LTIRegistration,
-        "get_by_client_id",
-        lambda db, client_id: _async_return(registration),
+        "get_by_issuer_and_client_id",
+        lambda db, issuer, client_id: _async_return(registration),
     )
     monkeypatch.setattr(
         server_module,
@@ -2875,8 +2920,8 @@ async def test_lti_launch_admin_and_instructor_pending_class_redirect(monkeypatc
     )
     monkeypatch.setattr(
         server_module.LTIRegistration,
-        "get_by_client_id",
-        lambda db, client_id: _async_return(registration),
+        "get_by_issuer_and_client_id",
+        lambda db, issuer, client_id: _async_return(registration),
     )
     monkeypatch.setattr(
         server_module,
@@ -2939,8 +2984,8 @@ async def test_lti_launch_admin_only_no_user_redirect(monkeypatch):
     )
     monkeypatch.setattr(
         server_module.LTIRegistration,
-        "get_by_client_id",
-        lambda db, client_id: _async_return(registration),
+        "get_by_issuer_and_client_id",
+        lambda db, issuer, client_id: _async_return(registration),
     )
     monkeypatch.setattr(
         server_module,
@@ -2999,8 +3044,8 @@ async def test_lti_launch_student_no_group_redirect(monkeypatch):
     )
     monkeypatch.setattr(
         server_module.LTIRegistration,
-        "get_by_client_id",
-        lambda db, client_id: _async_return(registration),
+        "get_by_issuer_and_client_id",
+        lambda db, issuer, client_id: _async_return(registration),
     )
     monkeypatch.setattr(
         server_module,
@@ -3067,8 +3112,8 @@ async def test_lti_launch_existing_lti_class_setup_user(monkeypatch):
     )
     monkeypatch.setattr(
         server_module.LTIRegistration,
-        "get_by_client_id",
-        lambda db, client_id: _async_return(registration),
+        "get_by_issuer_and_client_id",
+        lambda db, issuer, client_id: _async_return(registration),
     )
     monkeypatch.setattr(
         server_module,
@@ -3142,8 +3187,8 @@ async def test_lti_launch_harvard_lxp_existing_lti_class_add_user(monkeypatch):
     )
     monkeypatch.setattr(
         server_module.LTIRegistration,
-        "get_by_client_id",
-        lambda db, client_id: _async_return(registration),
+        "get_by_issuer_and_client_id",
+        lambda db, issuer, client_id: _async_return(registration),
     )
     monkeypatch.setattr(
         server_module,
@@ -3223,8 +3268,8 @@ async def test_lti_launch_existing_class_add_user(monkeypatch):
     )
     monkeypatch.setattr(
         server_module.LTIRegistration,
-        "get_by_client_id",
-        lambda db, client_id: _async_return(registration),
+        "get_by_issuer_and_client_id",
+        lambda db, issuer, client_id: _async_return(registration),
     )
     monkeypatch.setattr(
         server_module,
@@ -3295,8 +3340,8 @@ async def test_lti_launch_resume_pending_lti_class(monkeypatch):
     )
     monkeypatch.setattr(
         server_module.LTIRegistration,
-        "get_by_client_id",
-        lambda db, client_id: _async_return(registration),
+        "get_by_issuer_and_client_id",
+        lambda db, issuer, client_id: _async_return(registration),
     )
     monkeypatch.setattr(
         server_module,
@@ -3364,8 +3409,8 @@ async def test_lti_launch_resume_unlinked_linked_lti_class(monkeypatch):
     )
     monkeypatch.setattr(
         server_module.LTIRegistration,
-        "get_by_client_id",
-        lambda db, client_id: _async_return(registration),
+        "get_by_issuer_and_client_id",
+        lambda db, issuer, client_id: _async_return(registration),
     )
     monkeypatch.setattr(
         server_module,
@@ -3448,8 +3493,8 @@ async def test_lti_launch_unlinked_class_from_other_registration_creates_new_pen
     )
     monkeypatch.setattr(
         server_module.LTIRegistration,
-        "get_by_client_id",
-        lambda db, client_id: _async_return(registration),
+        "get_by_issuer_and_client_id",
+        lambda db, issuer, client_id: _async_return(registration),
     )
     monkeypatch.setattr(
         server_module,
@@ -3531,8 +3576,8 @@ async def test_lti_launch_sso_user_update(monkeypatch):
     )
     monkeypatch.setattr(
         server_module.LTIRegistration,
-        "get_by_client_id",
-        lambda db, client_id: _async_return(registration),
+        "get_by_issuer_and_client_id",
+        lambda db, issuer, client_id: _async_return(registration),
     )
     monkeypatch.setattr(
         server_module,
@@ -3655,8 +3700,8 @@ async def test_lti_launch_ambiguous_lookup_returns_conflict(monkeypatch):
     )
     monkeypatch.setattr(
         server_module.LTIRegistration,
-        "get_by_client_id",
-        lambda db, client_id: _async_return(registration),
+        "get_by_issuer_and_client_id",
+        lambda db, issuer, client_id: _async_return(registration),
     )
     monkeypatch.setattr(
         server_module,
@@ -3748,8 +3793,8 @@ async def test_lti_launch_updates_email_after_merge(monkeypatch):
     )
     monkeypatch.setattr(
         server_module.LTIRegistration,
-        "get_by_client_id",
-        lambda db, client_id: _async_return(registration),
+        "get_by_issuer_and_client_id",
+        lambda db, issuer, client_id: _async_return(registration),
     )
     monkeypatch.setattr(
         server_module,
@@ -3845,8 +3890,8 @@ async def test_lti_launch_non_lti_class_redirect_when_owner(monkeypatch):
     )
     monkeypatch.setattr(
         server_module.LTIRegistration,
-        "get_by_client_id",
-        lambda db, client_id: _async_return(registration),
+        "get_by_issuer_and_client_id",
+        lambda db, issuer, client_id: _async_return(registration),
     )
     monkeypatch.setattr(
         server_module,
@@ -3915,8 +3960,8 @@ async def test_lti_launch_non_lti_class_add_user_same_course(monkeypatch):
     )
     monkeypatch.setattr(
         server_module.LTIRegistration,
-        "get_by_client_id",
-        lambda db, client_id: _async_return(registration),
+        "get_by_issuer_and_client_id",
+        lambda db, issuer, client_id: _async_return(registration),
     )
     monkeypatch.setattr(
         server_module,
@@ -3993,8 +4038,8 @@ async def test_lti_launch_non_lti_class_add_user_other_course(monkeypatch):
     )
     monkeypatch.setattr(
         server_module.LTIRegistration,
-        "get_by_client_id",
-        lambda db, client_id: _async_return(registration),
+        "get_by_issuer_and_client_id",
+        lambda db, issuer, client_id: _async_return(registration),
     )
     monkeypatch.setattr(
         server_module,
@@ -4069,8 +4114,8 @@ async def test_lti_launch_add_user_exception(monkeypatch):
     )
     monkeypatch.setattr(
         server_module.LTIRegistration,
-        "get_by_client_id",
-        lambda db, client_id: _async_return(registration),
+        "get_by_issuer_and_client_id",
+        lambda db, issuer, client_id: _async_return(registration),
     )
     monkeypatch.setattr(
         server_module,
@@ -4180,8 +4225,8 @@ async def test_lti_launch_admin_with_can_view_on_lti_class_redirects_to_group(
     )
     monkeypatch.setattr(
         server_module.LTIRegistration,
-        "get_by_client_id",
-        lambda db, client_id: _async_return(registration),
+        "get_by_issuer_and_client_id",
+        lambda db, issuer, client_id: _async_return(registration),
     )
     monkeypatch.setattr(
         server_module,
@@ -4260,8 +4305,8 @@ async def test_lti_launch_admin_without_can_view_on_lti_class_redirects_to_no_ro
     )
     monkeypatch.setattr(
         server_module.LTIRegistration,
-        "get_by_client_id",
-        lambda db, client_id: _async_return(registration),
+        "get_by_issuer_and_client_id",
+        lambda db, issuer, client_id: _async_return(registration),
     )
     monkeypatch.setattr(
         server_module,
@@ -4344,8 +4389,8 @@ async def test_lti_launch_admin_supervisor_creates_second_lti_class(monkeypatch)
     )
     monkeypatch.setattr(
         server_module.LTIRegistration,
-        "get_by_client_id",
-        lambda db, client_id: _async_return(registration),
+        "get_by_issuer_and_client_id",
+        lambda db, issuer, client_id: _async_return(registration),
     )
     monkeypatch.setattr(
         server_module,
@@ -4446,8 +4491,8 @@ async def test_lti_launch_admin_non_supervisor_does_not_create_second_lti_class(
     )
     monkeypatch.setattr(
         server_module.LTIRegistration,
-        "get_by_client_id",
-        lambda db, client_id: _async_return(registration),
+        "get_by_issuer_and_client_id",
+        lambda db, issuer, client_id: _async_return(registration),
     )
     monkeypatch.setattr(
         server_module,
@@ -4548,8 +4593,8 @@ async def test_lti_launch_admin_non_supervisor_does_not_create_lti_class_for_non
     )
     monkeypatch.setattr(
         server_module.LTIRegistration,
-        "get_by_client_id",
-        lambda db, client_id: _async_return(registration),
+        "get_by_issuer_and_client_id",
+        lambda db, issuer, client_id: _async_return(registration),
     )
     monkeypatch.setattr(
         server_module,
@@ -4640,8 +4685,8 @@ async def test_lti_launch_admin_with_can_view_on_second_lti_class_redirects_to_g
     )
     monkeypatch.setattr(
         server_module.LTIRegistration,
-        "get_by_client_id",
-        lambda db, client_id: _async_return(registration),
+        "get_by_issuer_and_client_id",
+        lambda db, issuer, client_id: _async_return(registration),
     )
     monkeypatch.setattr(
         server_module,
@@ -4726,8 +4771,8 @@ async def test_lti_launch_admin_without_can_view_on_second_lti_class_redirects_t
     )
     monkeypatch.setattr(
         server_module.LTIRegistration,
-        "get_by_client_id",
-        lambda db, client_id: _async_return(registration),
+        "get_by_issuer_and_client_id",
+        lambda db, issuer, client_id: _async_return(registration),
     )
     monkeypatch.setattr(
         server_module,
@@ -4817,8 +4862,8 @@ async def test_lti_launch_admin_supervisor_creates_new_lti_class_for_non_lti_cla
     )
     monkeypatch.setattr(
         server_module.LTIRegistration,
-        "get_by_client_id",
-        lambda db, client_id: _async_return(registration),
+        "get_by_issuer_and_client_id",
+        lambda db, issuer, client_id: _async_return(registration),
     )
     monkeypatch.setattr(
         server_module,
@@ -4909,8 +4954,8 @@ async def test_lti_launch_admin_with_can_view_on_non_lti_class_redirects_to_grou
     )
     monkeypatch.setattr(
         server_module.LTIRegistration,
-        "get_by_client_id",
-        lambda db, client_id: _async_return(registration),
+        "get_by_issuer_and_client_id",
+        lambda db, issuer, client_id: _async_return(registration),
     )
     monkeypatch.setattr(
         server_module,
@@ -4989,8 +5034,8 @@ async def test_lti_launch_admin_without_can_view_on_non_lti_class_redirects_to_n
     )
     monkeypatch.setattr(
         server_module.LTIRegistration,
-        "get_by_client_id",
-        lambda db, client_id: _async_return(registration),
+        "get_by_issuer_and_client_id",
+        lambda db, issuer, client_id: _async_return(registration),
     )
     monkeypatch.setattr(
         server_module,
@@ -5083,6 +5128,11 @@ async def test_register_lti_instance_harvard_lxp_success(monkeypatch):
         created["institution_ids"] = institution_ids
 
     monkeypatch.setattr(server_module.LTIRegistration, "create", _create)
+    monkeypatch.setattr(
+        server_module.LTIRegistration,
+        "get_by_issuer_and_client_id",
+        lambda db, issuer, client_id: _async_return(None),
+    )
     monkeypatch.setattr(
         server_module,
         "send_lti_registration_submitted",
@@ -5203,8 +5253,8 @@ async def test_lti_launch_harvard_lxp_missing_context_id(monkeypatch):
     )
     monkeypatch.setattr(
         server_module.LTIRegistration,
-        "get_by_client_id",
-        lambda db, client_id: _async_return(registration),
+        "get_by_issuer_and_client_id",
+        lambda db, issuer, client_id: _async_return(registration),
     )
     monkeypatch.setattr(
         server_module,
@@ -5263,8 +5313,8 @@ async def test_lti_launch_harvard_lxp_pending_setup(monkeypatch):
     )
     monkeypatch.setattr(
         server_module.LTIRegistration,
-        "get_by_client_id",
-        lambda db, client_id: _async_return(registration),
+        "get_by_issuer_and_client_id",
+        lambda db, issuer, client_id: _async_return(registration),
     )
     monkeypatch.setattr(
         server_module,

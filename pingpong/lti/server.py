@@ -630,9 +630,21 @@ async def register_lti_instance(request: StateRequest, data: LTIRegisterRequest)
         **platform_registration_fields,
     }
 
-    await LTIRegistration.create(
-        request.state["db"], new_registration, data.institution_ids
+    existing_registration = await LTIRegistration.get_by_issuer_and_client_id(
+        request.state["db"], issuer, client_id
     )
+
+    if existing_registration is None:
+        await LTIRegistration.create(
+            request.state["db"], new_registration, data.institution_ids
+        )
+    else:
+        await LTIRegistration.update(
+            request.state["db"], existing_registration.id, new_registration
+        )
+        await LTIRegistration.set_institutions(
+            request.state["db"], existing_registration.id, data.institution_ids
+        )
 
     try:
         await send_lti_registration_submitted(
@@ -670,14 +682,11 @@ async def lti_login(request: StateRequest):
     if not isinstance(iss, str) or not iss:
         raise HTTPException(status_code=400, detail="Missing or invalid iss")
 
-    registration = await LTIRegistration.get_by_client_id(
-        request.state["db"], client_id
+    registration = await LTIRegistration.get_by_issuer_and_client_id(
+        request.state["db"], iss, client_id
     )
     if registration is None:
-        raise HTTPException(status_code=404, detail="Unknown LTI client_id")
-
-    if registration.issuer != iss:
-        raise HTTPException(status_code=400, detail="Issuer mismatch for client_id")
+        raise HTTPException(status_code=404, detail="Unknown LTI registration")
 
     login_hint = payload.get("login_hint")
     if not isinstance(login_hint, str) or not login_hint:
@@ -810,13 +819,11 @@ async def lti_launch(
     if oidc_session.redirect_uri and oidc_session.redirect_uri != expected_redirect_uri:
         raise HTTPException(status_code=400, detail="OIDC redirect_uri mismatch")
 
-    registration = await LTIRegistration.get_by_client_id(
-        request.state["db"], oidc_session.client_id
+    registration = await LTIRegistration.get_by_issuer_and_client_id(
+        request.state["db"], oidc_session.issuer, oidc_session.client_id
     )
     if registration is None:
-        raise HTTPException(status_code=404, detail="Unknown LTI client_id")
-    if registration.issuer != oidc_session.issuer:
-        raise HTTPException(status_code=400, detail="Issuer mismatch for state")
+        raise HTTPException(status_code=404, detail="Unknown LTI registration")
 
     claims = await _verify_lti_id_token(
         id_token=id_token,
