@@ -2091,12 +2091,14 @@ async def get_institutions_with_default_api_key(request: StateRequest):
     "/admin/lti/client/{client_id}/course/{course_id}",
     dependencies=[Depends(Authz("admin"))],
 )
-async def get_lti_class_link(client_id: str, course_id: str, request: StateRequest):
-    registration = await models.LTIRegistration.get_by_client_id(
-        request.state["db"], client_id
+async def get_lti_class_link(
+    client_id: str, course_id: str, issuer: str, request: StateRequest
+):
+    registration = await models.LTIRegistration.get_by_issuer_and_client_id(
+        request.state["db"], issuer, client_id
     )
     if registration is None:
-        raise HTTPException(status_code=404, detail="Unknown LTI client_id")
+        raise HTTPException(status_code=404, detail="Unknown LTI registration")
 
     if registration.canvas_account_lti_guid:
         class_ = await find_class_by_course_id_search_by_canvas_account_lti_guid(
