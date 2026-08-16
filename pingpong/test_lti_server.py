@@ -837,8 +837,6 @@ async def test_get_lti_register_setup_canvas(monkeypatch):
         {
             "client_id": "client-42",
             "name": "Existing PingPong",
-            "admin_name": "Existing Admin",
-            "admin_email": "admin@example.com",
             "provider_id": 2,
             "sso_field": "canvas.sisSourceId",
             "institution_ids": [2],

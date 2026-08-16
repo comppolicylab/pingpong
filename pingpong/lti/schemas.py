@@ -30,8 +30,6 @@ LTISSOField = Literal[
 class LTIRegistrationQuickstart(BaseModel):
     client_id: str
     name: str
-    admin_name: str
-    admin_email: str
     provider_id: int
     sso_field: LTISSOField | None
     institution_ids: list[int]

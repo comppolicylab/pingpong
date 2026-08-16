@@ -23,46 +23,32 @@
 	let ssoField: api.LTISSOField = 'canvas.sisIntegrationId';
 	let institutionIds: number[] = [];
 	let showInCourseNavigation = true;
-	let quickstartClientId = '0';
+	let quickstartClientId = '';
 	let instanceName = '';
-	let adminName = '';
-	let adminEmail = '';
 
 	const isValidSsoField = (value: string): value is api.LTISSOField =>
 		value === 'canvas.sisIntegrationId' ||
 		value === 'canvas.sisSourceId' ||
 		value === 'person.sourcedId';
 
-	const applyQuickstart = (clientId: string) => {
-		quickstartClientId = clientId;
-		if (!clientId) {
-			instanceName = '';
-			adminName = '';
-			adminEmail = '';
-			ssoProviderId = api.NO_SSO_PROVIDER_ID_VALUE;
-			ssoField = 'canvas.sisIntegrationId';
-			institutionIds = [];
-			showInCourseNavigation = true;
-			return;
-		}
+	const resetQuickstart = () => {
+		instanceName = '';
+		ssoProviderId = api.NO_SSO_PROVIDER_ID_VALUE;
+		ssoField = 'canvas.sisIntegrationId';
+		institutionIds = [];
+		showInCourseNavigation = true;
+	};
 
+	const applyQuickstart = (clientId: string) => {
 		const registration = quickstartRegistrations.find(
 			(candidate) => candidate.client_id === clientId
 		);
 		if (!registration) {
-			instanceName = '';
-			adminName = '';
-			adminEmail = '';
-			ssoProviderId = api.NO_SSO_PROVIDER_ID_VALUE;
-			ssoField = 'canvas.sisIntegrationId';
-			institutionIds = [];
-			showInCourseNavigation = true;
+			resetQuickstart();
 			return;
 		}
 
 		instanceName = registration.name;
-		adminName = registration.admin_name;
-		adminEmail = registration.admin_email;
 		ssoProviderId = `${registration.provider_id}`;
 		ssoField = registration.sso_field ?? 'canvas.sisIntegrationId';
 		institutionIds = [...registration.institution_ids];
@@ -184,7 +170,7 @@
 					bind:value={quickstartClientId}
 					onchange={(event) => applyQuickstart((event.currentTarget as HTMLSelectElement).value)}
 				>
-					<option value="0">Start from scratch</option>
+					<option value="">Start from scratch</option>
 					{#each quickstartRegistrations as registration (registration.client_id)}
 						<option value={registration.client_id}
 							>{registration.name || 'Existing registration'} ({registration.client_id})</option
@@ -205,17 +191,11 @@
 			<Helper class="mb-2"
 				>Let us know who we should contact if we need to troubleshoot your integration.</Helper
 			>
-			<Input id="admin_name" name="admin_name" placeholder="John Doe" bind:value={adminName} />
+			<Input id="admin_name" name="admin_name" placeholder="John Doe" />
 		</div>
 		<div>
 			<Label for="admin_email" class="mb-1">Administrator Email</Label>
-			<Input
-				id="admin_email"
-				name="admin_email"
-				placeholder="john.doe@example.com"
-				type="email"
-				bind:value={adminEmail}
-			/>
+			<Input id="admin_email" name="admin_email" placeholder="john.doe@example.com" type="email" />
 		</div>
 		{#if showCourseNavigationControl}
 			<div>
@@ -241,7 +221,7 @@
 				>
 				<Select name="sso_id" id="sso_id" disabled={$loading} bind:value={ssoProviderId}>
 					{#each externalLoginProviders as provider (provider.id)}
-						<option value={provider.id}>{provider.display_name || provider.name}</option>
+						<option value={`${provider.id}`}>{provider.display_name || provider.name}</option>
 					{/each}
 					<option disabled>──────────</option>
 					<option value={api.NO_SSO_PROVIDER_ID_VALUE}>No SSO</option>
