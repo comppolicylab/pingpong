@@ -23,8 +23,10 @@
 	let ssoField: api.LTISSOField = 'canvas.sisIntegrationId';
 	let institutionIds: number[] = [];
 	let showInCourseNavigation = true;
-	let quickstartClientId = '';
+	let quickstartClientId = '0';
 	let instanceName = '';
+	let adminName = '';
+	let adminEmail = '';
 
 	const isValidSsoField = (value: string): value is api.LTISSOField =>
 		value === 'canvas.sisIntegrationId' ||
@@ -33,6 +35,8 @@
 
 	const resetQuickstart = () => {
 		instanceName = '';
+		adminName = '';
+		adminEmail = '';
 		ssoProviderId = api.NO_SSO_PROVIDER_ID_VALUE;
 		ssoField = 'canvas.sisIntegrationId';
 		institutionIds = [];
@@ -49,6 +53,8 @@
 		}
 
 		instanceName = registration.name;
+		adminName = registration.admin_name;
+		adminEmail = registration.admin_email;
 		ssoProviderId = `${registration.provider_id}`;
 		ssoField = registration.sso_field ?? 'canvas.sisIntegrationId';
 		institutionIds = [...registration.institution_ids];
@@ -170,7 +176,7 @@
 					bind:value={quickstartClientId}
 					onchange={(event) => applyQuickstart((event.currentTarget as HTMLSelectElement).value)}
 				>
-					<option value="">Start from scratch</option>
+					<option value="0">Start from scratch</option>
 					{#each quickstartRegistrations as registration (registration.client_id)}
 						<option value={registration.client_id}
 							>{registration.name || 'Existing registration'} ({registration.client_id})</option
@@ -191,11 +197,17 @@
 			<Helper class="mb-2"
 				>Let us know who we should contact if we need to troubleshoot your integration.</Helper
 			>
-			<Input id="admin_name" name="admin_name" placeholder="John Doe" />
+			<Input id="admin_name" name="admin_name" placeholder="John Doe" bind:value={adminName} />
 		</div>
 		<div>
 			<Label for="admin_email" class="mb-1">Administrator Email</Label>
-			<Input id="admin_email" name="admin_email" placeholder="john.doe@example.com" type="email" />
+			<Input
+				id="admin_email"
+				name="admin_email"
+				placeholder="john.doe@example.com"
+				type="email"
+				bind:value={adminEmail}
+			/>
 		</div>
 		{#if showCourseNavigationControl}
 			<div>

@@ -149,6 +149,8 @@ class CanvasPlatformHandler(LTIPlatformHandler):
         return {
             "client_id": registration.client_id,
             "name": registration.friendly_name or "",
+            "admin_name": registration.admin_name or "",
+            "admin_email": registration.admin_email or "",
             "provider_id": provider_id,
             "sso_field": sso_field,
             "institution_ids": [

@@ -567,6 +567,8 @@ export type LTIRegisterSetup = {
 export type LTIRegistrationQuickstart = {
 	client_id: string;
 	name: string;
+	admin_name: string;
+	admin_email: string;
 	provider_id: number;
 	sso_field: LTISSOField | null;
 	institution_ids: number[];
