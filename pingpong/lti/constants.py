@@ -52,7 +52,9 @@ LTI_CUSTOM_PARAM_DEFAULT_VALUES = {
 NRPS_CONTEXT_MEMBERSHIP_SCOPE = (
     "https://purl.imsglobal.org/spec/lti-nrps/scope/contextmembership.readonly"
 )
+LTI_REGISTRATION_SCOPE = "https://purl.imsglobal.org/spec/lti-reg/scope/registration"
 REQUIRED_SCOPES = [NRPS_CONTEXT_MEMBERSHIP_SCOPE]
+PINGPONG_LTI_TOOL_VERSION = "1.1"
 
 TOKEN_REQUEST_CONTENT_TYPE = "application/x-www-form-urlencoded"
 CLIENT_ASSERTION_TYPE = "urn:ietf:params:oauth:client-assertion-type:jwt-bearer"

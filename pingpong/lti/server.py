@@ -40,6 +40,7 @@ from pingpong.lti.constants import (
     LTI_CUSTOM_SSO_PROVIDER_ID_KEY,
     LTI_CUSTOM_SSO_VALUE_KEY,
     LTI_DEPLOYMENT_ID_CLAIM,
+    LTI_REGISTRATION_SCOPE,
     LTI_TOOL_CONFIGURATION_KEY,
     MESSAGE_TYPES_KEY,
     MESSAGE_TYPE,
@@ -510,6 +511,9 @@ async def register_lti_instance(request: StateRequest, data: LTIRegisterRequest)
         raise HTTPException(status_code=400, detail="public subject type not supported")
 
     platform_registration_fields = handler.extract_registration_fields(platform_config)
+    requested_scopes = REQUIRED_SCOPES + ["openid"]
+    if LTI_REGISTRATION_SCOPE in scopes_supported:
+        requested_scopes.append(LTI_REGISTRATION_SCOPE)
 
     base_tool_config = {
         "application_type": "web",
@@ -521,7 +525,7 @@ async def register_lti_instance(request: StateRequest, data: LTIRegisterRequest)
         "jwks_uri": config.url("/api/v1/lti/.well-known/jwks.json"),
         "token_endpoint_auth_method": "private_key_jwt",
         "logo_uri": config.url("/pingpong_icon_2x.png"),
-        "scope": " ".join(REQUIRED_SCOPES + ["openid"]),
+        "scope": " ".join(requested_scopes),
         LTI_TOOL_CONFIGURATION_KEY: {
             "domain": config.public_url.replace("https://", "")
             .replace("http://", "")

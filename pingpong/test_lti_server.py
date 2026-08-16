@@ -905,19 +905,17 @@ async def test_register_lti_instance_success(monkeypatch, reinstall):
         "registration_endpoint": "https://platform.example.com/reg",
         "jwks_uri": "https://platform.example.com/jwks",
         "token_endpoint": "https://platform.example.com/token",
-        "scopes_supported": server_module.REQUIRED_SCOPES,
+        "scopes_supported": server_module.REQUIRED_SCOPES
+        + [server_module.LTI_REGISTRATION_SCOPE],
         "id_token_signing_alg_values_supported": ["RS256"],
         "subject_types_supported": ["public"],
         server_module.PLATFORM_CONFIGURATION_KEY: platform_config,
     }
     registration_payload = {"client_id": "client"}
 
+    session = FakeSession(get_payload=openid_payload, post_payload=registration_payload)
     monkeypatch.setattr(
-        server_module.aiohttp,
-        "ClientSession",
-        _fake_session_factory(
-            get_payload=openid_payload, post_payload=registration_payload
-        ),
+        server_module.aiohttp, "ClientSession", _client_session_factory(session)
     )
     monkeypatch.setattr(
         server_module.Institution,
@@ -981,6 +979,10 @@ async def test_register_lti_instance_success(monkeypatch, reinstall):
     result = await server_module.register_lti_instance(request, data)
 
     assert result == {"status": "ok"}
+    assert (
+        server_module.LTI_REGISTRATION_SCOPE
+        in session.post_calls[0][1]["json"]["scope"].split()
+    )
     assert updated["identity"] == ("issuer", "client")
     if reinstall:
         assert created == {}
