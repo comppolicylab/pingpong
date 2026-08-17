@@ -1,6 +1,10 @@
 import type { LTIDeepLinkAssistant } from '$lib/api';
 import dayjs from '$lib/time';
 
+export const DEEP_LINK_TITLE = 'Add PingPong to Canvas';
+export const DEEP_LINK_SUBTITLE =
+	'Choose what content PingPong should show in Canvas for this link.';
+
 export const interactionModeLabel = (mode: LTIDeepLinkAssistant['interaction_mode']) => {
 	if (mode === 'lecture_video') return 'Video';
 	if (mode === 'lecture_slides') return 'Slides';

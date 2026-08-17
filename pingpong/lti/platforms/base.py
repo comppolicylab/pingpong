@@ -106,11 +106,13 @@ class LTIPlatformHandler(ABC):
         base_tool_config: dict[str, Any],
         data: LTIRegisterRequest,
         sso_field_full_name: str | None,
+        message_types_supported: list[dict[str, Any]],
     ) -> dict[str, Any]:
         """Return the full tool_registration_data dict that will be POSTed to
         the platform's registration_endpoint. The handler decides what goes
         into custom_parameters, messages[].custom_parameters, and any
-        platform-specific vendor extensions.
+        platform-specific vendor extensions, constrained by the platform's
+        advertised message and placement capabilities.
         """
 
     # --- Launch-time ---

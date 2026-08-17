@@ -105,6 +105,11 @@
 				}
 			</style>
 		</div>
-		<div id="app-shell" class="mx-auto mt-12 lg:h-[calc(100vh-3rem)]">%sveltekit.body%</div>
+		<div
+			id="app-shell"
+			class="mx-auto mt-12 has-[.lti-deep-link]:mt-0 lg:h-[calc(100vh-3rem)] lg:has-[.lti-deep-link]:h-dvh"
+		>
+			%sveltekit.body%
+		</div>
 	</body>
 </html>

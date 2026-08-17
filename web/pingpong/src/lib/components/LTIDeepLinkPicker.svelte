@@ -14,6 +14,8 @@
 	import AssistantAvatar from '$lib/components/AssistantAvatar.svelte';
 	import type * as api from '$lib/api';
 	import {
+		DEEP_LINK_SUBTITLE,
+		DEEP_LINK_TITLE,
 		ambiguousAssistantIds,
 		assistantUpdatedLabel,
 		filterDeepLinkAssistants,
@@ -48,7 +50,7 @@
 	} as const;
 
 	const rowClass = (selected: boolean) =>
-		`flex gap-3 rounded-xl border p-3 transition-colors focus-within:ring-3 focus-within:ring-orange/40 ${
+		`flex gap-3 rounded-xl border p-3 transition-colors select-none focus-within:ring-3 focus-within:ring-orange/40 ${
 			selected
 				? 'border-orange bg-orange-light'
 				: 'border-gray-200 bg-white hover:border-melon hover:bg-orange-light/60'
@@ -90,12 +92,10 @@
 </script>
 
 <div class="flex min-h-0 flex-1 flex-col">
-	<div class="flex shrink-0 flex-col gap-4 px-6 pt-6 md:px-10">
-		<div>
-			<h2 class="text-2xl font-medium text-blue-dark-50">Add PingPong to Canvas</h2>
-			<p class="mt-1 text-gray-600">
-				Choose what content PingPong should show in Canvas for this link.
-			</p>
+	<div class="flex shrink-0 flex-col gap-4 px-6 pt-6 md:px-10 lti-compact:gap-3 lti-compact:pt-4">
+		<div class="lti-compact:hidden">
+			<h2 class="text-2xl font-medium text-blue-dark-50">{DEEP_LINK_TITLE}</h2>
+			<p class="mt-1 text-gray-600">{DEEP_LINK_SUBTITLE}</p>
 		</div>
 
 		<label class="block cursor-pointer rounded-xl focus-within:ring-3 focus-within:ring-orange/40">
@@ -249,18 +249,18 @@
 		</div>
 	{/if}
 
-	<div class="shrink-0 border-t border-gray-200 px-6 py-4 md:px-10">
+	<div class="shrink-0 border-t border-gray-200 px-6 py-4 md:px-10 lti-compact:py-2">
 		{#if errorMessage}
 			<div
-				class="mb-3 flex items-start gap-2 rounded-xl bg-red-light-50 p-3 text-sm text-red-700"
+				class="mb-3 flex items-start gap-2 rounded-xl bg-red-light-50 p-3 text-sm text-red-700 lti-compact:mb-2 lti-compact:p-2 lti-compact:text-xs"
 				role="alert"
 			>
 				<ExclamationCircleOutline class="mt-0.5 h-4 w-4 shrink-0" />
 				<span>{errorMessage}</span>
 			</div>
 		{/if}
-		<div class="flex flex-wrap items-center justify-between gap-3">
-			<p class="min-w-0 text-sm text-gray-500" aria-live="polite">
+		<div class="flex flex-wrap items-center justify-between gap-3 lti-compact:gap-2">
+			<p class="min-w-0 text-sm text-gray-500 lti-compact:text-xs" aria-live="polite">
 				PingPong will show
 				<span class="font-semibold text-blue-dark-50">
 					{selectedAssistant ? selectedAssistant.name : "the Group's page"}
@@ -269,12 +269,17 @@
 					<span>on its own</span>
 				{/if}
 			</p>
-			<div class="flex shrink-0 gap-3">
-				<Button class="rounded-full" color="alternative" disabled={busy} onclick={() => onCancel()}>
+			<div class="flex shrink-0 gap-3 lti-compact:gap-2">
+				<Button
+					class="rounded-full lti-compact:px-3 lti-compact:py-1.5 lti-compact:text-xs"
+					color="alternative"
+					disabled={busy}
+					onclick={() => onCancel()}
+				>
 					Cancel
 				</Button>
 				<Button
-					class="rounded-full bg-orange text-white hover:bg-orange-dark"
+					class="rounded-full bg-orange text-white hover:bg-orange-dark lti-compact:px-3 lti-compact:py-1.5 lti-compact:text-xs"
 					disabled={busy}
 					onclick={() => onSubmit(destination, selectedAssistantId, simpleView)}
 				>

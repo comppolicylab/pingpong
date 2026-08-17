@@ -568,6 +568,7 @@ async def register_lti_instance(request: StateRequest, data: LTIRegisterRequest)
         base_tool_config=base_tool_config,
         data=data,
         sso_field_full_name=sso_field_full_name,
+        message_types_supported=message_types_supported,
     )
 
     registration_response_data: dict[str, Any] | None = None

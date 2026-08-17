@@ -10,6 +10,7 @@ from pingpong.lti.constants import (
     CANVAS_ACCOUNT_LTI_GUID_KEY,
     CANVAS_ACCOUNT_NAME_KEY,
     CANVAS_EDITOR_BUTTON_PLACEMENT,
+    CANVAS_LINK_SELECTION_PLACEMENT,
     CANVAS_MESSAGE_PLACEMENT,
     DEEP_LINK_MESSAGE_TYPE,
     LTI_CLAIM_CONTEXT_KEY,
@@ -135,29 +136,14 @@ def test_canvas_validate_platform_config_rejects_missing_course_navigation():
     assert "Canvas course navigation" in excinfo.value.detail
 
 
-def test_canvas_validate_platform_config_accepts_required_placements():
+def test_canvas_validate_platform_config_accepts_course_navigation_only():
     handler = CanvasPlatformHandler()
     handler.validate_platform_config(
         {},
         [
             {"type": MESSAGE_TYPE, "placements": [CANVAS_MESSAGE_PLACEMENT]},
-            {
-                "type": DEEP_LINK_MESSAGE_TYPE,
-                "placements": [CANVAS_EDITOR_BUTTON_PLACEMENT],
-            },
         ],
     )
-
-
-def test_canvas_validate_platform_config_requires_editor_button():
-    handler = CanvasPlatformHandler()
-    with pytest.raises(HTTPException) as excinfo:
-        handler.validate_platform_config(
-            {},
-            [{"type": MESSAGE_TYPE, "placements": [CANVAS_MESSAGE_PLACEMENT]}],
-        )
-    assert excinfo.value.status_code == 400
-    assert "editor button Deep Linking" in excinfo.value.detail
 
 
 def test_canvas_extract_registration_fields():
@@ -189,6 +175,16 @@ def test_canvas_build_tool_registration_payload_includes_vendor_extensions():
         base_tool_config=_base_tool_config(),
         data=data,
         sso_field_full_name=None,
+        message_types_supported=[
+            {"type": MESSAGE_TYPE, "placements": [CANVAS_MESSAGE_PLACEMENT]},
+            {
+                "type": DEEP_LINK_MESSAGE_TYPE,
+                "placements": [
+                    CANVAS_EDITOR_BUTTON_PLACEMENT,
+                    CANVAS_LINK_SELECTION_PLACEMENT,
+                ],
+            },
+        ],
     )
     tool = payload[LTI_TOOL_CONFIGURATION_KEY]
     assert tool["custom_parameters"]["platform"] == "canvas"
@@ -198,7 +194,7 @@ def test_canvas_build_tool_registration_payload_includes_vendor_extensions():
     assert tool["https://canvas.instructure.com/lti/vendor"] == (
         "Computational Policy Lab"
     )
-    course_navigation, editor_button = tool["messages"]
+    course_navigation, editor_button, link_selection = tool["messages"]
     assert course_navigation["placements"] == ["course_navigation"]
     assert (
         course_navigation["custom_parameters"]["canvas_course_id"]
@@ -222,6 +218,60 @@ def test_canvas_build_tool_registration_payload_includes_vendor_extensions():
     assert editor_button["https://canvas.instructure.com/lti/launch_height"] == 1600
     assert editor_button["https://canvas.instructure.com/lti/visibility"] == "admins"
     assert editor_button["custom_parameters"]["canvas_course_id"] == "$Canvas.course.id"
+    assert link_selection["type"] == DEEP_LINK_MESSAGE_TYPE
+    assert link_selection["placements"] == ["link_selection"]
+    assert link_selection["selection_width"] == 900
+    assert link_selection["selection_height"] == 850
+    assert link_selection["https://canvas.instructure.com/lti/launch_width"] == 900
+    assert link_selection["https://canvas.instructure.com/lti/launch_height"] == 850
+    assert link_selection["https://canvas.instructure.com/lti/visibility"] == "admins"
+    assert link_selection["custom_parameters"]["placement"] == "link_selection"
+    assert (
+        link_selection["custom_parameters"]["canvas_course_id"] == "$Canvas.course.id"
+    )
+
+
+@pytest.mark.parametrize(
+    ("deep_link_placements", "expected_placements"),
+    [
+        ([], ["course_navigation"]),
+        ([CANVAS_EDITOR_BUTTON_PLACEMENT], ["course_navigation", "editor_button"]),
+        ([CANVAS_LINK_SELECTION_PLACEMENT], ["course_navigation", "link_selection"]),
+    ],
+)
+def test_canvas_build_tool_registration_payload_adds_deep_link_placements_opportunistically(
+    deep_link_placements, expected_placements
+):
+    handler = CanvasPlatformHandler()
+    data = LTIRegisterRequest(
+        name="PingPong",
+        admin_name="Admin",
+        admin_email="admin@example.com",
+        provider_id=NO_SSO_PROVIDER_ID,
+        sso_field=None,
+        openid_configuration="https://platform.example.com/.well-known/openid",
+        registration_token="token",
+        institution_ids=[1],
+    )
+    message_types_supported = [
+        {"type": MESSAGE_TYPE, "placements": [CANVAS_MESSAGE_PLACEMENT]}
+    ]
+    if deep_link_placements:
+        message_types_supported.append(
+            {"type": DEEP_LINK_MESSAGE_TYPE, "placements": deep_link_placements}
+        )
+
+    payload = handler.build_tool_registration_payload(
+        base_tool_config=_base_tool_config(),
+        data=data,
+        sso_field_full_name=None,
+        message_types_supported=message_types_supported,
+    )
+
+    assert [
+        message.get("placements", [None])[0]
+        for message in payload[LTI_TOOL_CONFIGURATION_KEY]["messages"]
+    ] == expected_placements
 
 
 def test_canvas_extract_course_id_rejects_placeholder():
@@ -284,6 +334,7 @@ def test_lxp_build_tool_registration_payload_omits_canvas_extensions():
         base_tool_config=_base_tool_config(),
         data=_lxp_register_request(),
         sso_field_full_name=None,
+        message_types_supported=[{"type": MESSAGE_TYPE}],
     )
     tool = payload[LTI_TOOL_CONFIGURATION_KEY]
     assert tool["custom_parameters"] == {
