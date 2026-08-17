@@ -181,24 +181,6 @@ class CanvasPlatformHandler(LTIPlatformHandler):
                 status_code=400,
                 detail="Canvas course navigation placement not supported by platform",
             )
-        if not any(
-            CANVAS_EDITOR_BUTTON_PLACEMENT in msg.get("placements", [])
-            for msg in message_types_supported
-            if msg.get("type") == DEEP_LINK_MESSAGE_TYPE
-        ):
-            raise HTTPException(
-                status_code=400,
-                detail="Canvas editor button Deep Linking placement not supported by platform",
-            )
-        if not any(
-            CANVAS_LINK_SELECTION_PLACEMENT in msg.get("placements", [])
-            for msg in message_types_supported
-            if msg.get("type") == DEEP_LINK_MESSAGE_TYPE
-        ):
-            raise HTTPException(
-                status_code=400,
-                detail="Canvas link selection Deep Linking placement not supported by platform",
-            )
 
     def validate_registration_request(self, data: LTIRegisterRequest) -> None:
         # Canvas accepts all SSO configurations the generic validator already allows.
@@ -218,6 +200,7 @@ class CanvasPlatformHandler(LTIPlatformHandler):
         base_tool_config: dict[str, Any],
         data: LTIRegisterRequest,
         sso_field_full_name: str | None,
+        message_types_supported: list[dict[str, Any]],
     ) -> dict[str, Any]:
         payload = dict(base_tool_config)
         tool_config = dict(payload[LTI_TOOL_CONFIGURATION_KEY])
@@ -295,11 +278,19 @@ class CanvasPlatformHandler(LTIPlatformHandler):
         logo_uri = payload.get("logo_uri")
         if isinstance(logo_uri, str) and logo_uri:
             editor_button_message["icon_uri"] = logo_uri
-        tool_config["messages"] = [
-            course_navigation_message,
-            editor_button_message,
-            link_selection_message,
-        ]
+            link_selection_message["icon_uri"] = logo_uri
+        messages = [course_navigation_message]
+        deep_link_placements = {
+            placement
+            for message in message_types_supported
+            if message.get("type") == DEEP_LINK_MESSAGE_TYPE
+            for placement in message.get("placements", [])
+        }
+        if CANVAS_EDITOR_BUTTON_PLACEMENT in deep_link_placements:
+            messages.append(editor_button_message)
+        if CANVAS_LINK_SELECTION_PLACEMENT in deep_link_placements:
+            messages.append(link_selection_message)
+        tool_config["messages"] = messages
 
         payload[LTI_TOOL_CONFIGURATION_KEY] = tool_config
         return payload

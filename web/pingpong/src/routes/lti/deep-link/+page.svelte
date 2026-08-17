@@ -62,8 +62,10 @@
 				<PingPongLogo size="full" />
 			</h1>
 			<div class="hidden min-w-0 flex-1 text-right lti-compact:block">
-				<p class="truncate text-sm font-semibold text-white">{DEEP_LINK_TITLE}</p>
-				<p class="truncate text-xs text-blue-light-40">{DEEP_LINK_SUBTITLE}</p>
+				<h2 class="truncate text-sm font-semibold text-white">{DEEP_LINK_TITLE}</h2>
+				<p class="truncate text-xs text-blue-light-40" title={DEEP_LINK_SUBTITLE}>
+					{DEEP_LINK_SUBTITLE}
+				</p>
 			</div>
 		</header>
 

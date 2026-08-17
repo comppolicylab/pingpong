@@ -136,49 +136,14 @@ def test_canvas_validate_platform_config_rejects_missing_course_navigation():
     assert "Canvas course navigation" in excinfo.value.detail
 
 
-def test_canvas_validate_platform_config_accepts_required_placements():
+def test_canvas_validate_platform_config_accepts_course_navigation_only():
     handler = CanvasPlatformHandler()
     handler.validate_platform_config(
         {},
         [
             {"type": MESSAGE_TYPE, "placements": [CANVAS_MESSAGE_PLACEMENT]},
-            {
-                "type": DEEP_LINK_MESSAGE_TYPE,
-                "placements": [
-                    CANVAS_EDITOR_BUTTON_PLACEMENT,
-                    CANVAS_LINK_SELECTION_PLACEMENT,
-                ],
-            },
         ],
     )
-
-
-def test_canvas_validate_platform_config_requires_editor_button():
-    handler = CanvasPlatformHandler()
-    with pytest.raises(HTTPException) as excinfo:
-        handler.validate_platform_config(
-            {},
-            [{"type": MESSAGE_TYPE, "placements": [CANVAS_MESSAGE_PLACEMENT]}],
-        )
-    assert excinfo.value.status_code == 400
-    assert "editor button Deep Linking" in excinfo.value.detail
-
-
-def test_canvas_validate_platform_config_requires_link_selection():
-    handler = CanvasPlatformHandler()
-    with pytest.raises(HTTPException) as excinfo:
-        handler.validate_platform_config(
-            {},
-            [
-                {"type": MESSAGE_TYPE, "placements": [CANVAS_MESSAGE_PLACEMENT]},
-                {
-                    "type": DEEP_LINK_MESSAGE_TYPE,
-                    "placements": [CANVAS_EDITOR_BUTTON_PLACEMENT],
-                },
-            ],
-        )
-    assert excinfo.value.status_code == 400
-    assert "link selection Deep Linking" in excinfo.value.detail
 
 
 def test_canvas_extract_registration_fields():
@@ -210,6 +175,16 @@ def test_canvas_build_tool_registration_payload_includes_vendor_extensions():
         base_tool_config=_base_tool_config(),
         data=data,
         sso_field_full_name=None,
+        message_types_supported=[
+            {"type": MESSAGE_TYPE, "placements": [CANVAS_MESSAGE_PLACEMENT]},
+            {
+                "type": DEEP_LINK_MESSAGE_TYPE,
+                "placements": [
+                    CANVAS_EDITOR_BUTTON_PLACEMENT,
+                    CANVAS_LINK_SELECTION_PLACEMENT,
+                ],
+            },
+        ],
     )
     tool = payload[LTI_TOOL_CONFIGURATION_KEY]
     assert tool["custom_parameters"]["platform"] == "canvas"
@@ -254,6 +229,49 @@ def test_canvas_build_tool_registration_payload_includes_vendor_extensions():
     assert (
         link_selection["custom_parameters"]["canvas_course_id"] == "$Canvas.course.id"
     )
+
+
+@pytest.mark.parametrize(
+    ("deep_link_placements", "expected_placements"),
+    [
+        ([], ["course_navigation"]),
+        ([CANVAS_EDITOR_BUTTON_PLACEMENT], ["course_navigation", "editor_button"]),
+        ([CANVAS_LINK_SELECTION_PLACEMENT], ["course_navigation", "link_selection"]),
+    ],
+)
+def test_canvas_build_tool_registration_payload_adds_deep_link_placements_opportunistically(
+    deep_link_placements, expected_placements
+):
+    handler = CanvasPlatformHandler()
+    data = LTIRegisterRequest(
+        name="PingPong",
+        admin_name="Admin",
+        admin_email="admin@example.com",
+        provider_id=NO_SSO_PROVIDER_ID,
+        sso_field=None,
+        openid_configuration="https://platform.example.com/.well-known/openid",
+        registration_token="token",
+        institution_ids=[1],
+    )
+    message_types_supported = [
+        {"type": MESSAGE_TYPE, "placements": [CANVAS_MESSAGE_PLACEMENT]}
+    ]
+    if deep_link_placements:
+        message_types_supported.append(
+            {"type": DEEP_LINK_MESSAGE_TYPE, "placements": deep_link_placements}
+        )
+
+    payload = handler.build_tool_registration_payload(
+        base_tool_config=_base_tool_config(),
+        data=data,
+        sso_field_full_name=None,
+        message_types_supported=message_types_supported,
+    )
+
+    assert [
+        message.get("placements", [None])[0]
+        for message in payload[LTI_TOOL_CONFIGURATION_KEY]["messages"]
+    ] == expected_placements
 
 
 def test_canvas_extract_course_id_rejects_placeholder():
@@ -316,6 +334,7 @@ def test_lxp_build_tool_registration_payload_omits_canvas_extensions():
         base_tool_config=_base_tool_config(),
         data=_lxp_register_request(),
         sso_field_full_name=None,
+        message_types_supported=[{"type": MESSAGE_TYPE}],
     )
     tool = payload[LTI_TOOL_CONFIGURATION_KEY]
     assert tool["custom_parameters"] == {

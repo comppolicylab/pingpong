@@ -75,6 +75,7 @@ class HarvardLxpPlatformHandler(LTIPlatformHandler):
         base_tool_config: dict[str, Any],
         data: LTIRegisterRequest,
         sso_field_full_name: str | None,
+        message_types_supported: list[dict[str, Any]],
     ) -> dict[str, Any]:
         payload = dict(base_tool_config)
         tool_config = dict(payload[LTI_TOOL_CONFIGURATION_KEY])
