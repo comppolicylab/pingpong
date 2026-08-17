@@ -108,9 +108,11 @@ export const load: LayoutLoad = async ({ fetch, url }) => {
 	const sharedPageCanUseSimpleView = isSharedAssistantPage || isSharedThreadPage;
 	const disagreementProjectView =
 		sharedPageCanUseSimpleView && requestedView === 'disagreementproject';
-	// Only shared pages can opt into the simple view.
+	const isLTIAssistantLaunch =
+		isLTIContext && /^\/group\/\d+\/?$/.test(url.pathname) && !!url.searchParams.get('assistant');
 	const simpleView =
-		sharedPageCanUseSimpleView && (requestedView === 'simple' || disagreementProjectView);
+		(sharedPageCanUseSimpleView && (requestedView === 'simple' || disagreementProjectView)) ||
+		(isLTIAssistantLaunch && requestedView === 'simple');
 
 	if (url.pathname === LOGIN) {
 		// If the user is logged in, go to the forward page.

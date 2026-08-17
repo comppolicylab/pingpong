@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { Button } from 'flowbite-svelte';
+	import { Button, Toggle, Tooltip } from 'flowbite-svelte';
 	import {
 		AnnotationOutline,
 		BadgeCheckOutline,
@@ -25,7 +25,8 @@
 	export let errorMessage = '';
 	export let onSubmit: (
 		destination: api.LTIDeepLinkDestination,
-		assistantId: number | null
+		assistantId: number | null,
+		simpleView: boolean
 	) => void = () => {};
 	export let onCancel: () => void = () => {};
 
@@ -34,6 +35,10 @@
 	let selection = 'group';
 	let search = '';
 	let searchInput: HTMLInputElement | null = null;
+	// Applies to whichever assistant is selected, and is kept while the control is
+	// disabled so switching to the group option and back does not lose it. Only
+	// ever submitted alongside an assistant.
+	let simpleView = false;
 
 	const modeIcons = {
 		chat: AnnotationOutline,
@@ -43,11 +48,16 @@
 	} as const;
 
 	const rowClass = (selected: boolean) =>
-		`flex gap-3 rounded-xl border p-3 transition-colors ${
+		`flex gap-3 rounded-xl border p-3 transition-colors focus-within:ring-3 focus-within:ring-orange/40 ${
 			selected
 				? 'border-orange bg-orange-light'
 				: 'border-gray-200 bg-white hover:border-melon hover:bg-orange-light/60'
 		}`;
+
+	const simpleViewLabelClass = (eligible: boolean) =>
+		eligible
+			? 'text-xs whitespace-nowrap text-gray-800 contrast-100 grayscale-0'
+			: 'text-xs whitespace-nowrap text-gray-400 contrast-50 grayscale';
 
 	const clearSearch = () => {
 		search = '';
@@ -74,6 +84,7 @@
 	$: selectedAssistant = assistants.find((a) => a.id === selectedAssistantId) || null;
 	let destination: api.LTIDeepLinkDestination = 'group';
 	$: destination = selectedAssistant ? 'assistant' : 'group';
+	$: simpleViewEligible = selectedAssistant !== null;
 	$: showSearch = assistants.length > 4;
 	$: trimmedSearch = search.trim();
 </script>
@@ -111,10 +122,27 @@
 		</label>
 
 		{#if assistants.length > 0}
-			<div class="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+			<div class="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
 				<span class="text-sm font-semibold tracking-wide text-gray-500 uppercase">
 					Or link directly to an assistant
 				</span>
+				<Toggle
+					size="small"
+					color="blue"
+					bind:checked={simpleView}
+					disabled={!simpleViewEligible}
+					classDiv="me-0"
+					class={simpleViewLabelClass(simpleViewEligible)}
+				>
+					<span slot="offLabel">Show simple view</span>
+				</Toggle>
+				<Tooltip class="max-w-60 text-xs">
+					{#if simpleViewEligible}
+						Opens the assistant on its own in Canvas, without PingPong's navigation around it.
+					{:else}
+						Pick an assistant below to open it on its own in Canvas.
+					{/if}
+				</Tooltip>
 			</div>
 
 			{#if showSearch}
@@ -153,17 +181,15 @@
 					{@const selected = selectedAssistantId === assistant.id}
 					{@const updated = assistantUpdatedLabel(assistant.updated)}
 					{@const ModeIcon = modeIcons[assistant.interaction_mode]}
-					<label
-						class="block cursor-pointer rounded-xl focus-within:ring-3 focus-within:ring-orange/40"
-					>
-						<input
-							type="radio"
-							name="lti-destination"
-							class="sr-only"
-							value={`assistant:${assistant.id}`}
-							bind:group={selection}
-						/>
-						<div class={rowClass(selected)}>
+					<div class={rowClass(selected)}>
+						<label class="flex min-w-0 flex-1 cursor-pointer gap-3">
+							<input
+								type="radio"
+								name="lti-destination"
+								class="sr-only"
+								value={`assistant:${assistant.id}`}
+								bind:group={selection}
+							/>
 							<AssistantAvatar {assistant} size={10} showFallback />
 							<div class="min-w-0 flex-1">
 								<div class="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
@@ -198,8 +224,8 @@
 									{/if}
 								</p>
 							</div>
-						</div>
-					</label>
+						</label>
+					</div>
 				{:else}
 					<div class="rounded-xl bg-gray-50 p-6 text-center">
 						<p class="text-sm text-gray-600">No assistants match “{trimmedSearch}”.</p>
@@ -239,6 +265,9 @@
 				<span class="font-semibold text-blue-dark-50">
 					{selectedAssistant ? selectedAssistant.name : "the Group's page"}
 				</span>
+				{#if selectedAssistant && simpleView}
+					<span>on its own</span>
+				{/if}
 			</p>
 			<div class="flex shrink-0 gap-3">
 				<Button class="rounded-full" color="alternative" disabled={busy} onclick={() => onCancel()}>
@@ -247,7 +276,7 @@
 				<Button
 					class="rounded-full bg-orange text-white hover:bg-orange-dark"
 					disabled={busy}
-					onclick={() => onSubmit(destination, selectedAssistantId)}
+					onclick={() => onSubmit(destination, selectedAssistantId, simpleView)}
 				>
 					{busy ? 'Adding...' : 'Add to Canvas'}
 				</Button>

@@ -935,6 +935,8 @@ async def _resource_launch_url(
                 + urlencode({"lti_session": user_token, "class_id": class_id})
             )
         query["assistant"] = assistant.id
+        if launch_custom_params.get("pingpong_simple_view") == "1":
+            query["view"] = "simple"
     return config.url(f"/group/{class_id}?" + urlencode(query))
 
 
@@ -2033,6 +2035,11 @@ async def complete_lti_deep_link(
     if state.get("completed_at"):
         raise HTTPException(status_code=409, detail="Deep Linking session completed")
 
+    if body.simple_view and body.destination != "assistant":
+        raise HTTPException(
+            status_code=400, detail="Simple view requires an assistant selection"
+        )
+
     content_items: list[dict[str, Any]] = []
     if body.destination == "group":
         if body.assistant_id is not None:
@@ -2088,6 +2095,7 @@ async def complete_lti_deep_link(
                     "pingpong_destination": "assistant",
                     "pingpong_assistant_id": str(assistant.id),
                     "pingpong_resource_version": "1",
+                    **({"pingpong_simple_view": "1"} if body.simple_view else {}),
                 },
                 "iframe": {
                     "src": config.url("/api/v1/lti/launch"),

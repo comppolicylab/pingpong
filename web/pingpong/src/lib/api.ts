@@ -1209,14 +1209,20 @@ export const completeLTIDeepLink = async (
 	f: Fetcher,
 	deepLinkSessionId: number,
 	destination: LTIDeepLinkDestination,
-	assistantId: number | null = null
+	assistantId: number | null = null,
+	simpleView = false
 ) => {
 	return await POST<
-		{ destination: LTIDeepLinkDestination; assistant_id: number | null },
+		{
+			destination: LTIDeepLinkDestination;
+			assistant_id: number | null;
+			simple_view: boolean;
+		},
 		LTIDeepLinkCompleteResponse
 	>(f, `lti/deep-link/${deepLinkSessionId}/complete`, {
 		destination,
-		assistant_id: assistantId
+		assistant_id: assistantId,
+		simple_view: simpleView
 	});
 };
 

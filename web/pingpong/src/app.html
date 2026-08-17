@@ -22,9 +22,14 @@
 				if (location.pathname.replace(/\/+$/, '') === '/lti/register') {
 					document.documentElement.classList.add('lti-register');
 				}
+				var params = new URLSearchParams(location.search);
+				var isLTIAssistantLaunch =
+					/^\/group\/\d+\/?$/.test(location.pathname) &&
+					!!params.get('assistant') &&
+					!!params.get('lti_session');
 				if (
 					(view === 'simple' || view === 'disagreementproject') &&
-					location.pathname.indexOf('/shared/') !== -1
+					(location.pathname.indexOf('/shared/') !== -1 || isLTIAssistantLaunch)
 				) {
 					document.documentElement.classList.add('simple-view');
 				}
