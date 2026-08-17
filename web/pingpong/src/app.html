@@ -18,18 +18,20 @@
 		<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
 		<script>
 			try {
-				const view = new URLSearchParams(location.search).get('view');
+				var params = new URLSearchParams(location.search);
+				var view = params.get('view');
 				if (location.pathname.replace(/\/+$/, '') === '/lti/register') {
 					document.documentElement.classList.add('lti-register');
 				}
-				var params = new URLSearchParams(location.search);
+				var isLTIContext = !!params.get('lti_session') || !!sessionStorage.getItem('lti_session');
 				var isLTIAssistantLaunch =
-					/^\/group\/\d+\/?$/.test(location.pathname) &&
-					!!params.get('assistant') &&
-					!!params.get('lti_session');
+					isLTIContext &&
+					((/^\/group\/\d+\/?$/.test(location.pathname) && !!params.get('assistant')) ||
+						/^\/group\/\d+\/thread\/\d+\/?$/.test(location.pathname));
+				var isSharedPage = location.pathname.indexOf('/shared/') !== -1;
 				if (
-					(view === 'simple' || view === 'disagreementproject') &&
-					(location.pathname.indexOf('/shared/') !== -1 || isLTIAssistantLaunch)
+					(isSharedPage && (view === 'simple' || view === 'disagreementproject')) ||
+					(isLTIAssistantLaunch && view === 'simple')
 				) {
 					document.documentElement.classList.add('simple-view');
 				}

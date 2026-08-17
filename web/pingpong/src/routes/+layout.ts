@@ -109,7 +109,9 @@ export const load: LayoutLoad = async ({ fetch, url }) => {
 	const disagreementProjectView =
 		sharedPageCanUseSimpleView && requestedView === 'disagreementproject';
 	const isLTIAssistantLaunch =
-		isLTIContext && /^\/group\/\d+\/?$/.test(url.pathname) && !!url.searchParams.get('assistant');
+		isLTIContext &&
+		((/^\/group\/\d+\/?$/.test(url.pathname) && !!url.searchParams.get('assistant')) ||
+			/^\/group\/\d+\/thread\/\d+\/?$/.test(url.pathname));
 	const simpleView =
 		(sharedPageCanUseSimpleView && (requestedView === 'simple' || disagreementProjectView)) ||
 		(isLTIAssistantLaunch && requestedView === 'simple');

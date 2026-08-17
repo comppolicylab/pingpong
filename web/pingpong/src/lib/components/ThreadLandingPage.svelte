@@ -52,9 +52,9 @@
 	$: lectureVideoEnabled = data?.lectureVideoEnabled ?? true;
 	$: conversationId = $page.url.searchParams.get('conversation_id');
 
-	const viewQuerySuffix = () => {
+	const viewQuerySuffix = (hasQuery = false) => {
 		const view = $page.url.searchParams.get('view');
-		return view ? `?view=${encodeURIComponent(view)}` : '';
+		return view ? `${hasQuery ? '&' : '?'}view=${encodeURIComponent(view)}` : '';
 	};
 	let chatInputRef: ChatInputHandle | null = null;
 	let dropOverlayVisible = false;
@@ -86,18 +86,24 @@
 			!assistants.some((asst: Assistant) => asst.id === linkedAssistantId) &&
 			assistants.length > 0
 		) {
-			await goto(resolve(`/group/${data.class.id}/?assistant=${assistants[0].id}`), {
-				replaceState: true
-			});
+			await goto(
+				resolve(`/group/${data.class.id}/?assistant=${assistants[0].id}${viewQuerySuffix(true)}`),
+				{
+					replaceState: true
+				}
+			);
 			return;
 		}
 		// Make sure that an assistant is linked in the URL
 		if (!$page.url.searchParams.has('assistant') && !data.isSharedAssistantPage) {
 			if (assistants.length > 0) {
 				// replace current URL with one that has the assistant ID
-				await goto(resolve(`/group/${data.class.id}/?assistant=${assistants[0].id}`), {
-					replaceState: true
-				});
+				await goto(
+					resolve(`/group/${data.class.id}/?assistant=${assistants[0].id}${viewQuerySuffix(true)}`),
+					{
+						replaceState: true
+					}
+				);
 			}
 		}
 		const requestedLanguage = $page.url.searchParams.get('language') || 'original';
@@ -639,7 +645,11 @@
 					)
 				);
 			} else {
-				await goto(resolve(`/group/${$page.params.classId}/thread/${newThreadOpts.thread.id}`));
+				await goto(
+					resolve(
+						`/group/${$page.params.classId}/thread/${newThreadOpts.thread.id}${viewQuerySuffix()}`
+					)
+				);
 			}
 		} catch (e) {
 			$loading = false;
@@ -681,7 +691,11 @@
 					)
 				);
 			} else {
-				await goto(resolve(`/group/${$page.params.classId}/thread/${newThreadOpts.thread.id}`));
+				await goto(
+					resolve(
+						`/group/${$page.params.classId}/thread/${newThreadOpts.thread.id}${viewQuerySuffix()}`
+					)
+				);
 			}
 		} catch (e) {
 			$loading = false;
@@ -737,7 +751,11 @@
 					)
 				);
 			} else {
-				await goto(resolve(`/group/${$page.params.classId}/thread/${newThreadOpts.thread.id}`));
+				await goto(
+					resolve(
+						`/group/${$page.params.classId}/thread/${newThreadOpts.thread.id}${viewQuerySuffix()}`
+					)
+				);
 			}
 		} catch (e) {
 			$loading = false;
@@ -806,7 +824,11 @@
 					)
 				);
 			} else {
-				await goto(resolve(`/group/${$page.params.classId}/thread/${newThreadOpts.thread.id}`));
+				await goto(
+					resolve(
+						`/group/${$page.params.classId}/thread/${newThreadOpts.thread.id}${viewQuerySuffix()}`
+					)
+				);
 			}
 		} catch (e) {
 			$loading = false;
