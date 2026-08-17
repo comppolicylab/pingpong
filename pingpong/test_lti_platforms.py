@@ -10,6 +10,7 @@ from pingpong.lti.constants import (
     CANVAS_ACCOUNT_LTI_GUID_KEY,
     CANVAS_ACCOUNT_NAME_KEY,
     CANVAS_EDITOR_BUTTON_PLACEMENT,
+    CANVAS_LINK_SELECTION_PLACEMENT,
     CANVAS_MESSAGE_PLACEMENT,
     DEEP_LINK_MESSAGE_TYPE,
     LTI_CLAIM_CONTEXT_KEY,
@@ -143,7 +144,10 @@ def test_canvas_validate_platform_config_accepts_required_placements():
             {"type": MESSAGE_TYPE, "placements": [CANVAS_MESSAGE_PLACEMENT]},
             {
                 "type": DEEP_LINK_MESSAGE_TYPE,
-                "placements": [CANVAS_EDITOR_BUTTON_PLACEMENT],
+                "placements": [
+                    CANVAS_EDITOR_BUTTON_PLACEMENT,
+                    CANVAS_LINK_SELECTION_PLACEMENT,
+                ],
             },
         ],
     )
@@ -158,6 +162,23 @@ def test_canvas_validate_platform_config_requires_editor_button():
         )
     assert excinfo.value.status_code == 400
     assert "editor button Deep Linking" in excinfo.value.detail
+
+
+def test_canvas_validate_platform_config_requires_link_selection():
+    handler = CanvasPlatformHandler()
+    with pytest.raises(HTTPException) as excinfo:
+        handler.validate_platform_config(
+            {},
+            [
+                {"type": MESSAGE_TYPE, "placements": [CANVAS_MESSAGE_PLACEMENT]},
+                {
+                    "type": DEEP_LINK_MESSAGE_TYPE,
+                    "placements": [CANVAS_EDITOR_BUTTON_PLACEMENT],
+                },
+            ],
+        )
+    assert excinfo.value.status_code == 400
+    assert "link selection Deep Linking" in excinfo.value.detail
 
 
 def test_canvas_extract_registration_fields():
@@ -198,7 +219,7 @@ def test_canvas_build_tool_registration_payload_includes_vendor_extensions():
     assert tool["https://canvas.instructure.com/lti/vendor"] == (
         "Computational Policy Lab"
     )
-    course_navigation, editor_button = tool["messages"]
+    course_navigation, editor_button, link_selection = tool["messages"]
     assert course_navigation["placements"] == ["course_navigation"]
     assert (
         course_navigation["custom_parameters"]["canvas_course_id"]
@@ -222,6 +243,17 @@ def test_canvas_build_tool_registration_payload_includes_vendor_extensions():
     assert editor_button["https://canvas.instructure.com/lti/launch_height"] == 1600
     assert editor_button["https://canvas.instructure.com/lti/visibility"] == "admins"
     assert editor_button["custom_parameters"]["canvas_course_id"] == "$Canvas.course.id"
+    assert link_selection["type"] == DEEP_LINK_MESSAGE_TYPE
+    assert link_selection["placements"] == ["link_selection"]
+    assert link_selection["selection_width"] == 900
+    assert link_selection["selection_height"] == 850
+    assert link_selection["https://canvas.instructure.com/lti/launch_width"] == 900
+    assert link_selection["https://canvas.instructure.com/lti/launch_height"] == 850
+    assert link_selection["https://canvas.instructure.com/lti/visibility"] == "admins"
+    assert link_selection["custom_parameters"]["placement"] == "link_selection"
+    assert (
+        link_selection["custom_parameters"]["canvas_course_id"] == "$Canvas.course.id"
+    )
 
 
 def test_canvas_extract_course_id_rejects_placeholder():

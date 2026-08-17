@@ -1,8 +1,8 @@
 <script lang="ts">
-	import { Heading } from 'flowbite-svelte';
 	import LTIDeepLinkPicker from '$lib/components/LTIDeepLinkPicker.svelte';
 	import PingPongLogo from '$lib/components/PingPongLogo.svelte';
 	import * as api from '$lib/api';
+	import { DEEP_LINK_SUBTITLE, DEEP_LINK_TITLE } from '$lib/ltiDeepLink';
 	import { loading } from '$lib/stores/general';
 
 	export let data;
@@ -53,12 +53,18 @@
 	};
 </script>
 
-<div class="v-screen flex min-h-[calc(100dvh-3rem)] items-center justify-center py-8">
-	<div
-		class="flex max-h-[calc(100dvh-5rem)] w-11/12 max-w-3xl flex-col overflow-hidden rounded-4xl bg-white lg:w-9/12"
-	>
-		<header class="shrink-0 bg-blue-dark-40 px-8 py-6">
-			<Heading tag="h1" class="logo w-full text-center"><PingPongLogo size="full" /></Heading>
+<div class="lti-deep-link flex h-dvh items-center justify-center p-4 md:p-8 lti-compact:py-0">
+	<div class="flex max-h-full w-full max-w-3xl flex-col overflow-hidden rounded-4xl bg-white">
+		<header
+			class="flex shrink-0 items-center justify-center gap-4 bg-blue-dark-40 px-6 py-6 md:px-10 lti-compact:justify-between lti-compact:py-3"
+		>
+			<h1 class="logo shrink-0 lti-compact:[&_svg]:h-8 lti-compact:[&_svg]:w-auto">
+				<PingPongLogo size="full" />
+			</h1>
+			<div class="hidden min-w-0 flex-1 text-right lti-compact:block">
+				<p class="truncate text-sm font-semibold text-white">{DEEP_LINK_TITLE}</p>
+				<p class="truncate text-xs text-blue-light-40">{DEEP_LINK_SUBTITLE}</p>
+			</div>
 		</header>
 
 		<LTIDeepLinkPicker

@@ -13,6 +13,7 @@ from pingpong.lti.constants import (
     CANVAS_COURSE_ID_VARIABLE,
     CANVAS_COURSE_NAVIGATION_DEFAULT_ENABLED_KEY,
     CANVAS_EDITOR_BUTTON_PLACEMENT,
+    CANVAS_LINK_SELECTION_PLACEMENT,
     CANVAS_MESSAGE_PLACEMENT,
     CANVAS_TERM_NAME_VARIABLE,
     DEEP_LINK_MESSAGE_TYPE,
@@ -189,6 +190,15 @@ class CanvasPlatformHandler(LTIPlatformHandler):
                 status_code=400,
                 detail="Canvas editor button Deep Linking placement not supported by platform",
             )
+        if not any(
+            CANVAS_LINK_SELECTION_PLACEMENT in msg.get("placements", [])
+            for msg in message_types_supported
+            if msg.get("type") == DEEP_LINK_MESSAGE_TYPE
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail="Canvas link selection Deep Linking placement not supported by platform",
+            )
 
     def validate_registration_request(self, data: LTIRegisterRequest) -> None:
         # Canvas accepts all SSO configurations the generic validator already allows.
@@ -262,10 +272,34 @@ class CanvasPlatformHandler(LTIPlatformHandler):
             },
             "https://canvas.instructure.com/lti/visibility": "admins",
         }
+        link_selection_message = {
+            "type": DEEP_LINK_MESSAGE_TYPE,
+            "target_link_uri": target_link_uri,
+            "label": "PingPong",
+            "placements": ["link_selection"],
+            "selection_width": 900,
+            "selection_height": 850,
+            "https://canvas.instructure.com/lti/launch_width": 900,
+            "https://canvas.instructure.com/lti/launch_height": 850,
+            "custom_parameters": {
+                "placement": "link_selection",
+                CANVAS_COURSE_ID_KEY: CANVAS_CUSTOM_PARAM_DEFAULT_VALUES[
+                    CANVAS_COURSE_ID_KEY
+                ][0],
+                CANVAS_TERM_NAME_KEY: CANVAS_CUSTOM_PARAM_DEFAULT_VALUES[
+                    CANVAS_TERM_NAME_KEY
+                ][0],
+            },
+            "https://canvas.instructure.com/lti/visibility": "admins",
+        }
         logo_uri = payload.get("logo_uri")
         if isinstance(logo_uri, str) and logo_uri:
             editor_button_message["icon_uri"] = logo_uri
-        tool_config["messages"] = [course_navigation_message, editor_button_message]
+        tool_config["messages"] = [
+            course_navigation_message,
+            editor_button_message,
+            link_selection_message,
+        ]
 
         payload[LTI_TOOL_CONFIGURATION_KEY] = tool_config
         return payload

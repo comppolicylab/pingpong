@@ -26,6 +26,7 @@ MESSAGE_TYPE = "LtiResourceLinkRequest"
 DEEP_LINK_MESSAGE_TYPE = "LtiDeepLinkingRequest"
 CANVAS_MESSAGE_PLACEMENT = "https://canvas.instructure.com/lti/course_navigation"
 CANVAS_EDITOR_BUTTON_PLACEMENT = "https://canvas.instructure.com/lti/editor_button"
+CANVAS_LINK_SELECTION_PLACEMENT = "https://canvas.instructure.com/lti/link_selection"
 LTI_TOOL_CONFIGURATION_KEY = "https://purl.imsglobal.org/spec/lti-tool-configuration"
 
 CANVAS_ACCOUNT_NAME_KEY = "https://canvas.instructure.com/lti/account_name"

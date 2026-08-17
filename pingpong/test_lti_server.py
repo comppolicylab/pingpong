@@ -12,6 +12,7 @@ import pingpong.config as config_module
 from pingpong.lti import server as server_module
 from pingpong.lti.constants import (
     CANVAS_EDITOR_BUTTON_PLACEMENT,
+    CANVAS_LINK_SELECTION_PLACEMENT,
     CANVAS_MESSAGE_PLACEMENT,
     DEEP_LINK_MESSAGE_TYPE,
     LTI_CLAIM_MESSAGE_TYPE_KEY,
@@ -42,7 +43,10 @@ CANVAS_MESSAGES_SUPPORTED = [
     },
     {
         "type": DEEP_LINK_MESSAGE_TYPE,
-        "placements": [CANVAS_EDITOR_BUTTON_PLACEMENT],
+        "placements": [
+            CANVAS_EDITOR_BUTTON_PLACEMENT,
+            CANVAS_LINK_SELECTION_PLACEMENT,
+        ],
     },
 ]
 
