@@ -9,7 +9,9 @@ import pingpong.config as config_module
 from pingpong.lti.constants import (
     CANVAS_ACCOUNT_LTI_GUID_KEY,
     CANVAS_ACCOUNT_NAME_KEY,
+    CANVAS_EDITOR_BUTTON_PLACEMENT,
     CANVAS_MESSAGE_PLACEMENT,
+    DEEP_LINK_MESSAGE_TYPE,
     LTI_CLAIM_CONTEXT_KEY,
     LTI_CLAIM_NRPS_KEY,
     LTI_TOOL_CONFIGURATION_KEY,
@@ -133,12 +135,29 @@ def test_canvas_validate_platform_config_rejects_missing_course_navigation():
     assert "Canvas course navigation" in excinfo.value.detail
 
 
-def test_canvas_validate_platform_config_accepts_course_navigation():
+def test_canvas_validate_platform_config_accepts_required_placements():
     handler = CanvasPlatformHandler()
     handler.validate_platform_config(
         {},
-        [{"type": MESSAGE_TYPE, "placements": [CANVAS_MESSAGE_PLACEMENT]}],
+        [
+            {"type": MESSAGE_TYPE, "placements": [CANVAS_MESSAGE_PLACEMENT]},
+            {
+                "type": DEEP_LINK_MESSAGE_TYPE,
+                "placements": [CANVAS_EDITOR_BUTTON_PLACEMENT],
+            },
+        ],
     )
+
+
+def test_canvas_validate_platform_config_requires_editor_button():
+    handler = CanvasPlatformHandler()
+    with pytest.raises(HTTPException) as excinfo:
+        handler.validate_platform_config(
+            {},
+            [{"type": MESSAGE_TYPE, "placements": [CANVAS_MESSAGE_PLACEMENT]}],
+        )
+    assert excinfo.value.status_code == 400
+    assert "editor button Deep Linking" in excinfo.value.detail
 
 
 def test_canvas_extract_registration_fields():
@@ -179,14 +198,30 @@ def test_canvas_build_tool_registration_payload_includes_vendor_extensions():
     assert tool["https://canvas.instructure.com/lti/vendor"] == (
         "Computational Policy Lab"
     )
-    message = tool["messages"][0]
-    assert message["placements"] == ["course_navigation"]
-    assert message["custom_parameters"]["canvas_course_id"] == "$Canvas.course.id"
-    assert message["custom_parameters"]["canvas_term_name"] == "$Canvas.term.name"
+    course_navigation, editor_button = tool["messages"]
+    assert course_navigation["placements"] == ["course_navigation"]
     assert (
-        message["https://canvas.instructure.com/lti/course_navigation/default_enabled"]
+        course_navigation["custom_parameters"]["canvas_course_id"]
+        == "$Canvas.course.id"
+    )
+    assert (
+        course_navigation["custom_parameters"]["canvas_term_name"]
+        == "$Canvas.term.name"
+    )
+    assert (
+        course_navigation[
+            "https://canvas.instructure.com/lti/course_navigation/default_enabled"
+        ]
         is True
     )
+    assert editor_button["type"] == DEEP_LINK_MESSAGE_TYPE
+    assert editor_button["placements"] == ["editor_button"]
+    assert editor_button["selection_width"] == 1000
+    assert editor_button["selection_height"] == 1600
+    assert editor_button["https://canvas.instructure.com/lti/launch_width"] == 1000
+    assert editor_button["https://canvas.instructure.com/lti/launch_height"] == 1600
+    assert editor_button["https://canvas.instructure.com/lti/visibility"] == "admins"
+    assert editor_button["custom_parameters"]["canvas_course_id"] == "$Canvas.course.id"
 
 
 def test_canvas_extract_course_id_rejects_placeholder():

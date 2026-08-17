@@ -7,10 +7,12 @@
 	import * as api from '$lib/api';
 	import { loading } from '$lib/stores/general.js';
 	import { resolve } from '$app/paths';
+	import { ltiSetupQuery } from '$lib/ltiDeepLink';
 
 	export let data;
 
-	const { context, groups, ltiClassId, supportInfo } = data;
+	const { context, groups, ltiClassId, deepLinkSessionId, supportInfo } = data;
+	const setupQuery = () => ltiSetupQuery(ltiClassId, deepLinkSessionId);
 	const sortedGroups = [...groups].sort((a, b) =>
 		a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })
 	);
@@ -24,7 +26,7 @@
 
 	const goBack = () => {
 		// eslint-disable-next-line svelte/no-navigation-without-resolve
-		goto(`/lti/setup?lti_class_id=${ltiClassId}`);
+		goto(`/lti/setup?${setupQuery()}`);
 	};
 
 	const handleSubmit = async (event: SubmitEvent) => {
@@ -49,8 +51,11 @@
 				return;
 			}
 
-			// Redirect to the group's assistant page
-			await goto(resolve(`/group/${result.class_id}/assistant`));
+			if (deepLinkSessionId !== null) {
+				await goto(resolve(`/lti/deep-link?deep_link_session_id=${deepLinkSessionId}`));
+			} else {
+				await goto(resolve(`/group/${result.class_id}/assistant`));
+			}
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Failed to link group';
 		} finally {
@@ -95,7 +100,7 @@
 						<Button
 							type="button"
 							class="mt-4 rounded-full bg-orange text-white hover:bg-orange-dark"
-							onclick={() => goto(`/lti/setup/create?lti_class_id=${ltiClassId}`)}
+							onclick={() => goto(`/lti/setup/create?${setupQuery()}`)}
 						>
 							Create New Group
 						</Button>

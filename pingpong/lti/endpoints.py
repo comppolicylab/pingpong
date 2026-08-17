@@ -176,6 +176,24 @@ def generate_authorization_endpoint_url(
     )
 
 
+def generate_deep_link_return_url(
+    deep_link_return_url: str,
+    *,
+    validation_mode: LTIUrlValidationMode = "canonicalize",
+) -> str:
+    """Validate a platform-provided Deep Linking response destination."""
+    from pingpong.config import config
+
+    return _generate_lti_url(
+        unverified_url=deep_link_return_url,
+        security_config=(
+            config.lti.security.deep_link_return_endpoint if config.lti else None
+        ),
+        url_type="Deep Linking return endpoint",
+        validation_mode=validation_mode,
+    )
+
+
 def generate_registration_endpoint_url(
     registration_endpoint_url: str,
     *,

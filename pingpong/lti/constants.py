@@ -23,7 +23,9 @@ PLATFORM_CONFIGURATION_KEY = (
 )
 MESSAGE_TYPES_KEY = "messages_supported"
 MESSAGE_TYPE = "LtiResourceLinkRequest"
+DEEP_LINK_MESSAGE_TYPE = "LtiDeepLinkingRequest"
 CANVAS_MESSAGE_PLACEMENT = "https://canvas.instructure.com/lti/course_navigation"
+CANVAS_EDITOR_BUTTON_PLACEMENT = "https://canvas.instructure.com/lti/editor_button"
 LTI_TOOL_CONFIGURATION_KEY = "https://purl.imsglobal.org/spec/lti-tool-configuration"
 
 CANVAS_ACCOUNT_NAME_KEY = "https://canvas.instructure.com/lti/account_name"
@@ -31,6 +33,8 @@ CANVAS_ACCOUNT_LTI_GUID_KEY = "https://canvas.instructure.com/lti/account_lti_gu
 CANVAS_COURSE_NAVIGATION_DEFAULT_ENABLED_KEY = (
     "https://canvas.instructure.com/lti/course_navigation/default_enabled"
 )
+CANVAS_COURSE_ID_VARIABLE = "$Canvas.course.id"
+CANVAS_TERM_NAME_VARIABLE = "$Canvas.term.name"
 
 LTI_DEPLOYMENT_ID_CLAIM = "https://purl.imsglobal.org/spec/lti/claim/deployment_id"
 LTI_CLAIM_CUSTOM_KEY = "https://purl.imsglobal.org/spec/lti/claim/custom"
@@ -39,6 +43,15 @@ LTI_CLAIM_ROLES_KEY = "https://purl.imsglobal.org/spec/lti/claim/roles"
 LTI_CLAIM_RESOURCE_LINK_KEY = "https://purl.imsglobal.org/spec/lti/claim/resource_link"
 LTI_CLAIM_TOOL_PLATFORM_KEY = "https://purl.imsglobal.org/spec/lti/claim/tool_platform"
 LTI_CLAIM_NRPS_KEY = "https://purl.imsglobal.org/spec/lti-nrps/claim/namesroleservice"
+LTI_CLAIM_MESSAGE_TYPE_KEY = "https://purl.imsglobal.org/spec/lti/claim/message_type"
+LTI_CLAIM_VERSION_KEY = "https://purl.imsglobal.org/spec/lti/claim/version"
+LTI_DEEP_LINKING_SETTINGS_KEY = (
+    "https://purl.imsglobal.org/spec/lti-dl/claim/deep_linking_settings"
+)
+LTI_DEEP_LINKING_CONTENT_ITEMS_KEY = (
+    "https://purl.imsglobal.org/spec/lti-dl/claim/content_items"
+)
+LTI_DEEP_LINKING_DATA_KEY = "https://purl.imsglobal.org/spec/lti-dl/claim/data"
 
 LTI_CUSTOM_SSO_PROVIDER_ID_KEY = "sso_provider_id"
 LTI_CUSTOM_SSO_VALUE_KEY = "sso_value"
@@ -55,6 +68,9 @@ NRPS_CONTEXT_MEMBERSHIP_SCOPE = (
 LTI_REGISTRATION_SCOPE = "https://purl.imsglobal.org/spec/lti-reg/scope/registration"
 REQUIRED_SCOPES = [NRPS_CONTEXT_MEMBERSHIP_SCOPE]
 PINGPONG_LTI_TOOL_VERSION = "1.1"
+
+LTI_VERSION = "1.3.0"
+LTI_DEEP_LINK_SESSION_TTL_SECONDS = 30 * 60
 
 TOKEN_REQUEST_CONTENT_TYPE = "application/x-www-form-urlencoded"
 CLIENT_ASSERTION_TYPE = "urn:ietf:params:oauth:client-assertion-type:jwt-bearer"

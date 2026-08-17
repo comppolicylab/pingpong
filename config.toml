@@ -272,6 +272,15 @@ deny = ["/private/*"]
 # allow = ["/login/oauth2/*"]
 # deny = []
 
+[lti.security.deep_link_return_endpoint]
+# Optional overrides for browser POSTs that return a signed Deep Linking response.
+# [lti.security.deep_link_return_endpoint.hosts]
+# allow = ["*.instructure.com", "canvas.docker"]
+# deny = []
+[lti.security.deep_link_return_endpoint.paths]
+allow = ["/courses/*/external_content/*", "/api/lti/*"]
+deny = []
+
 [lti.security.registration_endpoint]
 # Optional overrides for dynamic registration endpoints.
 # allow_http_in_development = true

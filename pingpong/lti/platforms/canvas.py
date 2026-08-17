@@ -10,8 +10,12 @@ from pingpong.lti.claims import get_claim_object
 from pingpong.lti.constants import (
     CANVAS_ACCOUNT_LTI_GUID_KEY,
     CANVAS_ACCOUNT_NAME_KEY,
+    CANVAS_COURSE_ID_VARIABLE,
     CANVAS_COURSE_NAVIGATION_DEFAULT_ENABLED_KEY,
+    CANVAS_EDITOR_BUTTON_PLACEMENT,
     CANVAS_MESSAGE_PLACEMENT,
+    CANVAS_TERM_NAME_VARIABLE,
+    DEEP_LINK_MESSAGE_TYPE,
     LTI_CLAIM_CONTEXT_KEY,
     LTI_CUSTOM_SSO_PROVIDER_ID_KEY,
     LTI_CUSTOM_SSO_VALUE_KEY,
@@ -36,8 +40,8 @@ from pingpong.schemas import LMSPlatform
 CANVAS_COURSE_ID_KEY = "canvas_course_id"
 CANVAS_TERM_NAME_KEY = "canvas_term_name"
 CANVAS_CUSTOM_PARAM_DEFAULT_VALUES = {
-    CANVAS_COURSE_ID_KEY: ["$Canvas.course.id"],
-    CANVAS_TERM_NAME_KEY: ["$Canvas.term.name"],
+    CANVAS_COURSE_ID_KEY: [CANVAS_COURSE_ID_VARIABLE],
+    CANVAS_TERM_NAME_KEY: [CANVAS_TERM_NAME_VARIABLE],
 }
 
 
@@ -176,6 +180,15 @@ class CanvasPlatformHandler(LTIPlatformHandler):
                 status_code=400,
                 detail="Canvas course navigation placement not supported by platform",
             )
+        if not any(
+            CANVAS_EDITOR_BUTTON_PLACEMENT in msg.get("placements", [])
+            for msg in message_types_supported
+            if msg.get("type") == DEEP_LINK_MESSAGE_TYPE
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail="Canvas editor button Deep Linking placement not supported by platform",
+            )
 
     def validate_registration_request(self, data: LTIRegisterRequest) -> None:
         # Canvas accepts all SSO configurations the generic validator already allows.
@@ -211,26 +224,48 @@ class CanvasPlatformHandler(LTIPlatformHandler):
             "Computational Policy Lab"
         )
         target_link_uri = tool_config["target_link_uri"]
-        tool_config["messages"] = [
-            {
-                "type": MESSAGE_TYPE,
-                "target_link_uri": target_link_uri,
-                "label": "PingPong",
-                "placements": ["course_navigation"],
-                "custom_parameters": {
-                    "placement": "course_navigation",
-                    CANVAS_COURSE_ID_KEY: CANVAS_CUSTOM_PARAM_DEFAULT_VALUES[
-                        CANVAS_COURSE_ID_KEY
-                    ][0],
-                    CANVAS_TERM_NAME_KEY: CANVAS_CUSTOM_PARAM_DEFAULT_VALUES[
-                        CANVAS_TERM_NAME_KEY
-                    ][0],
-                },
-                "https://canvas.instructure.com/lti/display_type": "full_width_in_context",
-                CANVAS_COURSE_NAVIGATION_DEFAULT_ENABLED_KEY: data.show_in_course_navigation,
-                "https://canvas.instructure.com/lti/visibility": "members",
-            }
-        ]
+        course_navigation_message = {
+            "type": MESSAGE_TYPE,
+            "target_link_uri": target_link_uri,
+            "label": "PingPong",
+            "placements": ["course_navigation"],
+            "custom_parameters": {
+                "placement": "course_navigation",
+                CANVAS_COURSE_ID_KEY: CANVAS_CUSTOM_PARAM_DEFAULT_VALUES[
+                    CANVAS_COURSE_ID_KEY
+                ][0],
+                CANVAS_TERM_NAME_KEY: CANVAS_CUSTOM_PARAM_DEFAULT_VALUES[
+                    CANVAS_TERM_NAME_KEY
+                ][0],
+            },
+            "https://canvas.instructure.com/lti/display_type": "full_width_in_context",
+            CANVAS_COURSE_NAVIGATION_DEFAULT_ENABLED_KEY: data.show_in_course_navigation,
+            "https://canvas.instructure.com/lti/visibility": "members",
+        }
+        editor_button_message = {
+            "type": DEEP_LINK_MESSAGE_TYPE,
+            "target_link_uri": target_link_uri,
+            "label": "PingPong",
+            "placements": ["editor_button"],
+            "selection_width": 1000,
+            "selection_height": 1600,
+            "https://canvas.instructure.com/lti/launch_width": 1000,
+            "https://canvas.instructure.com/lti/launch_height": 1600,
+            "custom_parameters": {
+                "placement": "editor_button",
+                CANVAS_COURSE_ID_KEY: CANVAS_CUSTOM_PARAM_DEFAULT_VALUES[
+                    CANVAS_COURSE_ID_KEY
+                ][0],
+                CANVAS_TERM_NAME_KEY: CANVAS_CUSTOM_PARAM_DEFAULT_VALUES[
+                    CANVAS_TERM_NAME_KEY
+                ][0],
+            },
+            "https://canvas.instructure.com/lti/visibility": "admins",
+        }
+        logo_uri = payload.get("logo_uri")
+        if isinstance(logo_uri, str) and logo_uri:
+            editor_button_message["icon_uri"] = logo_uri
+        tool_config["messages"] = [course_navigation_message, editor_button_message]
 
         payload[LTI_TOOL_CONFIGURATION_KEY] = tool_config
         return payload
