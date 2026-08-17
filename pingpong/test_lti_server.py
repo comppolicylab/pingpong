@@ -5461,6 +5461,39 @@ async def test_resource_launch_unavailable_when_assistant_is_not_published(monke
 
 
 @pytest.mark.asyncio
+async def test_resource_launch_restores_simple_view_for_published_assistant(
+    monkeypatch,
+):
+    assistant = SimpleNamespace(
+        id=77, class_id=12, published=datetime.now(timezone.utc)
+    )
+    monkeypatch.setattr(
+        server_module.Assistant,
+        "get_by_id",
+        lambda db, assistant_id: _async_return(assistant),
+    )
+
+    result = await server_module._resource_launch_url(
+        FakeDB(),
+        class_id=12,
+        launch_custom_params={
+            "pingpong_destination": "assistant",
+            "pingpong_assistant_id": "77",
+            "pingpong_simple_view": "1",
+        },
+        user_token="session-token",
+    )
+
+    parsed = URL(result)
+    assert parsed.path == "/group/12"
+    assert parsed.query == {
+        "lti_session": "session-token",
+        "assistant": "77",
+        "view": "simple",
+    }
+
+
+@pytest.mark.asyncio
 async def test_complete_lti_deep_link_signs_one_published_assistant(monkeypatch):
     now = datetime(2026, 8, 16, 12, 0, tzinfo=timezone.utc)
     oidc_session = SimpleNamespace(extra=None)
@@ -5514,7 +5547,9 @@ async def test_complete_lti_deep_link_signs_one_published_assistant(monkeypatch)
     result = await server_module.complete_lti_deep_link(
         request,
         9,
-        LTIDeepLinkCompleteRequest(destination="assistant", assistant_id=77),
+        LTIDeepLinkCompleteRequest(
+            destination="assistant", assistant_id=77, simple_view=True
+        ),
     )
 
     assert result.deep_link_return_url == state["deep_link_return_url"]
@@ -5526,6 +5561,7 @@ async def test_complete_lti_deep_link_signs_one_published_assistant(monkeypatch)
     assert content_item["custom"]["canvas_course_id"] == "$Canvas.course.id"
     assert content_item["custom"]["canvas_term_name"] == "$Canvas.term.name"
     assert content_item["custom"]["pingpong_assistant_id"] == "77"
+    assert content_item["custom"]["pingpong_simple_view"] == "1"
     assert content_item["iframe"] == {
         "src": server_module.config.url("/api/v1/lti/launch"),
         "width": 1000,
@@ -5533,3 +5569,30 @@ async def test_complete_lti_deep_link_signs_one_published_assistant(monkeypatch)
     }
     assert load_calls == [True]
     assert json.loads(oidc_session.extra)["completed_at"] == now.isoformat()
+
+
+@pytest.mark.asyncio
+async def test_complete_lti_deep_link_rejects_simple_group_view(monkeypatch):
+    async def _load_state(request, session_id, *, for_update=False):
+        return (
+            SimpleNamespace(extra=None),
+            {},
+            _make_registration(),
+            SimpleNamespace(),
+            SimpleNamespace(id=12, name="Biology"),
+        )
+
+    monkeypatch.setattr(server_module, "_load_deep_link_state", _load_state)
+    request = FakeRequest(
+        state=_make_request_state(session_user=SimpleNamespace(id=42))
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await server_module.complete_lti_deep_link(
+            request,
+            9,
+            LTIDeepLinkCompleteRequest(destination="group", simple_view=True),
+        )
+
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.detail == "Simple view requires an assistant selection"

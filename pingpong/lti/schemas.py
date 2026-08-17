@@ -122,6 +122,7 @@ class LTIDeepLinkContext(BaseModel):
 class LTIDeepLinkCompleteRequest(BaseModel):
     destination: Literal["group", "assistant", "cancel"]
     assistant_id: int | None = None
+    simple_view: bool = False
 
 
 class LTIDeepLinkCompleteResponse(BaseModel):

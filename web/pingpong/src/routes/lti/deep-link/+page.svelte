@@ -25,7 +25,8 @@
 
 	const complete = async (
 		destination: api.LTIDeepLinkDestination,
-		assistantId: number | null = null
+		assistantId: number | null = null,
+		simpleView = false
 	) => {
 		errorMessage = '';
 		$loading = true;
@@ -35,7 +36,8 @@
 					fetch,
 					deepLinkSessionId,
 					destination,
-					destination === 'assistant' ? assistantId : null
+					destination === 'assistant' ? assistantId : null,
+					destination === 'assistant' && simpleView
 				)
 				.then(api.expandResponse);
 			if (result.error || !result.data) {
