@@ -7,25 +7,24 @@ const fallbackSupportInfo = {
 	can_post: false
 };
 
+const parsePositiveInteger = (value: string | null): number | null => {
+	if (!value || !/^[1-9]\d*$/.test(value)) return null;
+	const parsed = Number(value);
+	return Number.isSafeInteger(parsed) ? parsed : null;
+};
+
 export const load: LayoutLoad = async ({ fetch, url }) => {
 	const ltiClassIdParam = url.searchParams.get('lti_class_id');
 	const deepLinkSessionIdParam = url.searchParams.get('deep_link_session_id');
 
-	if (!ltiClassIdParam) {
-		redirect(302, '/');
-	}
-
-	const ltiClassId = parseInt(ltiClassIdParam, 10);
-	if (isNaN(ltiClassId)) {
+	const ltiClassId = parsePositiveInteger(ltiClassIdParam);
+	if (ltiClassId === null) {
 		redirect(302, '/');
 	}
 	const deepLinkSessionId = deepLinkSessionIdParam
-		? Number.parseInt(deepLinkSessionIdParam, 10)
+		? parsePositiveInteger(deepLinkSessionIdParam)
 		: null;
-	if (
-		deepLinkSessionId !== null &&
-		(!Number.isInteger(deepLinkSessionId) || deepLinkSessionId <= 0)
-	) {
+	if (deepLinkSessionIdParam && deepLinkSessionId === null) {
 		redirect(302, '/');
 	}
 

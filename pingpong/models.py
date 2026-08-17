@@ -11184,6 +11184,18 @@ class LTIOIDCSession(Base):
         return await session.scalar(stmt)
 
     @classmethod
+    async def get_by_id_for_update(
+        cls, session: AsyncSession, id_: int
+    ) -> "LTIOIDCSession | None":
+        """Load and lock a session until the current transaction completes."""
+        stmt = (
+            select(LTIOIDCSession)
+            .where(LTIOIDCSession.id == int(id_))
+            .with_for_update()
+        )
+        return await session.scalar(stmt)
+
+    @classmethod
     async def validate_and_consume(
         cls,
         session: AsyncSession,

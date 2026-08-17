@@ -9,6 +9,7 @@ import pingpong.config as config_module
 from pingpong.lti.constants import (
     CANVAS_ACCOUNT_LTI_GUID_KEY,
     CANVAS_ACCOUNT_NAME_KEY,
+    CANVAS_EDITOR_BUTTON_PLACEMENT,
     CANVAS_MESSAGE_PLACEMENT,
     DEEP_LINK_MESSAGE_TYPE,
     LTI_CLAIM_CONTEXT_KEY,
@@ -134,14 +135,29 @@ def test_canvas_validate_platform_config_rejects_missing_course_navigation():
     assert "Canvas course navigation" in excinfo.value.detail
 
 
-def test_canvas_validate_platform_config_accepts_course_navigation():
+def test_canvas_validate_platform_config_accepts_required_placements():
     handler = CanvasPlatformHandler()
     handler.validate_platform_config(
         {},
         [
             {"type": MESSAGE_TYPE, "placements": [CANVAS_MESSAGE_PLACEMENT]},
+            {
+                "type": DEEP_LINK_MESSAGE_TYPE,
+                "placements": [CANVAS_EDITOR_BUTTON_PLACEMENT],
+            },
         ],
     )
+
+
+def test_canvas_validate_platform_config_requires_editor_button():
+    handler = CanvasPlatformHandler()
+    with pytest.raises(HTTPException) as excinfo:
+        handler.validate_platform_config(
+            {},
+            [{"type": MESSAGE_TYPE, "placements": [CANVAS_MESSAGE_PLACEMENT]}],
+        )
+    assert excinfo.value.status_code == 400
+    assert "editor button Deep Linking" in excinfo.value.detail
 
 
 def test_canvas_extract_registration_fields():

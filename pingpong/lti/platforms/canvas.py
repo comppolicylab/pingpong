@@ -12,7 +12,9 @@ from pingpong.lti.constants import (
     CANVAS_ACCOUNT_NAME_KEY,
     CANVAS_COURSE_ID_VARIABLE,
     CANVAS_COURSE_NAVIGATION_DEFAULT_ENABLED_KEY,
+    CANVAS_EDITOR_BUTTON_PLACEMENT,
     CANVAS_MESSAGE_PLACEMENT,
+    CANVAS_TERM_NAME_VARIABLE,
     DEEP_LINK_MESSAGE_TYPE,
     LTI_CLAIM_CONTEXT_KEY,
     LTI_CUSTOM_SSO_PROVIDER_ID_KEY,
@@ -39,7 +41,7 @@ CANVAS_COURSE_ID_KEY = "canvas_course_id"
 CANVAS_TERM_NAME_KEY = "canvas_term_name"
 CANVAS_CUSTOM_PARAM_DEFAULT_VALUES = {
     CANVAS_COURSE_ID_KEY: [CANVAS_COURSE_ID_VARIABLE],
-    CANVAS_TERM_NAME_KEY: ["$Canvas.term.name"],
+    CANVAS_TERM_NAME_KEY: [CANVAS_TERM_NAME_VARIABLE],
 }
 
 
@@ -177,6 +179,15 @@ class CanvasPlatformHandler(LTIPlatformHandler):
             raise HTTPException(
                 status_code=400,
                 detail="Canvas course navigation placement not supported by platform",
+            )
+        if not any(
+            CANVAS_EDITOR_BUTTON_PLACEMENT in msg.get("placements", [])
+            for msg in message_types_supported
+            if msg.get("type") == DEEP_LINK_MESSAGE_TYPE
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail="Canvas editor button Deep Linking placement not supported by platform",
             )
 
     def validate_registration_request(self, data: LTIRegisterRequest) -> None:

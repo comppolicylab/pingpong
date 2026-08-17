@@ -1,10 +1,9 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import type { LTIDeepLinkAssistant } from './api';
 import {
 	ambiguousAssistantIds,
 	assistantUpdatedLabel,
-	deepLinkContinuation,
 	filterDeepLinkAssistants,
 	interactionModeLabel
 } from './ltiDeepLink';
@@ -65,15 +64,16 @@ describe('Canvas Deep Linking picker helpers', () => {
 	});
 
 	it('labels freshness only when the assistant has a timestamp', () => {
-		expect(assistantUpdatedLabel(null)).toBeNull();
-		expect(assistantUpdatedLabel('not a date')).toBeNull();
-		expect(assistantUpdatedLabel(new Date(Date.now() - 3 * 86_400_000).toISOString())).toBe(
-			'Updated 3 days ago'
-		);
-	});
-
-	it('only creates a setup continuation for Deep Linking launches', () => {
-		expect(deepLinkContinuation(9)).toBe('/lti/deep-link?deep_link_session_id=9');
-		expect(deepLinkContinuation(null)).toBeNull();
+		vi.useFakeTimers();
+		try {
+			vi.setSystemTime(new Date('2026-06-15T12:00:00Z'));
+			expect(assistantUpdatedLabel(null)).toBeNull();
+			expect(assistantUpdatedLabel('not a date')).toBeNull();
+			expect(assistantUpdatedLabel(new Date(Date.now() - 3 * 86_400_000).toISOString())).toBe(
+				'Updated 3 days ago'
+			);
+		} finally {
+			vi.useRealTimers();
+		}
 	});
 });

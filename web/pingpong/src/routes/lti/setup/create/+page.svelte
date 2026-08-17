@@ -7,13 +7,12 @@
 	import * as api from '$lib/api';
 	import { loading } from '$lib/stores/general.js';
 	import { resolve } from '$app/paths';
-	import { deepLinkContinuation } from '$lib/ltiDeepLink';
+	import { ltiSetupQuery } from '$lib/ltiDeepLink';
 
 	export let data;
 
 	const { context, ltiClassId, deepLinkSessionId, supportInfo } = data;
-	const setupQuery = () =>
-		`lti_class_id=${ltiClassId}${deepLinkSessionId ? `&deep_link_session_id=${deepLinkSessionId}` : ''}`;
+	const setupQuery = () => ltiSetupQuery(ltiClassId, deepLinkSessionId);
 
 	// Pre-fill form with LTI context data
 	// Name: "Course Name"
@@ -62,8 +61,11 @@
 				return;
 			}
 
-			const continuation = deepLinkContinuation(deepLinkSessionId);
-			await goto(continuation || resolve(`/group/${result.class_id}/assistant`));
+			if (deepLinkSessionId !== null) {
+				await goto(resolve(`/lti/deep-link?deep_link_session_id=${deepLinkSessionId}`));
+			} else {
+				await goto(resolve(`/group/${result.class_id}/assistant`));
+			}
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Failed to create group';
 		} finally {

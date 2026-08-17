@@ -8,9 +8,19 @@ export const load: PageLoad = async ({ fetch, url }) => {
 	const deepLinkSessionId = Number.parseInt(rawSessionId, 10);
 	if (!Number.isInteger(deepLinkSessionId) || deepLinkSessionId <= 0) redirect(302, '/');
 
-	const result = await api.getLTIDeepLinkContext(fetch, deepLinkSessionId).then(api.expandResponse);
+	const result = await api
+		.getLTIDeepLinkContext(fetch, deepLinkSessionId)
+		.then(api.expandResponse)
+		.catch((requestError: unknown) => ({
+			$status: 503,
+			error: {
+				detail: requestError instanceof Error ? requestError.message : 'An unknown error occurred.'
+			},
+			data: null
+		}));
 	if (result.error || !result.data) {
-		error(result.$status, result.error?.detail || 'Unable to load the Canvas selection.');
+		const status = result.$status >= 400 && result.$status <= 599 ? result.$status : 500;
+		error(status, result.error?.detail || 'Unable to load the Canvas selection.');
 	}
 	return { context: result.data, deepLinkSessionId };
 };

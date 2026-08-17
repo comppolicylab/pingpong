@@ -54,6 +54,17 @@
 		searchInput?.focus();
 	};
 
+	const updateSearch = (event: Event) => {
+		const nextSearch = (event.currentTarget as HTMLInputElement).value;
+		search = nextSearch;
+		if (
+			selectedAssistantId !== null &&
+			!filterDeepLinkAssistants(assistants, nextSearch).some((a) => a.id === selectedAssistantId)
+		) {
+			selection = 'group';
+		}
+	};
+
 	$: assistants = context.assistants;
 	$: ambiguous = ambiguousAssistantIds(assistants);
 	$: filtered = filterDeepLinkAssistants(assistants, search);
@@ -63,7 +74,7 @@
 	$: selectedAssistant = assistants.find((a) => a.id === selectedAssistantId) || null;
 	let destination: api.LTIDeepLinkDestination = 'group';
 	$: destination = selectedAssistant ? 'assistant' : 'group';
-	$: showSearch = assistants.length > 4 || true;
+	$: showSearch = assistants.length > 4;
 	$: trimmedSearch = search.trim();
 </script>
 
@@ -113,7 +124,8 @@
 					/>
 					<input
 						bind:this={searchInput}
-						bind:value={search}
+						value={search}
+						oninput={updateSearch}
 						type="search"
 						class="w-full rounded-xl border-gray-300 py-2.5 pl-9 text-sm placeholder-gray-400 focus:border-orange focus:ring-orange"
 						placeholder="Search by name, description, creator, or type"

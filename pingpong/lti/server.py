@@ -11,6 +11,7 @@ import aiohttp
 import jwt
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Depends
 from fastapi.responses import RedirectResponse
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from pingpong.animal_hash import name as user_display_name
 from pingpong.auth import encode_session_token
@@ -31,6 +32,7 @@ from pingpong.lti.endpoints import (
 from pingpong.lti.constants import (
     AUTHORIZATION_ENDPOINT_KEY,
     CANVAS_COURSE_ID_VARIABLE,
+    CANVAS_TERM_NAME_VARIABLE,
     DEEP_LINK_MESSAGE_TYPE,
     ISSUER_KEY,
     KEYS_ENDPOINT_KEY,
@@ -907,7 +909,7 @@ def _course_resource_link_id(
 
 
 async def _resource_launch_url(
-    db,
+    db: AsyncSession,
     *,
     class_id: int,
     launch_custom_params: dict[str, Any],
@@ -921,7 +923,7 @@ async def _resource_launch_url(
             try:
                 assistant_id = int(raw_assistant_id)
             except ValueError:
-                pass
+                assistant_id = 0
         assistant = await Assistant.get_by_id(db, assistant_id)
         if (
             assistant is None
@@ -937,7 +939,7 @@ async def _resource_launch_url(
 
 
 async def _post_auth_launch_url(
-    db,
+    db: AsyncSession,
     *,
     class_id: int,
     launch_custom_params: dict[str, Any],
@@ -1885,11 +1887,16 @@ async def link_lti_group(
 
 
 async def _load_deep_link_state(
-    request: StateRequest, deep_link_session_id: int
+    request: StateRequest, deep_link_session_id: int, *, for_update: bool = False
 ) -> tuple[LTIOIDCSession, dict[str, Any], LTIRegistration, LTIClass, Class]:
-    oidc_session = await LTIOIDCSession.get_by_id(
-        request.state["db"], deep_link_session_id
-    )
+    if for_update:
+        oidc_session = await LTIOIDCSession.get_by_id_for_update(
+            request.state["db"], deep_link_session_id
+        )
+    else:
+        oidc_session = await LTIOIDCSession.get_by_id(
+            request.state["db"], deep_link_session_id
+        )
     now = get_now_fn(request)()
     if oidc_session is None or oidc_session.expires_at <= now:
         raise HTTPException(status_code=410, detail="Deep Linking session expired")
@@ -1948,12 +1955,22 @@ async def get_lti_deep_link_context(
     assistants = await Assistant.get_published_for_lti_picker(
         request.state["db"], class_.id
     )
-    creator_ids = sorted({assistant.creator_id for assistant in assistants})
-    creator_is_supervisor = await request.state["authz"].check(
-        [
-            (f"user:{creator_id}", "supervisor", f"class:{class_.id}")
-            for creator_id in creator_ids
-        ]
+    creator_ids = sorted(
+        {
+            assistant.creator_id
+            for assistant in assistants
+            if assistant.creator_id is not None
+        }
+    )
+    creator_is_supervisor = (
+        await request.state["authz"].check(
+            [
+                (f"user:{creator_id}", "supervisor", f"class:{class_.id}")
+                for creator_id in creator_ids
+            ]
+        )
+        if creator_ids
+        else []
     )
     endorsed_creator_ids = {
         creator_id
@@ -1969,7 +1986,10 @@ async def get_lti_deep_link_context(
             name=assistant.name,
             description=assistant.description,
             interaction_mode=assistant.interaction_mode,
-            creator_name=user_display_name(assistant.creator) or "Unknown user",
+            creator_name=(
+                user_display_name(assistant.creator) if assistant.creator else None
+            )
+            or "Unknown user",
             avatar_url=(
                 f"/api/v1/class/{assistant.class_id}/assistant/{assistant.id}/avatar"
                 f"?v={assistant.avatar_file_id}"
@@ -2008,7 +2028,7 @@ async def complete_lti_deep_link(
     body: LTIDeepLinkCompleteRequest,
 ) -> LTIDeepLinkCompleteResponse:
     oidc_session, state, registration, _, class_ = await _load_deep_link_state(
-        request, deep_link_session_id
+        request, deep_link_session_id, for_update=True
     )
     if state.get("completed_at"):
         raise HTTPException(status_code=409, detail="Deep Linking session completed")
@@ -2032,6 +2052,7 @@ async def complete_lti_deep_link(
                 },
                 "custom": {
                     "canvas_course_id": CANVAS_COURSE_ID_VARIABLE,
+                    "canvas_term_name": CANVAS_TERM_NAME_VARIABLE,
                     "pingpong_destination": "group",
                     "pingpong_resource_version": "1",
                 },
@@ -2063,6 +2084,7 @@ async def complete_lti_deep_link(
                 },
                 "custom": {
                     "canvas_course_id": CANVAS_COURSE_ID_VARIABLE,
+                    "canvas_term_name": CANVAS_TERM_NAME_VARIABLE,
                     "pingpong_destination": "assistant",
                     "pingpong_assistant_id": str(assistant.id),
                     "pingpong_resource_version": "1",
@@ -2112,8 +2134,3 @@ async def complete_lti_deep_link(
         deep_link_return_url=state["deep_link_return_url"],
         jwt=response_jwt,
     )
-    (LTI_CLAIM_MESSAGE_TYPE_KEY,)
-    (LTI_DEEP_LINKING_CONTENT_ITEMS_KEY,)
-    (LTI_DEEP_LINKING_DATA_KEY,)
-    (LTI_DEEP_LINKING_SETTINGS_KEY,)
-    (LTI_DEEP_LINK_SESSION_TTL_SECONDS,)

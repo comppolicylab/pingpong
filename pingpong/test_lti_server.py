@@ -11,6 +11,7 @@ from yarl import URL
 import pingpong.config as config_module
 from pingpong.lti import server as server_module
 from pingpong.lti.constants import (
+    CANVAS_EDITOR_BUTTON_PLACEMENT,
     CANVAS_MESSAGE_PLACEMENT,
     DEEP_LINK_MESSAGE_TYPE,
     LTI_CLAIM_MESSAGE_TYPE_KEY,
@@ -32,6 +33,18 @@ from pingpong.schemas import (
     LTIRegistrationReviewStatus,
     LTIStatus,
 )
+
+
+CANVAS_MESSAGES_SUPPORTED = [
+    {
+        "type": "LtiResourceLinkRequest",
+        "placements": [CANVAS_MESSAGE_PLACEMENT],
+    },
+    {
+        "type": DEEP_LINK_MESSAGE_TYPE,
+        "placements": [CANVAS_EDITOR_BUTTON_PLACEMENT],
+    },
+]
 
 
 class FakeResponse:
@@ -901,12 +914,7 @@ async def test_get_lti_register_setup_harvard_lxp(monkeypatch):
 async def test_register_lti_instance_success(monkeypatch, reinstall):
     platform_config = {
         "product_family_code": "canvas",
-        "messages_supported": [
-            {
-                "type": "LtiResourceLinkRequest",
-                "placements": [CANVAS_MESSAGE_PLACEMENT],
-            }
-        ],
+        "messages_supported": CANVAS_MESSAGES_SUPPORTED,
     }
     openid_payload = {
         "issuer": "issuer",
@@ -1010,12 +1018,7 @@ async def test_register_lti_instance_rejects_non_string_registration_endpoint(
 ):
     platform_config = {
         "product_family_code": "canvas",
-        "messages_supported": [
-            {
-                "type": "LtiResourceLinkRequest",
-                "placements": [CANVAS_MESSAGE_PLACEMENT],
-            }
-        ],
+        "messages_supported": CANVAS_MESSAGES_SUPPORTED,
     }
     openid_payload = {
         "issuer": "issuer",
@@ -1180,12 +1183,7 @@ async def test_register_lti_instance_rejects_invalid_authorization_endpoint(
 ):
     platform_config = {
         "product_family_code": "canvas",
-        "messages_supported": [
-            {
-                "type": "LtiResourceLinkRequest",
-                "placements": [CANVAS_MESSAGE_PLACEMENT],
-            }
-        ],
+        "messages_supported": CANVAS_MESSAGES_SUPPORTED,
     }
     openid_payload = {
         "issuer": "issuer",
@@ -1235,12 +1233,7 @@ async def test_register_lti_instance_does_not_forward_auth_to_openid_redirect(
 ):
     platform_config = {
         "product_family_code": "canvas",
-        "messages_supported": [
-            {
-                "type": "LtiResourceLinkRequest",
-                "placements": [CANVAS_MESSAGE_PLACEMENT],
-            }
-        ],
+        "messages_supported": CANVAS_MESSAGES_SUPPORTED,
     }
     openid_payload = {
         "issuer": "issuer",
@@ -1333,12 +1326,7 @@ async def test_register_lti_instance_preserves_auth_on_same_origin_openid_redire
 ):
     platform_config = {
         "product_family_code": "canvas",
-        "messages_supported": [
-            {
-                "type": "LtiResourceLinkRequest",
-                "placements": [CANVAS_MESSAGE_PLACEMENT],
-            }
-        ],
+        "messages_supported": CANVAS_MESSAGES_SUPPORTED,
     }
     openid_payload = {
         "issuer": "issuer",
@@ -1433,12 +1421,7 @@ async def test_register_lti_instance_returns_bad_gateway_for_invalid_registratio
 
     platform_config = {
         "product_family_code": "canvas",
-        "messages_supported": [
-            {
-                "type": "LtiResourceLinkRequest",
-                "placements": [CANVAS_MESSAGE_PLACEMENT],
-            }
-        ],
+        "messages_supported": CANVAS_MESSAGES_SUPPORTED,
     }
     openid_payload = {
         "issuer": "issuer",
@@ -1491,12 +1474,7 @@ async def test_register_lti_instance_converts_post_302_redirect_to_get(
 ):
     platform_config = {
         "product_family_code": "canvas",
-        "messages_supported": [
-            {
-                "type": "LtiResourceLinkRequest",
-                "placements": [CANVAS_MESSAGE_PLACEMENT],
-            }
-        ],
+        "messages_supported": CANVAS_MESSAGES_SUPPORTED,
     }
     openid_payload = {
         "issuer": "issuer",
@@ -1647,12 +1625,7 @@ async def test_register_lti_instance_rejects_registration_redirect_to_unallowlis
                 "subject_types_supported": ["public"],
                 server_module.PLATFORM_CONFIGURATION_KEY: {
                     "product_family_code": "canvas",
-                    "messages_supported": [
-                        {
-                            "type": "LtiResourceLinkRequest",
-                            "placements": [CANVAS_MESSAGE_PLACEMENT],
-                        }
-                    ],
+                    "messages_supported": CANVAS_MESSAGES_SUPPORTED,
                 },
             },
             post_responses=[
@@ -5506,12 +5479,16 @@ async def test_complete_lti_deep_link_signs_one_published_assistant(monkeypatch)
         name="Study Coach",
         description="Helps students review.",
     )
+    load_calls = []
+
+    async def _load_state(request, session_id, *, for_update=False):
+        load_calls.append(for_update)
+        return oidc_session, state, registration, SimpleNamespace(), class_
+
     monkeypatch.setattr(
         server_module,
         "_load_deep_link_state",
-        lambda request, session_id: _async_return(
-            (oidc_session, state, registration, SimpleNamespace(), class_)
-        ),
+        _load_state,
     )
     monkeypatch.setattr(
         server_module.Assistant,
@@ -5547,10 +5524,12 @@ async def test_complete_lti_deep_link_signs_one_published_assistant(monkeypatch)
     content_item = signed_claims[LTI_DEEP_LINKING_CONTENT_ITEMS_KEY][0]
     assert content_item["type"] == "ltiResourceLink"
     assert content_item["custom"]["canvas_course_id"] == "$Canvas.course.id"
+    assert content_item["custom"]["canvas_term_name"] == "$Canvas.term.name"
     assert content_item["custom"]["pingpong_assistant_id"] == "77"
     assert content_item["iframe"] == {
         "src": server_module.config.url("/api/v1/lti/launch"),
         "width": 1000,
         "height": 800,
     }
+    assert load_calls == [True]
     assert json.loads(oidc_session.extra)["completed_at"] == now.isoformat()

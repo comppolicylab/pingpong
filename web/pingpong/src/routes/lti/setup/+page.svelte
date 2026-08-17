@@ -4,12 +4,12 @@
 	import PingPongLogo from '$lib/components/PingPongLogo.svelte';
 	import Sanitize from '$lib/components/Sanitize.svelte';
 	import { PlusOutline, LinkOutline } from 'flowbite-svelte-icons';
+	import { ltiSetupQuery } from '$lib/ltiDeepLink';
 
 	export let data;
 
 	const { context, ltiClassId, deepLinkSessionId, supportInfo } = data;
-	const setupQuery = () =>
-		`lti_class_id=${ltiClassId}${deepLinkSessionId ? `&deep_link_session_id=${deepLinkSessionId}` : ''}`;
+	const setupQuery = () => ltiSetupQuery(ltiClassId, deepLinkSessionId);
 
 	// Build display name: prefer course_name, then course_code, else generic
 	// Previously, we used "Course Code: Course Name", but in many cases the

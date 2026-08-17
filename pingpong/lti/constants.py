@@ -34,6 +34,7 @@ CANVAS_COURSE_NAVIGATION_DEFAULT_ENABLED_KEY = (
     "https://canvas.instructure.com/lti/course_navigation/default_enabled"
 )
 CANVAS_COURSE_ID_VARIABLE = "$Canvas.course.id"
+CANVAS_TERM_NAME_VARIABLE = "$Canvas.term.name"
 
 LTI_DEPLOYMENT_ID_CLAIM = "https://purl.imsglobal.org/spec/lti/claim/deployment_id"
 LTI_CLAIM_CUSTOM_KEY = "https://purl.imsglobal.org/spec/lti/claim/custom"
