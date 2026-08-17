@@ -1,7 +1,8 @@
+from datetime import datetime
 from typing import Literal
 from pydantic import BaseModel, Field
 
-from pingpong.schemas import LMSPlatform
+from pingpong.schemas import InteractionMode, LMSPlatform
 
 
 class LTIPublicSSOProvider(BaseModel):
@@ -99,6 +100,33 @@ class LTISetupLinkRequest(BaseModel):
 
 class LTISetupLinkResponse(BaseModel):
     class_id: int
+
+
+class LTIDeepLinkAssistant(BaseModel):
+    id: int
+    name: str
+    description: str | None
+    interaction_mode: InteractionMode
+    creator_name: str
+    avatar_url: str | None
+    endorsed: bool
+    updated: datetime | None
+
+
+class LTIDeepLinkContext(BaseModel):
+    class_id: int
+    group_name: str
+    assistants: list[LTIDeepLinkAssistant]
+
+
+class LTIDeepLinkCompleteRequest(BaseModel):
+    destination: Literal["group", "assistant", "cancel"]
+    assistant_id: int | None = None
+
+
+class LTIDeepLinkCompleteResponse(BaseModel):
+    deep_link_return_url: str
+    jwt: str
 
 
 class LTILaunchCourseMetadata(BaseModel):

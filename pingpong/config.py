@@ -363,6 +363,7 @@ class LTISecuritySettings(BaseSettings):
     paths: LTIAllowDenySettings = Field(LTIAllowDenySettings())
 
     authorization_endpoint: LTIUrlSecuritySettings = Field(LTIUrlSecuritySettings())
+    deep_link_return_endpoint: LTIUrlSecuritySettings = Field(LTIUrlSecuritySettings())
     names_and_role_endpoint: LTIUrlSecuritySettings = Field(LTIUrlSecuritySettings())
     jwks_uri: LTIUrlSecuritySettings = Field(LTIUrlSecuritySettings())
     registration_endpoint: LTIUrlSecuritySettings = Field(LTIUrlSecuritySettings())

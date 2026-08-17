@@ -1149,6 +1149,30 @@ export type LTISetupLinkResponse = {
 	class_id: number;
 };
 
+export type LTIDeepLinkAssistant = {
+	id: number;
+	name: string;
+	description: string | null;
+	interaction_mode: InteractionMode;
+	creator_name: string;
+	avatar_url: string | null;
+	endorsed: boolean;
+	updated: string | null;
+};
+
+export type LTIDeepLinkContext = {
+	class_id: number;
+	group_name: string;
+	assistants: LTIDeepLinkAssistant[];
+};
+
+export type LTIDeepLinkDestination = 'group' | 'assistant' | 'cancel';
+
+export type LTIDeepLinkCompleteResponse = {
+	deep_link_return_url: string;
+	jwt: string;
+};
+
 export const getLTISetupContext = async (f: Fetcher, ltiClassId: number) => {
 	return await GET<never, LTISetupContext>(f, `lti/setup/${ltiClassId}`);
 };
@@ -1175,6 +1199,25 @@ export const linkLTIGroup = async (f: Fetcher, ltiClassId: number, data: LTISetu
 		`lti/setup/${ltiClassId}/link`,
 		data
 	);
+};
+
+export const getLTIDeepLinkContext = async (f: Fetcher, deepLinkSessionId: number) => {
+	return await GET<never, LTIDeepLinkContext>(f, `lti/deep-link/${deepLinkSessionId}`);
+};
+
+export const completeLTIDeepLink = async (
+	f: Fetcher,
+	deepLinkSessionId: number,
+	destination: LTIDeepLinkDestination,
+	assistantId: number | null = null
+) => {
+	return await POST<
+		{ destination: LTIDeepLinkDestination; assistant_id: number | null },
+		LTIDeepLinkCompleteResponse
+	>(f, `lti/deep-link/${deepLinkSessionId}/complete`, {
+		destination,
+		assistant_id: assistantId
+	});
 };
 
 export type LMSStatus = 'authorized' | 'none' | 'error' | 'linked' | 'dismissed';

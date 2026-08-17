@@ -9,6 +9,7 @@ const fallbackSupportInfo = {
 
 export const load: LayoutLoad = async ({ fetch, url }) => {
 	const ltiClassIdParam = url.searchParams.get('lti_class_id');
+	const deepLinkSessionIdParam = url.searchParams.get('deep_link_session_id');
 
 	if (!ltiClassIdParam) {
 		redirect(302, '/');
@@ -16,6 +17,15 @@ export const load: LayoutLoad = async ({ fetch, url }) => {
 
 	const ltiClassId = parseInt(ltiClassIdParam, 10);
 	if (isNaN(ltiClassId)) {
+		redirect(302, '/');
+	}
+	const deepLinkSessionId = deepLinkSessionIdParam
+		? Number.parseInt(deepLinkSessionIdParam, 10)
+		: null;
+	if (
+		deepLinkSessionId !== null &&
+		(!Number.isInteger(deepLinkSessionId) || deepLinkSessionId <= 0)
+	) {
 		redirect(302, '/');
 	}
 
@@ -31,6 +41,7 @@ export const load: LayoutLoad = async ({ fetch, url }) => {
 	return {
 		context: contextResult.data,
 		ltiClassId,
+		deepLinkSessionId,
 		supportInfo: supportResult.error ? fallbackSupportInfo : supportResult.data
 	};
 };

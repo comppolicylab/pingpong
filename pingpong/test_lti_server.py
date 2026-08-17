@@ -10,10 +10,18 @@ from yarl import URL
 
 import pingpong.config as config_module
 from pingpong.lti import server as server_module
-from pingpong.lti.constants import CANVAS_MESSAGE_PLACEMENT
+from pingpong.lti.constants import (
+    CANVAS_MESSAGE_PLACEMENT,
+    DEEP_LINK_MESSAGE_TYPE,
+    LTI_CLAIM_MESSAGE_TYPE_KEY,
+    LTI_DEEP_LINKING_CONTENT_ITEMS_KEY,
+    LTI_DEEP_LINKING_DATA_KEY,
+    LTI_DEEP_LINKING_SETTINGS_KEY,
+)
 from pingpong.lti.platforms import canvas as canvas_module
 from pingpong.lti.platforms.canvas import CanvasPlatformHandler
 from pingpong.lti.schemas import (
+    LTIDeepLinkCompleteRequest,
     LTIRegisterRequest,
     LTISetupCreateRequest,
     LTISetupLinkRequest,
@@ -395,6 +403,7 @@ def _patch_lti_security_config(monkeypatch):
         hosts=allow_deny,
         paths=allow_deny,
         authorization_endpoint=url_security,
+        deep_link_return_endpoint=url_security,
         jwks_uri=url_security,
         names_and_role_endpoint=url_security,
         openid_configuration=url_security,
@@ -5413,3 +5422,135 @@ async def test_lti_launch_harvard_lxp_pending_setup(monkeypatch):
     assert pending.course_code is None
     assert pending.course_term is None
     assert pending.lti_status == LTIStatus.PENDING
+
+
+def test_deep_link_request_settings_accepts_canvas_resource_links():
+    registration = _make_registration()
+    claims = {
+        LTI_CLAIM_MESSAGE_TYPE_KEY: DEEP_LINK_MESSAGE_TYPE,
+        LTI_DEEP_LINKING_SETTINGS_KEY: {
+            "deep_link_return_url": "https://platform.example.com/deep-link/return",
+            "accept_types": ["ltiResourceLink"],
+            "accept_presentation_document_targets": ["iframe"],
+            "data": "canvas-state",
+        },
+    }
+
+    assert server_module._deep_link_request_settings(registration, claims) == {
+        "deep_link_return_url": "https://platform.example.com/deep-link/return",
+        "data": "canvas-state",
+    }
+
+
+@pytest.mark.parametrize(
+    ("is_deep_link_request", "custom", "expected"),
+    [
+        (False, {}, "course-navigation-link"),
+        (True, {}, None),
+        (False, {"pingpong_destination": "group"}, None),
+        (False, {"pingpong_destination": "assistant"}, None),
+    ],
+)
+def test_course_resource_link_id_ignores_deep_link_resources(
+    is_deep_link_request, custom, expected
+):
+    assert (
+        server_module._course_resource_link_id(
+            "course-navigation-link",
+            is_deep_link_request=is_deep_link_request,
+            launch_custom_params=custom,
+        )
+        == expected
+    )
+
+
+@pytest.mark.asyncio
+async def test_resource_launch_unavailable_when_assistant_is_not_published(monkeypatch):
+    assistant = SimpleNamespace(id=77, class_id=12, published=None)
+    monkeypatch.setattr(
+        server_module.Assistant,
+        "get_by_id",
+        lambda db, assistant_id: _async_return(assistant),
+    )
+
+    result = await server_module._resource_launch_url(
+        FakeDB(),
+        class_id=12,
+        launch_custom_params={
+            "pingpong_destination": "assistant",
+            "pingpong_assistant_id": "77",
+        },
+        user_token="session-token",
+    )
+
+    assert "/lti/assistant-unavailable?" in result
+    assert "class_id=12" in result
+
+
+@pytest.mark.asyncio
+async def test_complete_lti_deep_link_signs_one_published_assistant(monkeypatch):
+    now = datetime(2026, 8, 16, 12, 0, tzinfo=timezone.utc)
+    oidc_session = SimpleNamespace(extra=None)
+    state = {
+        "deep_link_return_url": "https://platform.example.com/deep-link/return",
+        "data": "canvas-state",
+        "deployment_id": "deployment-1",
+        "course_id": "canvas-course-12",
+    }
+    registration = _make_registration(issuer="https://canvas.example.com")
+    class_ = SimpleNamespace(id=12, name="Biology")
+    assistant = SimpleNamespace(
+        id=77,
+        class_id=12,
+        published=now,
+        name="Study Coach",
+        description="Helps students review.",
+    )
+    monkeypatch.setattr(
+        server_module,
+        "_load_deep_link_state",
+        lambda request, session_id: _async_return(
+            (oidc_session, state, registration, SimpleNamespace(), class_)
+        ),
+    )
+    monkeypatch.setattr(
+        server_module.Assistant,
+        "get_by_id",
+        lambda db, assistant_id: _async_return(assistant),
+    )
+    signed_claims = {}
+
+    async def _sign_jwt(claims):
+        signed_claims.update(claims)
+        return "signed-jwt"
+
+    monkeypatch.setattr(
+        server_module,
+        "get_lti_key_manager",
+        lambda: SimpleNamespace(sign_jwt=_sign_jwt),
+    )
+    monkeypatch.setattr(server_module, "get_now_fn", lambda request: lambda: now)
+    request = FakeRequest(
+        state=_make_request_state(session_user=SimpleNamespace(id=42))
+    )
+
+    result = await server_module.complete_lti_deep_link(
+        request,
+        9,
+        LTIDeepLinkCompleteRequest(destination="assistant", assistant_id=77),
+    )
+
+    assert result.deep_link_return_url == state["deep_link_return_url"]
+    assert result.jwt == "signed-jwt"
+    assert signed_claims[LTI_DEEP_LINKING_DATA_KEY] == "canvas-state"
+    assert len(signed_claims[LTI_DEEP_LINKING_CONTENT_ITEMS_KEY]) == 1
+    content_item = signed_claims[LTI_DEEP_LINKING_CONTENT_ITEMS_KEY][0]
+    assert content_item["type"] == "ltiResourceLink"
+    assert content_item["custom"]["canvas_course_id"] == "$Canvas.course.id"
+    assert content_item["custom"]["pingpong_assistant_id"] == "77"
+    assert content_item["iframe"] == {
+        "src": server_module.config.url("/api/v1/lti/launch"),
+        "width": 1000,
+        "height": 800,
+    }
+    assert json.loads(oidc_session.extra)["completed_at"] == now.isoformat()

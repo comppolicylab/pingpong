@@ -6601,6 +6601,22 @@ class Assistant(Base):
             yield row.Assistant
 
     @classmethod
+    async def get_published_for_lti_picker(
+        cls, session: AsyncSession, class_id: int
+    ) -> list["Assistant"]:
+        """Load only the published assistant fields needed by the Canvas picker."""
+        stmt = (
+            select(Assistant)
+            .where(
+                Assistant.class_id == int(class_id),
+                Assistant.published.is_not(None),
+            )
+            .options(selectinload(Assistant.creator))
+        )
+        result = await session.execute(stmt)
+        return list(result.scalars().all())
+
+    @classmethod
     async def copy_code_interpreter_files(
         cls, session: AsyncSession, old_assistant_id: int, new_assistant_id: int
     ) -> None:
@@ -11158,6 +11174,13 @@ class LTIOIDCSession(Base):
         cls, session: AsyncSession, state: str
     ) -> "LTIOIDCSession | None":
         stmt = select(LTIOIDCSession).where(LTIOIDCSession.state == state)
+        return await session.scalar(stmt)
+
+    @classmethod
+    async def get_by_id(
+        cls, session: AsyncSession, id_: int
+    ) -> "LTIOIDCSession | None":
+        stmt = select(LTIOIDCSession).where(LTIOIDCSession.id == int(id_))
         return await session.scalar(stmt)
 
     @classmethod

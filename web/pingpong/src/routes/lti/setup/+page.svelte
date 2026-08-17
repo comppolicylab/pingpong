@@ -7,7 +7,9 @@
 
 	export let data;
 
-	const { context, ltiClassId, supportInfo } = data;
+	const { context, ltiClassId, deepLinkSessionId, supportInfo } = data;
+	const setupQuery = () =>
+		`lti_class_id=${ltiClassId}${deepLinkSessionId ? `&deep_link_session_id=${deepLinkSessionId}` : ''}`;
 
 	// Build display name: prefer course_name, then course_code, else generic
 	// Previously, we used "Course Code: Course Name", but in many cases the
@@ -16,12 +18,12 @@
 
 	const goToCreate = () => {
 		// eslint-disable-next-line svelte/no-navigation-without-resolve
-		goto(`/lti/setup/create?lti_class_id=${ltiClassId}`);
+		goto(`/lti/setup/create?${setupQuery()}`);
 	};
 
 	const goToLink = () => {
 		// eslint-disable-next-line svelte/no-navigation-without-resolve
-		goto(`/lti/setup/link?lti_class_id=${ltiClassId}`);
+		goto(`/lti/setup/link?${setupQuery()}`);
 	};
 </script>
 

@@ -7,10 +7,13 @@
 	import * as api from '$lib/api';
 	import { loading } from '$lib/stores/general.js';
 	import { resolve } from '$app/paths';
+	import { deepLinkContinuation } from '$lib/ltiDeepLink';
 
 	export let data;
 
-	const { context, ltiClassId, supportInfo } = data;
+	const { context, ltiClassId, deepLinkSessionId, supportInfo } = data;
+	const setupQuery = () =>
+		`lti_class_id=${ltiClassId}${deepLinkSessionId ? `&deep_link_session_id=${deepLinkSessionId}` : ''}`;
 
 	// Pre-fill form with LTI context data
 	// Name: "Course Name"
@@ -25,7 +28,7 @@
 
 	const goBack = () => {
 		// eslint-disable-next-line svelte/no-navigation-without-resolve
-		goto(`/lti/setup?lti_class_id=${ltiClassId}`);
+		goto(`/lti/setup?${setupQuery()}`);
 	};
 
 	const handleSubmit = async () => {
@@ -59,8 +62,8 @@
 				return;
 			}
 
-			// Redirect to the new group's assistant page
-			await goto(resolve(`/group/${result.class_id}/assistant`));
+			const continuation = deepLinkContinuation(deepLinkSessionId);
+			await goto(continuation || resolve(`/group/${result.class_id}/assistant`));
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Failed to create group';
 		} finally {

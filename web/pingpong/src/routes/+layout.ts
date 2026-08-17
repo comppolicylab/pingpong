@@ -14,6 +14,8 @@ const LTI_INACTIVE = '/lti/inactive';
 const LTI_NO_ROLE = '/lti/no-role';
 const NO_GROUP = '/lti/no-group';
 const SETUP = '/lti/setup';
+const LTI_DEEP_LINK = '/lti/deep-link';
+const LTI_ASSISTANT_UNAVAILABLE = '/lti/assistant-unavailable';
 
 export const ssr = false;
 
@@ -128,7 +130,12 @@ export const load: LayoutLoad = async ({ fetch, url }) => {
 			if (isLTIRegister) {
 				doNotShowSidebar = true;
 			}
-		} else if (url.pathname === NO_GROUP || url.pathname.startsWith(SETUP)) {
+		} else if (
+			url.pathname === NO_GROUP ||
+			url.pathname.startsWith(SETUP) ||
+			url.pathname === LTI_DEEP_LINK ||
+			url.pathname === LTI_ASSISTANT_UNAVAILABLE
+		) {
 			doNotShowSidebar = true;
 			logoIsClickable = false;
 		} else if (new Set([ABOUT, PRIVACY_POLICY, HOME]).has(url.pathname) && !authed) {

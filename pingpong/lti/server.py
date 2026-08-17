@@ -4,7 +4,7 @@ import asyncio
 from functools import partial
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, cast
 from urllib.parse import urlencode
 import aiohttp
@@ -12,6 +12,7 @@ import jwt
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Depends
 from fastapi.responses import RedirectResponse
 
+from pingpong.animal_hash import name as user_display_name
 from pingpong.auth import encode_session_token
 from pingpong.authz.openfga import OpenFgaAuthzClient
 from pingpong.config import config
@@ -21,6 +22,7 @@ from pingpong.lti.claims import get_claim_object as _get_claim_object
 from pingpong.lti.endpoints import (
     allow_redirects,
     generate_authorization_endpoint_url,
+    generate_deep_link_return_url,
     generate_jwks_uri_url,
     generate_openid_configuration_url,
     generate_registration_endpoint_url,
@@ -28,20 +30,29 @@ from pingpong.lti.endpoints import (
 )
 from pingpong.lti.constants import (
     AUTHORIZATION_ENDPOINT_KEY,
+    CANVAS_COURSE_ID_VARIABLE,
+    DEEP_LINK_MESSAGE_TYPE,
     ISSUER_KEY,
     KEYS_ENDPOINT_KEY,
     LTI_CLAIM_CONTEXT_KEY,
     LTI_CLAIM_CUSTOM_KEY,
+    LTI_CLAIM_MESSAGE_TYPE_KEY,
     LTI_CLAIM_NRPS_KEY,
     LTI_CLAIM_RESOURCE_LINK_KEY,
     LTI_CLAIM_ROLES_KEY,
     LTI_CLAIM_TOOL_PLATFORM_KEY,
+    LTI_CLAIM_VERSION_KEY,
     LTI_CUSTOM_PARAM_DEFAULT_VALUES,
     LTI_CUSTOM_SSO_PROVIDER_ID_KEY,
     LTI_CUSTOM_SSO_VALUE_KEY,
     LTI_DEPLOYMENT_ID_CLAIM,
+    LTI_DEEP_LINKING_CONTENT_ITEMS_KEY,
+    LTI_DEEP_LINKING_DATA_KEY,
+    LTI_DEEP_LINKING_SETTINGS_KEY,
+    LTI_DEEP_LINK_SESSION_TTL_SECONDS,
     LTI_REGISTRATION_SCOPE,
     LTI_TOOL_CONFIGURATION_KEY,
+    LTI_VERSION,
     MESSAGE_TYPES_KEY,
     MESSAGE_TYPE,
     NO_SSO_PROVIDER_ID,
@@ -66,6 +77,10 @@ from pingpong.lti.roles import (
     is_student as is_lti_student,
 )
 from pingpong.lti.schemas import (
+    LTIDeepLinkAssistant,
+    LTIDeepLinkCompleteRequest,
+    LTIDeepLinkCompleteResponse,
+    LTIDeepLinkContext,
     LTIRegisterRequest,
     LTIRegisterSetupRequest,
     LTIRegisterSetupResponse,
@@ -81,6 +96,7 @@ from pingpong.lti.schemas import (
 from pingpong.merge import merge
 from pingpong.models import (
     AmbiguousExternalLoginLookupError,
+    Assistant,
     Class,
     ExternalLogin,
     ExternalLoginProvider,
@@ -788,6 +804,156 @@ def _is_admin(roles: list[str]) -> bool:
     return is_lti_admin(roles)
 
 
+def _deep_link_request_settings(
+    registration: LTIRegistration, claims: dict[str, Any]
+) -> dict[str, str] | None:
+    if claims.get(LTI_CLAIM_MESSAGE_TYPE_KEY) != DEEP_LINK_MESSAGE_TYPE:
+        return None
+    if registration.lms_platform != LMSPlatform.CANVAS:
+        raise HTTPException(
+            status_code=400, detail="Deep Linking is only supported for Canvas"
+        )
+
+    settings = _get_claim_object(claims, LTI_DEEP_LINKING_SETTINGS_KEY)
+    return_url = settings.get("deep_link_return_url")
+    if not isinstance(return_url, str) or not return_url:
+        raise HTTPException(status_code=400, detail="Missing Deep Linking return URL")
+    try:
+        return_url = generate_deep_link_return_url(return_url)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=400, detail="Invalid Deep Linking return URL"
+        ) from e
+
+    accept_types = settings.get("accept_types")
+    if not isinstance(accept_types, list) or "ltiResourceLink" not in accept_types:
+        raise HTTPException(
+            status_code=400, detail="Canvas does not accept LTI resource links"
+        )
+
+    accept_targets = settings.get("accept_presentation_document_targets")
+    if not isinstance(accept_targets, list) or "iframe" not in accept_targets:
+        raise HTTPException(
+            status_code=400, detail="Canvas does not accept embedded LTI resources"
+        )
+
+    data = settings.get("data")
+    if data is not None and not isinstance(data, str):
+        raise HTTPException(status_code=400, detail="Invalid Deep Linking data")
+
+    return {
+        "deep_link_return_url": return_url,
+        "data": data or "",
+    }
+
+
+async def _save_deep_link_session(
+    request: StateRequest,
+    *,
+    oidc_session: LTIOIDCSession,
+    registration: LTIRegistration,
+    course_id: str,
+    user_id: int,
+    settings: dict[str, str],
+    deployment_id: str | None,
+    now: datetime,
+) -> int:
+    oidc_session.extra = json.dumps(
+        {
+            "kind": "canvas_editor_button",
+            "registration_id": registration.id,
+            "course_id": course_id,
+            "user_id": user_id,
+            "deep_link_return_url": settings["deep_link_return_url"],
+            "data": settings["data"],
+            "deployment_id": deployment_id,
+        }
+    )
+    oidc_session.expires_at = now + timedelta(seconds=LTI_DEEP_LINK_SESSION_TTL_SECONDS)
+    request.state["db"].add(oidc_session)
+    await request.state["db"].flush()
+    return int(oidc_session.id)
+
+
+def _deep_link_picker_url(deep_link_session_id: int, user_token: str) -> str:
+    return config.url(
+        "/lti/deep-link?"
+        + urlencode(
+            {
+                "deep_link_session_id": deep_link_session_id,
+                "lti_session": user_token,
+            }
+        )
+    )
+
+
+def _course_resource_link_id(
+    resource_link_id: str | None,
+    *,
+    is_deep_link_request: bool,
+    launch_custom_params: dict[str, Any],
+) -> str | None:
+    """Keep the course-navigation resource link as the NRPS sync anchor.
+
+    Canvas creates a distinct resource link for every Deep Linking insertion. Those
+    links must not replace the one course-level link used for roster synchronization.
+    """
+    if is_deep_link_request or launch_custom_params.get("pingpong_destination") in {
+        "group",
+        "assistant",
+    }:
+        return None
+    return resource_link_id
+
+
+async def _resource_launch_url(
+    db,
+    *,
+    class_id: int,
+    launch_custom_params: dict[str, Any],
+    user_token: str,
+) -> str:
+    query: dict[str, str | int] = {"lti_session": user_token}
+    if launch_custom_params.get("pingpong_destination") == "assistant":
+        raw_assistant_id = launch_custom_params.get("pingpong_assistant_id")
+        assistant_id = 0
+        if isinstance(raw_assistant_id, str):
+            try:
+                assistant_id = int(raw_assistant_id)
+            except ValueError:
+                pass
+        assistant = await Assistant.get_by_id(db, assistant_id)
+        if (
+            assistant is None
+            or assistant.class_id != class_id
+            or assistant.published is None
+        ):
+            return config.url(
+                "/lti/assistant-unavailable?"
+                + urlencode({"lti_session": user_token, "class_id": class_id})
+            )
+        query["assistant"] = assistant.id
+    return config.url(f"/group/{class_id}?" + urlencode(query))
+
+
+async def _post_auth_launch_url(
+    db,
+    *,
+    class_id: int,
+    launch_custom_params: dict[str, Any],
+    user_token: str,
+    deep_link_session_id: int | None,
+) -> str:
+    if deep_link_session_id is not None:
+        return _deep_link_picker_url(deep_link_session_id, user_token)
+    return await _resource_launch_url(
+        db,
+        class_id=class_id,
+        launch_custom_params=launch_custom_params,
+        user_token=user_token,
+    )
+
+
 async def _is_supervisor_by_class_id(
     client: OpenFgaAuthzClient,
     user_id: int,
@@ -891,6 +1057,12 @@ async def lti_launch(
 
     handler = get_handler(registration.lms_platform)
     course_id = handler.extract_course_id(claims, launch_custom_params)
+    deep_link_settings = _deep_link_request_settings(registration, claims)
+    course_resource_link_id = _course_resource_link_id(
+        resource_link_id,
+        is_deep_link_request=deep_link_settings is not None,
+        launch_custom_params=launch_custom_params,
+    )
     class_ = await handler.find_class_for_course(
         request.state["db"], registration, course_id
     )
@@ -902,6 +1074,8 @@ async def lti_launch(
 
     if not is_instructor and not is_student and not is_admin:
         logger.exception(f"LTI launch with no recognized roles: roles={user_roles}")
+        return RedirectResponse(url=config.url("/lti/no-role"), status_code=302)
+    if deep_link_settings is not None and not (is_instructor or is_admin):
         return RedirectResponse(url=config.url("/lti/no-role"), status_code=302)
 
     user_email = claims.get("email")
@@ -1069,6 +1243,20 @@ async def lti_launch(
 
     request.state["session"].user = user
     user_token = encode_session_token(user.id, nowfn=get_now_fn(request))
+    deep_link_session_id = None
+    if deep_link_settings is not None:
+        deep_link_session_id = await _save_deep_link_session(
+            request,
+            oidc_session=oidc_session,
+            registration=registration,
+            course_id=course_id,
+            user_id=user.id,
+            settings=deep_link_settings,
+            deployment_id=(
+                deployment_id_claim if isinstance(deployment_id_claim, str) else None
+            ),
+            now=now,
+        )
 
     class_needs_setup = isinstance(class_, LTIClass) and (
         class_.lti_status == LTIStatus.PENDING or class_.class_id is None
@@ -1090,10 +1278,10 @@ async def lti_launch(
                 pending_lti_class.lti_status = LTIStatus.PENDING
                 pending_lti_class.setup_user_id = user.id
                 if (
-                    resource_link_id
-                    and pending_lti_class.resource_link_id != resource_link_id
+                    course_resource_link_id
+                    and pending_lti_class.resource_link_id != course_resource_link_id
                 ):
-                    pending_lti_class.resource_link_id = resource_link_id
+                    pending_lti_class.resource_link_id = course_resource_link_id
                 request.state["db"].add(pending_lti_class)
                 await request.state["db"].flush()
             else:
@@ -1105,7 +1293,7 @@ async def lti_launch(
                     lti_status=LTIStatus.PENDING,
                     lti_platform=registration.lms_platform,
                     course_id=course_id,
-                    resource_link_id=resource_link_id,
+                    resource_link_id=course_resource_link_id,
                     course_code=metadata.course_code,
                     course_name=metadata.course_name,
                     course_term=metadata.course_term,
@@ -1116,10 +1304,14 @@ async def lti_launch(
                 request.state["db"].add(pending_lti_class)
                 await request.state["db"].flush()
 
+            setup_query: dict[str, str | int] = {
+                "lti_session": user_token,
+                "lti_class_id": pending_lti_class.id,
+            }
+            if deep_link_session_id is not None:
+                setup_query["deep_link_session_id"] = deep_link_session_id
             return RedirectResponse(
-                url=config.url(
-                    f"/lti/setup?lti_session={user_token}&lti_class_id={pending_lti_class.id}"
-                ),
+                url=config.url("/lti/setup?" + urlencode(setup_query)),
                 status_code=302,
             )
         else:
@@ -1130,14 +1322,21 @@ async def lti_launch(
             )
     else:
         if isinstance(class_, LTIClass) and class_.registration_id == registration.id:
-            if resource_link_id and class_.resource_link_id != resource_link_id:
-                class_.resource_link_id = resource_link_id
+            if (
+                course_resource_link_id
+                and class_.resource_link_id != course_resource_link_id
+            ):
+                class_.resource_link_id = course_resource_link_id
                 request.state["db"].add(class_)
                 await request.state["db"].flush()
             if user.id == class_.setup_user_id:
                 return RedirectResponse(
-                    url=config.url(
-                        f"/group/{class_.class_id}?lti_session={user_token}"
+                    url=await _post_auth_launch_url(
+                        request.state["db"],
+                        class_id=class_.class_id,
+                        launch_custom_params=launch_custom_params,
+                        user_token=user_token,
+                        deep_link_session_id=deep_link_session_id,
                     ),
                     status_code=302,
                 )
@@ -1155,8 +1354,12 @@ async def lti_launch(
                         )
                     # No role is being added, but allow access
                     return RedirectResponse(
-                        url=config.url(
-                            f"/group/{class_.class_id}?lti_session={user_token}"
+                        url=await _post_auth_launch_url(
+                            request.state["db"],
+                            class_id=class_.class_id,
+                            launch_custom_params=launch_custom_params,
+                            user_token=user_token,
+                            deep_link_session_id=deep_link_session_id,
                         ),
                         status_code=302,
                     )
@@ -1193,8 +1396,12 @@ async def lti_launch(
                         detail="Failed to add user to class",
                     )
                 return RedirectResponse(
-                    url=config.url(
-                        f"/group/{class_.class_id}?lti_session={user_token}"
+                    url=await _post_auth_launch_url(
+                        request.state["db"],
+                        class_id=class_.class_id,
+                        launch_custom_params=launch_custom_params,
+                        user_token=user_token,
+                        deep_link_session_id=deep_link_session_id,
                     ),
                     status_code=302,
                 )
@@ -1219,7 +1426,7 @@ async def lti_launch(
                     lti_status=LTIStatus.LINKED,
                     lti_platform=registration.lms_platform,
                     course_id=course_id,
-                    resource_link_id=resource_link_id,
+                    resource_link_id=course_resource_link_id,
                     course_code=metadata.course_code,
                     course_name=metadata.course_name,
                     course_term=metadata.course_term,
@@ -1233,7 +1440,13 @@ async def lti_launch(
 
             if pp_class.lms_user_id == user.id:
                 return RedirectResponse(
-                    url=config.url(f"/group/{pp_class.id}?lti_session={user_token}"),
+                    url=await _post_auth_launch_url(
+                        request.state["db"],
+                        class_id=pp_class.id,
+                        launch_custom_params=launch_custom_params,
+                        user_token=user_token,
+                        deep_link_session_id=deep_link_session_id,
+                    ),
                     status_code=302,
                 )
             else:
@@ -1250,8 +1463,12 @@ async def lti_launch(
                         )
                     # No role is being added, but allow access
                     return RedirectResponse(
-                        url=config.url(
-                            f"/group/{pp_class.id}?lti_session={user_token}"
+                        url=await _post_auth_launch_url(
+                            request.state["db"],
+                            class_id=pp_class.id,
+                            launch_custom_params=launch_custom_params,
+                            user_token=user_token,
+                            deep_link_session_id=deep_link_session_id,
                         ),
                         status_code=302,
                     )
@@ -1291,7 +1508,13 @@ async def lti_launch(
                         detail="Failed to add user to class",
                     )
             return RedirectResponse(
-                url=config.url(f"/group/{pp_class.id}?lti_session={user_token}"),
+                url=await _post_auth_launch_url(
+                    request.state["db"],
+                    class_id=pp_class.id,
+                    launch_custom_params=launch_custom_params,
+                    user_token=user_token,
+                    deep_link_session_id=deep_link_session_id,
+                ),
                 status_code=302,
             )
         else:
@@ -1312,7 +1535,7 @@ async def lti_launch(
                     lti_status=LTIStatus.LINKED,
                     lti_platform=registration.lms_platform,
                     course_id=course_id,
-                    resource_link_id=resource_link_id,
+                    resource_link_id=course_resource_link_id,
                     course_code=metadata.course_code,
                     course_name=metadata.course_name,
                     course_term=metadata.course_term,
@@ -1326,7 +1549,13 @@ async def lti_launch(
 
             if class_.lms_user_id == user.id:
                 return RedirectResponse(
-                    url=config.url(f"/group/{class_.id}?lti_session={user_token}"),
+                    url=await _post_auth_launch_url(
+                        request.state["db"],
+                        class_id=class_.id,
+                        launch_custom_params=launch_custom_params,
+                        user_token=user_token,
+                        deep_link_session_id=deep_link_session_id,
+                    ),
                     status_code=302,
                 )
             elif is_admin and not (is_instructor or is_student):
@@ -1342,7 +1571,13 @@ async def lti_launch(
                     )
                 # No role is being added, but allow access
                 return RedirectResponse(
-                    url=config.url(f"/group/{class_.id}?lti_session={user_token}"),
+                    url=await _post_auth_launch_url(
+                        request.state["db"],
+                        class_id=class_.id,
+                        launch_custom_params=launch_custom_params,
+                        user_token=user_token,
+                        deep_link_session_id=deep_link_session_id,
+                    ),
                     status_code=302,
                 )
             elif str(class_.lms_course_id) == course_id:
@@ -1403,7 +1638,13 @@ async def lti_launch(
                         detail="Failed to add user to class",
                     )
             return RedirectResponse(
-                url=config.url(f"/group/{class_.id}?lti_session={user_token}"),
+                url=await _post_auth_launch_url(
+                    request.state["db"],
+                    class_id=class_.id,
+                    launch_custom_params=launch_custom_params,
+                    user_token=user_token,
+                    deep_link_session_id=deep_link_session_id,
+                ),
                 status_code=302,
             )
 
@@ -1641,3 +1882,238 @@ async def link_lti_group(
     request.state["db"].add(lti_class)
 
     return LTISetupLinkResponse(class_id=body.class_id)
+
+
+async def _load_deep_link_state(
+    request: StateRequest, deep_link_session_id: int
+) -> tuple[LTIOIDCSession, dict[str, Any], LTIRegistration, LTIClass, Class]:
+    oidc_session = await LTIOIDCSession.get_by_id(
+        request.state["db"], deep_link_session_id
+    )
+    now = get_now_fn(request)()
+    if oidc_session is None or oidc_session.expires_at <= now:
+        raise HTTPException(status_code=410, detail="Deep Linking session expired")
+    try:
+        state = json.loads(oidc_session.extra or "{}")
+    except (json.JSONDecodeError, TypeError) as e:
+        raise HTTPException(
+            status_code=400, detail="Invalid Deep Linking session"
+        ) from e
+    if not isinstance(state, dict) or state.get("kind") != "canvas_editor_button":
+        raise HTTPException(status_code=400, detail="Invalid Deep Linking session")
+    if state.get("user_id") != request.state["session"].user.id:
+        raise HTTPException(status_code=403, detail="Not authorized for this selection")
+
+    registration = await LTIRegistration.get_by_issuer_and_client_id(
+        request.state["db"], oidc_session.issuer, oidc_session.client_id
+    )
+    if registration is None or registration.id != state.get("registration_id"):
+        raise HTTPException(status_code=404, detail="LTI registration not found")
+
+    course_id = state.get("course_id")
+    if not isinstance(course_id, str) or not course_id:
+        raise HTTPException(status_code=400, detail="Invalid Deep Linking course")
+    lti_class = await LTIClass.get_by_registration_and_course_id(
+        request.state["db"], registration.id, course_id
+    )
+    if (
+        lti_class is None
+        or lti_class.class_id is None
+        or lti_class.lti_status not in {LTIStatus.LINKED, LTIStatus.ERROR}
+    ):
+        raise HTTPException(status_code=409, detail="Canvas course is not linked")
+    if not await _is_supervisor_by_class_id(
+        request.state["authz"], request.state["session"].user.id, lti_class.class_id
+    ):
+        raise HTTPException(status_code=403, detail="Not authorized for this selection")
+
+    class_ = await Class.get_by_id(request.state["db"], lti_class.class_id)
+    if class_ is None:
+        raise HTTPException(status_code=404, detail="PingPong group not found")
+    return oidc_session, state, registration, lti_class, class_
+
+
+@lti_router.get(
+    "/deep-link/{deep_link_session_id}",
+    dependencies=[Depends(LoggedIn())],
+    response_model=LTIDeepLinkContext,
+)
+async def get_lti_deep_link_context(
+    request: StateRequest, deep_link_session_id: int
+) -> LTIDeepLinkContext:
+    _, state, _, _, class_ = await _load_deep_link_state(request, deep_link_session_id)
+    if state.get("completed_at"):
+        raise HTTPException(status_code=409, detail="Deep Linking session completed")
+
+    assistants = await Assistant.get_published_for_lti_picker(
+        request.state["db"], class_.id
+    )
+    creator_ids = sorted({assistant.creator_id for assistant in assistants})
+    creator_is_supervisor = await request.state["authz"].check(
+        [
+            (f"user:{creator_id}", "supervisor", f"class:{class_.id}")
+            for creator_id in creator_ids
+        ]
+    )
+    endorsed_creator_ids = {
+        creator_id
+        for creator_id, endorsed in zip(
+            creator_ids, creator_is_supervisor, strict=False
+        )
+        if endorsed
+    }
+
+    response_assistants = [
+        LTIDeepLinkAssistant(
+            id=assistant.id,
+            name=assistant.name,
+            description=assistant.description,
+            interaction_mode=assistant.interaction_mode,
+            creator_name=user_display_name(assistant.creator) or "Unknown user",
+            avatar_url=(
+                f"/api/v1/class/{assistant.class_id}/assistant/{assistant.id}/avatar"
+                f"?v={assistant.avatar_file_id}"
+                if assistant.avatar_file_id is not None
+                else None
+            ),
+            endorsed=assistant.creator_id in endorsed_creator_ids,
+            updated=assistant.updated or assistant.created,
+        )
+        for assistant in assistants
+    ]
+    response_assistants.sort(
+        key=lambda assistant: (
+            not assistant.endorsed,
+            assistant.name.casefold(),
+            assistant.creator_name.casefold(),
+            -(assistant.updated.timestamp() if assistant.updated else 0),
+            assistant.id,
+        )
+    )
+    return LTIDeepLinkContext(
+        class_id=class_.id,
+        group_name=class_.name,
+        assistants=response_assistants,
+    )
+
+
+@lti_router.post(
+    "/deep-link/{deep_link_session_id}/complete",
+    dependencies=[Depends(LoggedIn())],
+    response_model=LTIDeepLinkCompleteResponse,
+)
+async def complete_lti_deep_link(
+    request: StateRequest,
+    deep_link_session_id: int,
+    body: LTIDeepLinkCompleteRequest,
+) -> LTIDeepLinkCompleteResponse:
+    oidc_session, state, registration, _, class_ = await _load_deep_link_state(
+        request, deep_link_session_id
+    )
+    if state.get("completed_at"):
+        raise HTTPException(status_code=409, detail="Deep Linking session completed")
+
+    content_items: list[dict[str, Any]] = []
+    if body.destination == "group":
+        if body.assistant_id is not None:
+            raise HTTPException(
+                status_code=400, detail="Unexpected assistant selection"
+            )
+        content_items.append(
+            {
+                "type": "ltiResourceLink",
+                "url": config.url("/api/v1/lti/launch"),
+                "title": f"Open {class_.name} in PingPong",
+                "text": "Open this course's PingPong group.",
+                "icon": {
+                    "url": config.url("/pingpong_icon_2x.png"),
+                    "width": 32,
+                    "height": 32,
+                },
+                "custom": {
+                    "canvas_course_id": CANVAS_COURSE_ID_VARIABLE,
+                    "pingpong_destination": "group",
+                    "pingpong_resource_version": "1",
+                },
+                "iframe": {
+                    "src": config.url("/api/v1/lti/launch"),
+                    "width": 1000,
+                    "height": 800,
+                },
+            }
+        )
+    elif body.destination == "assistant":
+        assistant = await Assistant.get_by_id(request.state["db"], body.assistant_id)
+        if (
+            assistant is None
+            or assistant.class_id != class_.id
+            or assistant.published is None
+        ):
+            raise HTTPException(status_code=400, detail="Published assistant not found")
+        content_items.append(
+            {
+                "type": "ltiResourceLink",
+                "url": config.url("/api/v1/lti/launch"),
+                "title": assistant.name,
+                "text": assistant.description or f"Open {assistant.name} in PingPong.",
+                "icon": {
+                    "url": config.url("/pingpong_icon_2x.png"),
+                    "width": 32,
+                    "height": 32,
+                },
+                "custom": {
+                    "canvas_course_id": CANVAS_COURSE_ID_VARIABLE,
+                    "pingpong_destination": "assistant",
+                    "pingpong_assistant_id": str(assistant.id),
+                    "pingpong_resource_version": "1",
+                },
+                "iframe": {
+                    "src": config.url("/api/v1/lti/launch"),
+                    "width": 1000,
+                    "height": 800,
+                },
+            }
+        )
+    elif body.assistant_id is not None:
+        raise HTTPException(status_code=400, detail="Unexpected assistant selection")
+
+    if not registration.client_id:
+        raise HTTPException(status_code=500, detail="LTI registration has no client ID")
+    now = get_now_fn(request)()
+    response_claims: dict[str, Any] = {
+        "iss": registration.client_id,
+        "aud": registration.issuer,
+        "iat": int(now.timestamp()),
+        "exp": int((now + timedelta(minutes=5)).timestamp()),
+        "nonce": LTIOIDCSession.generate_nonce(),
+        LTI_DEPLOYMENT_ID_CLAIM: state.get("deployment_id"),
+        LTI_CLAIM_MESSAGE_TYPE_KEY: "LtiDeepLinkingResponse",
+        LTI_CLAIM_VERSION_KEY: LTI_VERSION,
+        LTI_DEEP_LINKING_CONTENT_ITEMS_KEY: content_items,
+    }
+    if state.get("data"):
+        response_claims[LTI_DEEP_LINKING_DATA_KEY] = state["data"]
+    if response_claims[LTI_DEPLOYMENT_ID_CLAIM] is None:
+        response_claims.pop(LTI_DEPLOYMENT_ID_CLAIM)
+
+    try:
+        response_jwt = await get_lti_key_manager().sign_jwt(response_claims)
+    except Exception as e:
+        logger.exception("Failed to sign LTI Deep Linking response")
+        raise HTTPException(
+            status_code=500, detail="Failed to sign Deep Linking response"
+        ) from e
+
+    state["completed_at"] = now.isoformat()
+    oidc_session.extra = json.dumps(state)
+    request.state["db"].add(oidc_session)
+    await request.state["db"].flush()
+    return LTIDeepLinkCompleteResponse(
+        deep_link_return_url=state["deep_link_return_url"],
+        jwt=response_jwt,
+    )
+    (LTI_CLAIM_MESSAGE_TYPE_KEY,)
+    (LTI_DEEP_LINKING_CONTENT_ITEMS_KEY,)
+    (LTI_DEEP_LINKING_DATA_KEY,)
+    (LTI_DEEP_LINKING_SETTINGS_KEY,)
+    (LTI_DEEP_LINK_SESSION_TTL_SECONDS,)
