@@ -2368,7 +2368,7 @@ wheels = [
 
 [[package]]
 name = "pingpong"
-version = "7.78.0"
+version = "7.79.0"
 source = { virtual = "." }
 dependencies = [
     { name = "aioboto3" },
