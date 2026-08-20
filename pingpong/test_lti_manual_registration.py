@@ -59,9 +59,12 @@ def test_build_canvas_openid_configuration_uses_explicit_platform_values():
     )
 
     assert configuration["issuer"] == "https://canvas.instructure.com"
-    assert configuration["authorization_endpoint"].startswith("http://canvas.docker")
-    assert configuration["token_endpoint"].startswith("http://canvas.docker")
-    assert configuration["jwks_uri"].startswith("http://canvas.docker")
+    assert (
+        configuration["authorization_endpoint"]
+        == "http://canvas.docker/api/lti/authorize_redirect"
+    )
+    assert configuration["token_endpoint"] == "http://canvas.docker/login/oauth2/token"
+    assert configuration["jwks_uri"] == "http://canvas.docker/api/lti/security/jwks"
 
 
 def test_build_canvas_manual_configuration_omits_sso_value_without_sso():

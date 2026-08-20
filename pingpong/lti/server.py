@@ -133,15 +133,6 @@ logger = logging.getLogger(__name__)
 lti_router: APIRouter = APIRouter()
 
 
-def _log_canvas_payload(stage: str, payload: object) -> None:
-    """Pretty-print a Canvas payload so registration and launch calls are inspectable."""
-    logger.info(
-        "[Canvas LTI] %s:\n%s",
-        stage,
-        json.dumps(payload, indent=2, sort_keys=True, default=str),
-    )
-
-
 def _parse_json_object(value: str | None) -> dict[str, Any] | None:
     try:
         payload = json.loads(value or "{}")
@@ -397,10 +388,7 @@ async def _resolve_platform(
             status_code=400, detail="Missing or unsupported product_family_code"
         )
 
-    platform = LMSPlatform(product_family_code)
-    if platform == LMSPlatform.CANVAS:
-        _log_canvas_payload("OpenID configuration response", response_data)
-    return platform, response_data
+    return LMSPlatform(product_family_code), response_data
 
 
 def _select_jwk(jwks: dict[str, Any], kid: str | None) -> dict[str, Any]:
@@ -745,9 +733,6 @@ async def register_lti_instance(request: StateRequest, data: LTIRegisterRequest)
     if not registration_response_data:
         raise HTTPException(status_code=500, detail="Failed to create registration")
 
-    if platform == LMSPlatform.CANVAS:
-        _log_canvas_payload("Dynamic Registration response", registration_response_data)
-
     client_id = registration_response_data.get("client_id")
     if not isinstance(client_id, str) or not client_id:
         raise HTTPException(
@@ -827,9 +812,6 @@ async def lti_login(request: StateRequest):
     )
     if registration is None:
         raise HTTPException(status_code=404, detail="Unknown LTI registration")
-
-    if registration.lms_platform == LMSPlatform.CANVAS:
-        _log_canvas_payload(f"login initiation {request.method} request", dict(payload))
 
     login_hint = payload.get("login_hint")
     if not isinstance(login_hint, str) or not login_hint:
@@ -1120,15 +1102,6 @@ async def lti_launch(
     if registration is None:
         raise HTTPException(status_code=404, detail="Unknown LTI registration")
 
-    if registration.lms_platform == LMSPlatform.CANVAS:
-        launch_form_for_log = dict(form)
-        raw_id_token = launch_form_for_log.get("id_token")
-        if isinstance(raw_id_token, str):
-            launch_form_for_log["id_token"] = (
-                f"<JWT omitted; {len(raw_id_token)} characters>"
-            )
-        _log_canvas_payload("launch form POST", launch_form_for_log)
-
     claims = await _verify_lti_id_token(
         id_token=id_token,
         jwks_url=registration.key_set_url,
@@ -1136,9 +1109,6 @@ async def lti_launch(
         expected_audience=oidc_session.client_id,
         expected_algorithm=registration.token_algorithm,
     )
-    if registration.lms_platform == LMSPlatform.CANVAS:
-        _log_canvas_payload("verified launch claims", claims)
-
     nonce = claims.get("nonce")
     if not isinstance(nonce, str) or not nonce:
         raise HTTPException(status_code=400, detail="Missing nonce in id_token")
