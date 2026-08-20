@@ -10923,6 +10923,19 @@ class LTIRegistration(Base):
         onupdate=func.now(),
     )
 
+    @property
+    def registration_method(self) -> schemas.LTIRegistrationMethod:
+        try:
+            registration_data = json.loads(self.registration_data or "{}")
+        except (json.JSONDecodeError, TypeError):
+            return schemas.LTIRegistrationMethod.DYNAMIC
+        if isinstance(registration_data, dict) and all(
+            key in registration_data
+            for key in ("oidc_initiation_url", "target_link_uri", "extensions")
+        ):
+            return schemas.LTIRegistrationMethod.MANUAL
+        return schemas.LTIRegistrationMethod.DYNAMIC
+
     @classmethod
     async def create(
         cls,

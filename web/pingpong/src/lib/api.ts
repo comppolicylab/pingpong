@@ -976,6 +976,7 @@ export const removeLectureLessonAccess = async (f: Fetcher, userId: number) => {
 };
 
 export type LTIRegistrationReviewStatus = 'pending' | 'approved' | 'rejected';
+export type LTIRegistrationMethod = 'dynamic' | 'manual';
 
 export type LTIRegistrationInstitution = {
 	id: number;
@@ -1005,6 +1006,7 @@ export type LTIRegistration = {
 	friendly_name: string | null;
 	enabled: boolean;
 	review_status: LTIRegistrationReviewStatus;
+	registration_method: LTIRegistrationMethod;
 	internal_notes: string | null;
 	review_notes: string | null;
 	review_by: LTIRegistrationReviewer | null;
@@ -1021,6 +1023,7 @@ export type LTIRegistrationDetail = LTIRegistration & {
 	openid_configuration: string | null;
 	registration_data: string | null;
 	lti_classes_count: number;
+	manual_configuration_url: string | null;
 };
 
 export type UpdateLTIRegistrationRequest = {
@@ -1043,8 +1046,74 @@ export const getLTIRegistrations = async (f: Fetcher) => {
 	return await GET<never, LTIRegistrations>(f, 'admin/lti/registrations');
 };
 
+export type CreateManualLTIRegistrationRequest = {
+	name: string;
+	admin_name: string;
+	admin_email: string;
+	issuer: string;
+	auth_login_url: string;
+	auth_token_url: string;
+	key_set_url: string;
+	provider_id: number;
+	sso_field: LTISSOField | null;
+	institution_ids: number[];
+	show_in_course_navigation: boolean;
+	internal_notes: string | null;
+};
+
+export const createManualLTIRegistration = async (
+	f: Fetcher,
+	data: CreateManualLTIRegistrationRequest
+) => {
+	return await POST<CreateManualLTIRegistrationRequest, LTIRegistrationDetail>(
+		f,
+		'admin/lti/registrations/manual',
+		data
+	);
+};
+
+export type CanvasPlatformPreset = {
+	id: string;
+	label: string;
+	issuer: string;
+	auth_login_url: string;
+	auth_token_url: string;
+	key_set_url: string;
+};
+
+export type CanvasPlatformPresets = {
+	default_preset_id: string;
+	presets: CanvasPlatformPreset[];
+};
+
+export const getCanvasPlatformPresets = async (f: Fetcher) => {
+	return await GET<never, CanvasPlatformPresets>(f, 'admin/lti/registrations/manual/presets');
+};
+
 export const getLTIRegistration = async (f: Fetcher, id: number | string) => {
 	return await GET<never, LTIRegistrationDetail>(f, `admin/lti/registrations/${id}`);
+};
+
+export type ManualLTIRegistrationTemplate = {
+	id: number;
+	name: string;
+	admin_name: string;
+	admin_email: string;
+	issuer: string;
+	auth_login_url: string;
+	auth_token_url: string;
+	key_set_url: string;
+	provider_id: number;
+	sso_field: LTISSOField | null;
+	institution_ids: number[];
+	show_in_course_navigation: boolean;
+};
+
+export const getManualLTIRegistrationTemplate = async (f: Fetcher, id: number | string) => {
+	return await GET<never, ManualLTIRegistrationTemplate>(
+		f,
+		`admin/lti/registrations/${id}/manual-template`
+	);
 };
 
 export const updateLTIRegistration = async (
@@ -1067,6 +1136,22 @@ export const setLTIRegistrationStatus = async (
 	return await PATCH<SetLTIRegistrationStatusRequest, LTIRegistration>(
 		f,
 		`admin/lti/registrations/${id}/status`,
+		data
+	);
+};
+
+export type AcceptManualLTIRegistrationRequest = {
+	client_id: string;
+};
+
+export const acceptManualLTIRegistration = async (
+	f: Fetcher,
+	id: number,
+	data: AcceptManualLTIRegistrationRequest
+) => {
+	return await POST<AcceptManualLTIRegistrationRequest, LTIRegistration>(
+		f,
+		`admin/lti/registrations/${id}/manual/accept`,
 		data
 	);
 };

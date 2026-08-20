@@ -205,14 +205,14 @@ class CanvasPlatformHandler(LTIPlatformHandler):
         payload = dict(base_tool_config)
         tool_config = dict(payload[LTI_TOOL_CONFIGURATION_KEY])
 
-        tool_config["custom_parameters"] = {
+        custom_parameters = {
             "platform": self.platform.value,
             "pingpong_lti_tool_version": PINGPONG_LTI_TOOL_VERSION,
             LTI_CUSTOM_SSO_PROVIDER_ID_KEY: str(data.provider_id),
-            LTI_CUSTOM_SSO_VALUE_KEY: (
-                f"${sso_field_full_name}" if sso_field_full_name else ""
-            ),
         }
+        if data.provider_id != NO_SSO_PROVIDER_ID and sso_field_full_name:
+            custom_parameters[LTI_CUSTOM_SSO_VALUE_KEY] = f"${sso_field_full_name}"
+        tool_config["custom_parameters"] = custom_parameters
         tool_config["https://canvas.instructure.com/lti/vendor"] = (
             "Computational Policy Lab"
         )

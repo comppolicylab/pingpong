@@ -31,6 +31,8 @@ from pingpong.lti.endpoints import (
 )
 from pingpong.lti.constants import (
     AUTHORIZATION_ENDPOINT_KEY,
+    CANVAS_ACCOUNT_LTI_GUID_KEY,
+    CANVAS_ACCOUNT_NAME_KEY,
     CANVAS_COURSE_ID_VARIABLE,
     CANVAS_TERM_NAME_VARIABLE,
     DEEP_LINK_MESSAGE_TYPE,
@@ -129,6 +131,94 @@ from pingpong.schemas import (
 logger = logging.getLogger(__name__)
 
 lti_router: APIRouter = APIRouter()
+
+
+def _parse_json_object(value: str | None) -> dict[str, Any] | None:
+    try:
+        payload = json.loads(value or "{}")
+    except (json.JSONDecodeError, TypeError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _set_missing_string(payload: dict[str, Any], key: str, value: object) -> bool:
+    if payload.get(key) or not isinstance(value, str) or not value:
+        return False
+    payload[key] = value
+    return True
+
+
+def _enrich_canvas_registration_from_launch(
+    registration: LTIRegistration,
+    claims: dict[str, Any],
+    deployment_id: str | None,
+) -> bool:
+    """Backfill missing Canvas registration metadata from a verified launch."""
+    if registration.lms_platform != LMSPlatform.CANVAS:
+        return False
+
+    changed = False
+    registration_data = _parse_json_object(
+        getattr(registration, "registration_data", None)
+    )
+    if registration_data is not None and _set_missing_string(
+        registration_data, "deployment_id", deployment_id
+    ):
+        registration.registration_data = json.dumps(registration_data)
+        changed = True
+
+    tool_platform = _get_claim_object(claims, LTI_CLAIM_TOOL_PLATFORM_KEY)
+    account_name = tool_platform.get("name")
+    account_lti_guid = tool_platform.get("guid")
+
+    if (
+        not getattr(registration, "canvas_account_name", None)
+        and isinstance(account_name, str)
+        and account_name
+    ):
+        registration.canvas_account_name = account_name
+        changed = True
+    if (
+        not registration.canvas_account_lti_guid
+        and isinstance(account_lti_guid, str)
+        and account_lti_guid
+    ):
+        registration.canvas_account_lti_guid = account_lti_guid
+        changed = True
+
+    openid_configuration = _parse_json_object(
+        getattr(registration, "openid_configuration", None)
+    )
+    if openid_configuration is None or not tool_platform:
+        return changed
+
+    platform_configuration = openid_configuration.get(PLATFORM_CONFIGURATION_KEY)
+    if platform_configuration is None:
+        platform_configuration = {}
+        openid_configuration[PLATFORM_CONFIGURATION_KEY] = platform_configuration
+    if not isinstance(platform_configuration, dict):
+        return changed
+
+    openid_changed = False
+    openid_changed |= _set_missing_string(
+        platform_configuration,
+        "product_family_code",
+        tool_platform.get("product_family_code"),
+    )
+    openid_changed |= _set_missing_string(
+        platform_configuration, "version", tool_platform.get("version")
+    )
+    openid_changed |= _set_missing_string(
+        platform_configuration, CANVAS_ACCOUNT_NAME_KEY, account_name
+    )
+    openid_changed |= _set_missing_string(
+        platform_configuration, CANVAS_ACCOUNT_LTI_GUID_KEY, account_lti_guid
+    )
+    if openid_changed:
+        registration.openid_configuration = json.dumps(openid_configuration)
+        changed = True
+
+    return changed
 
 
 def _is_public_sso_provider(provider: ExternalLoginProvider) -> bool:
@@ -1019,7 +1109,6 @@ async def lti_launch(
         expected_audience=oidc_session.client_id,
         expected_algorithm=registration.token_algorithm,
     )
-
     nonce = claims.get("nonce")
     if not isinstance(nonce, str) or not nonce:
         raise HTTPException(status_code=400, detail="Missing nonce in id_token")
@@ -1047,6 +1136,12 @@ async def lti_launch(
     )
     if consumed is None:
         raise HTTPException(status_code=400, detail="Invalid or expired state/nonce")
+    if _enrich_canvas_registration_from_launch(
+        registration,
+        claims,
+        deployment_id_claim if isinstance(deployment_id_claim, str) else None,
+    ):
+        request.state["db"].add(registration)
     launch_custom_params = _get_claim_object(claims, LTI_CLAIM_CUSTOM_KEY)
     resource_link_claim = _get_claim_object(claims, LTI_CLAIM_RESOURCE_LINK_KEY)
     resource_link_id = None

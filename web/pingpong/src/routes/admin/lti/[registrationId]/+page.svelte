@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { invalidateAll } from '$app/navigation';
+	import { copy } from 'svelte-copy';
 	import {
 		Button,
 		Heading,
@@ -12,7 +13,13 @@
 		Card,
 		MultiSelect
 	} from 'flowbite-svelte';
-	import { ArrowRightOutline, CheckCircleSolid, CloseCircleSolid } from 'flowbite-svelte-icons';
+	import {
+		ArrowRightOutline,
+		CheckCircleSolid,
+		CloseCircleSolid,
+		DownloadOutline,
+		FileCopyOutline
+	} from 'flowbite-svelte-icons';
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import * as api from '$lib/api';
 	import { happyToast, sadToast } from '$lib/toast';
@@ -38,6 +45,11 @@
 	let settingStatus = false;
 	let togglingEnabled = false;
 	let savingInstitutions = false;
+	let acceptingManualRegistration = false;
+	let draftClientId = registration.client_id || '';
+
+	const actionButtonClass =
+		'flex items-center gap-2 rounded-full border border-blue-dark-40 bg-white px-3 py-1.5 text-xs font-medium text-blue-dark-40 transition-all hover:bg-blue-dark-40 hover:text-white';
 
 	$: institutionOptions = availableInstitutions.map((inst) => ({
 		value: inst.id,
@@ -58,8 +70,11 @@
 		});
 	}
 
-	const getStatusBadge = (status: api.LTIRegistrationReviewStatus) => {
-		switch (status) {
+	const getStatusBadge = (currentRegistration: api.LTIRegistrationDetail) => {
+		if (currentRegistration.registration_method === 'manual' && !currentRegistration.client_id) {
+			return { color: 'yellow' as const, text: 'Awaiting client ID' };
+		}
+		switch (currentRegistration.review_status) {
 			case 'approved':
 				return { color: 'green' as const, text: 'Approved' };
 			case 'rejected':
@@ -89,6 +104,34 @@
 		} catch {
 			return jsonStr;
 		}
+	};
+
+	const formatManualConfiguration = (jsonStr: string | null): string => {
+		if (!jsonStr) return 'No data available';
+		try {
+			const parsed = JSON.parse(jsonStr);
+			if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+				delete parsed.deployment_id;
+			}
+			return JSON.stringify(parsed, null, 2);
+		} catch {
+			return jsonStr;
+		}
+	};
+
+	const downloadManualConfiguration = () => {
+		const blob = new Blob([`${manualConfiguration}\n`], { type: 'application/json' });
+		const objectUrl = URL.createObjectURL(blob);
+		const anchor = document.createElement('a');
+		const filename = (registration.friendly_name || 'pingpong-canvas-lti')
+			.toLowerCase()
+			.replace(/[^a-z0-9]+/g, '-')
+			.replace(/^-|-$/g, '');
+		anchor.href = objectUrl;
+		anchor.download = `${filename || 'pingpong-canvas-lti'}.json`;
+		anchor.click();
+		URL.revokeObjectURL(objectUrl);
+		happyToast('Canvas configuration downloaded');
 	};
 
 	const getReviewerName = (reviewer: api.LTIRegistrationReviewer | null) => {
@@ -121,6 +164,31 @@
 		draftInternalNotes = registration.internal_notes || '';
 		draftReviewNotes = registration.review_notes || '';
 		selectedInstitutionIds = registration.institutions.map((i) => i.id);
+		draftClientId = registration.client_id || '';
+	};
+
+	const acceptManualRegistration = async () => {
+		if (acceptingManualRegistration || !draftClientId.trim()) return;
+		acceptingManualRegistration = true;
+		try {
+			const response = api.expandResponse(
+				await api.acceptManualLTIRegistration(fetch, registration.id, {
+					client_id: draftClientId.trim()
+				})
+			);
+			if (response.error) {
+				sadToast(response.error.detail || 'Could not activate manual registration');
+				return;
+			}
+			happyToast('Manual registration activated');
+			await refresh();
+			await invalidateAll();
+		} catch (err) {
+			console.error(err);
+			sadToast('Could not activate manual registration');
+		} finally {
+			acceptingManualRegistration = false;
+		}
 	};
 
 	const saveChanges = async () => {
@@ -219,7 +287,9 @@
 		}
 	};
 
-	$: statusBadge = getStatusBadge(registration.review_status);
+	$: statusBadge = getStatusBadge(registration);
+	$: isManualRegistration = registration.registration_method === 'manual';
+	$: manualConfiguration = formatManualConfiguration(registration.registration_data);
 	$: hasChanges =
 		draftFriendlyName !== (registration.friendly_name || '') ||
 		draftAdminName !== (registration.admin_name || '') ||
@@ -276,13 +346,97 @@
 			</div>
 		</div>
 
+		{#if isManualRegistration}
+			<div class="max-w-3xl space-y-4">
+				<Heading tag="h3" class="text-dark-blue-40 font-serif text-xl font-medium">
+					Canvas Configuration
+				</Heading>
+				<Helper>
+					Send the JSON or URL to the Canvas admin, then enter the client ID Canvas returns.
+				</Helper>
+
+				<div>
+					<div class="mb-2 flex items-center justify-between gap-3">
+						<Label>Configuration JSON</Label>
+						<div class="flex gap-2">
+							<button
+								type="button"
+								class={actionButtonClass}
+								onclick={() => {}}
+								use:copy={{
+									text: manualConfiguration,
+									onCopy: () => happyToast('Copied')
+								}}
+							>
+								<FileCopyOutline class="h-4 w-4" />Copy
+							</button>
+							<button type="button" class={actionButtonClass} onclick={downloadManualConfiguration}>
+								<DownloadOutline class="h-4 w-4" />Download
+							</button>
+						</div>
+					</div>
+					<pre
+						class="max-h-96 overflow-x-auto overflow-y-auto rounded-lg bg-gray-50 p-4 text-xs whitespace-pre-wrap text-gray-700">{manualConfiguration}</pre>
+				</div>
+
+				{#if registration.manual_configuration_url}
+					<div>
+						<div class="mb-2 flex items-center justify-between gap-3">
+							<Label for="manual-configuration-url">Configuration URL</Label>
+							<button
+								type="button"
+								class={actionButtonClass}
+								onclick={() => {}}
+								use:copy={{
+									text: registration.manual_configuration_url,
+									onCopy: () => happyToast('Copied')
+								}}
+							>
+								<FileCopyOutline class="h-4 w-4" />Copy
+							</button>
+						</div>
+						<Input
+							id="manual-configuration-url"
+							value={registration.manual_configuration_url}
+							readonly
+							class="font-mono text-xs"
+						/>
+					</div>
+				{/if}
+
+				{#if !registration.client_id}
+					<div>
+						<Label for="manual-client-id" class="mb-1">Canvas Client ID</Label>
+						<Helper class="mb-2">Entering the client ID activates this registration.</Helper>
+						<Input
+							id="manual-client-id"
+							bind:value={draftClientId}
+							placeholder="e.g., 17000000000042"
+							disabled={acceptingManualRegistration}
+						/>
+						<div class="flex justify-end pt-4">
+							<Button
+								class="rounded-full bg-orange text-white hover:bg-orange-dark"
+								disabled={acceptingManualRegistration || !draftClientId.trim()}
+								onclick={acceptManualRegistration}
+							>
+								Activate
+							</Button>
+						</div>
+					</div>
+				{/if}
+			</div>
+		{/if}
+
 		<!-- Status Actions -->
 		<Card class="max-w-3xl">
 			<Heading tag="h4" class="mb-4 text-lg font-medium text-gray-900">Review Actions</Heading>
 			<div class="flex flex-wrap gap-3">
 				<Button
 					color="green"
-					disabled={settingStatus || registration.review_status === 'approved'}
+					disabled={settingStatus ||
+						registration.review_status === 'approved' ||
+						!registration.client_id}
 					onclick={() => setStatus('approved')}
 					class="flex items-center gap-2"
 				>
