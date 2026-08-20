@@ -190,7 +190,7 @@ def test_canvas_build_tool_registration_payload_includes_vendor_extensions():
     assert tool["custom_parameters"]["platform"] == "canvas"
     assert tool["custom_parameters"]["pingpong_lti_tool_version"] == "1.1"
     assert tool["custom_parameters"]["sso_provider_id"] == NO_SSO_PROVIDER_ID_STR
-    assert tool["custom_parameters"]["sso_value"] == ""
+    assert "sso_value" not in tool["custom_parameters"]
     assert tool["https://canvas.instructure.com/lti/vendor"] == (
         "Computational Policy Lab"
     )
