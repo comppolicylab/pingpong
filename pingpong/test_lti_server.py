@@ -463,6 +463,63 @@ def _make_registration(
     )
 
 
+def test_enrich_canvas_registration_from_launch_only_fills_missing_values():
+    registration = _make_registration()
+    registration.registration_data = json.dumps({"title": "PingPong"})
+    registration.openid_configuration = json.dumps({"issuer": "issuer"})
+    registration.canvas_account_name = None
+
+    claims = {
+        server_module.LTI_CLAIM_TOOL_PLATFORM_KEY: {
+            "guid": "account-guid",
+            "name": "Canvas Account",
+            "product_family_code": "canvas",
+            "version": "cloud",
+        }
+    }
+
+    assert server_module._enrich_canvas_registration_from_launch(
+        registration, claims, "deployment-1"
+    )
+
+    registration_data = json.loads(registration.registration_data)
+    assert registration_data["deployment_id"] == "deployment-1"
+    assert registration.canvas_account_name == "Canvas Account"
+    assert registration.canvas_account_lti_guid == "account-guid"
+    platform_configuration = json.loads(registration.openid_configuration)[
+        server_module.PLATFORM_CONFIGURATION_KEY
+    ]
+    assert platform_configuration["product_family_code"] == "canvas"
+    assert platform_configuration["version"] == "cloud"
+    assert (
+        platform_configuration[server_module.CANVAS_ACCOUNT_NAME_KEY]
+        == "Canvas Account"
+    )
+    assert (
+        platform_configuration[server_module.CANVAS_ACCOUNT_LTI_GUID_KEY]
+        == "account-guid"
+    )
+
+    registration_json = registration.registration_data
+    openid_json = registration.openid_configuration
+    assert not server_module._enrich_canvas_registration_from_launch(
+        registration,
+        {
+            server_module.LTI_CLAIM_TOOL_PLATFORM_KEY: {
+                "guid": "different-guid",
+                "name": "Different Account",
+                "product_family_code": "different-platform",
+                "version": "different-version",
+            }
+        },
+        "deployment-2",
+    )
+    assert registration.registration_data == registration_json
+    assert registration.openid_configuration == openid_json
+    assert registration.canvas_account_name == "Canvas Account"
+    assert registration.canvas_account_lti_guid == "account-guid"
+
+
 @pytest.mark.asyncio
 async def test_fetch_jwks_returns_dict(monkeypatch):
     monkeypatch.setattr(
@@ -1004,6 +1061,11 @@ async def test_register_lti_instance_success(monkeypatch, reinstall):
         server_module.LTI_REGISTRATION_SCOPE
         in session.post_calls[0][1]["json"]["scope"].split()
     )
+    custom_parameters = session.post_calls[0][1]["json"][
+        server_module.LTI_TOOL_CONFIGURATION_KEY
+    ]["custom_parameters"]
+    assert custom_parameters[server_module.LTI_CUSTOM_SSO_PROVIDER_ID_KEY] == "0"
+    assert server_module.LTI_CUSTOM_SSO_VALUE_KEY not in custom_parameters
     assert updated["identity"] == ("issuer", "client")
     if reinstall:
         assert created == {}

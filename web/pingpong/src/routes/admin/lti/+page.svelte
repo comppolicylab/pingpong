@@ -11,7 +11,7 @@
 		Toggle,
 		Badge
 	} from 'flowbite-svelte';
-	import { ArrowRightOutline, PenSolid } from 'flowbite-svelte-icons';
+	import { ArrowRightOutline, PenSolid, PlusOutline } from 'flowbite-svelte-icons';
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import type { LTIRegistration } from '$lib/api';
 	import * as api from '$lib/api';
@@ -38,8 +38,11 @@
 		});
 	}
 
-	const getStatusBadge = (status: api.LTIRegistrationReviewStatus) => {
-		switch (status) {
+	const getStatusBadge = (registration: LTIRegistration) => {
+		if (registration.registration_method === 'manual' && !registration.client_id) {
+			return { color: 'yellow' as const, text: 'Awaiting client ID' };
+		}
+		switch (registration.review_status) {
 			case 'approved':
 				return { color: 'green' as const, text: 'Approved' };
 			case 'rejected':
@@ -109,6 +112,14 @@
 				class="text-dark-blue-40 mr-5 max-w-max shrink-0 font-serif text-3xl font-medium"
 				>Manage LTI Integrations</Heading
 			>
+			<Button
+				pill
+				size="sm"
+				class="flex flex-row gap-2 border border-solid border-blue-dark-40 bg-white text-blue-dark-40 hover:bg-blue-dark-40 hover:text-white"
+				href={resolve('/admin/lti/manual')}
+			>
+				<PlusOutline />New manual registration
+			</Button>
 		</div>
 
 		<div class="flex flex-col gap-4">
@@ -116,6 +127,7 @@
 				<TableHead class="rounded-2xl bg-blue-light-40 p-1 tracking-wide text-blue-dark-50">
 					<TableHeadCell>Name</TableHeadCell>
 					<TableHeadCell>Status</TableHeadCell>
+					<TableHeadCell>Setup</TableHeadCell>
 					<TableHeadCell>Admin Contact</TableHeadCell>
 					<TableHeadCell>Created</TableHeadCell>
 					<TableHeadCell>Enabled</TableHeadCell>
@@ -124,14 +136,14 @@
 				<TableBody>
 					{#if registrations.length === 0}
 						<TableBodyRow>
-							<TableBodyCell colspan={6} class="py-4 text-sm text-gray-500">
+							<TableBodyCell colspan={7} class="py-4 text-sm text-gray-500">
 								No LTI registrations found.
 							</TableBodyCell>
 						</TableBodyRow>
 					{/if}
 
 					{#each registrations as registration (registration.id)}
-						{@const statusBadge = getStatusBadge(registration.review_status)}
+						{@const statusBadge = getStatusBadge(registration)}
 						<TableBodyRow>
 							<TableBodyCell class="max-w-xs py-2 font-medium whitespace-normal">
 								<div class="flex flex-col">
@@ -143,6 +155,9 @@
 							</TableBodyCell>
 							<TableBodyCell class="py-2">
 								<Badge color={statusBadge.color}>{statusBadge.text}</Badge>
+							</TableBodyCell>
+							<TableBodyCell class="py-2 text-sm text-gray-600 capitalize">
+								{registration.registration_method}
 							</TableBodyCell>
 							<TableBodyCell class="max-w-xs py-2 whitespace-normal">
 								<div class="flex flex-col text-sm">

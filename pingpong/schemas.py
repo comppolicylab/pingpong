@@ -1,6 +1,7 @@
 from datetime import date, datetime
 from enum import Enum, StrEnum, auto
 from typing import Any, Generic, Literal, NotRequired, TypeVar, Union
+from urllib.parse import urlparse
 from typing_extensions import TypedDict, Annotated, TypeAlias
 
 from openai._utils import PropertyInfo
@@ -2826,6 +2827,11 @@ class LTIRegistrationReviewStatus(StrEnum):
     REJECTED = "rejected"
 
 
+class LTIRegistrationMethod(StrEnum):
+    DYNAMIC = "dynamic"
+    MANUAL = "manual"
+
+
 class LTITokenAlgorithm(StrEnum):
     RS256 = "RS256"
 
@@ -2866,6 +2872,7 @@ class LTIRegistration(BaseModel):
     friendly_name: str | None
     enabled: bool
     review_status: LTIRegistrationReviewStatus
+    registration_method: LTIRegistrationMethod = LTIRegistrationMethod.DYNAMIC
     internal_notes: str | None
     review_notes: str | None
     review_by: LTIRegistrationReviewer | None
@@ -2890,6 +2897,7 @@ class LTIRegistrationDetail(LTIRegistration):
     openid_configuration: str | None
     registration_data: str | None
     lti_classes_count: int = 0
+    manual_configuration_url: str | None = None
 
     model_config = ConfigDict(
         from_attributes=True,
@@ -2914,6 +2922,109 @@ class SetLTIRegistrationEnabled(BaseModel):
 
 class SetLTIRegistrationInstitutions(BaseModel):
     institution_ids: list[int]
+
+
+class CreateManualLTIRegistration(BaseModel):
+    name: str = Field(..., min_length=1, max_length=200)
+    admin_name: str = Field(..., min_length=1, max_length=200)
+    admin_email: str = Field(..., min_length=3, max_length=200)
+    issuer: str = Field(..., min_length=1, max_length=2048)
+    auth_login_url: str = Field(..., min_length=1, max_length=2048)
+    auth_token_url: str = Field(..., min_length=1, max_length=2048)
+    key_set_url: str = Field(..., min_length=1, max_length=2048)
+    provider_id: int = Field(0, ge=0)
+    sso_field: (
+        Literal[
+            "canvas.sisIntegrationId",
+            "canvas.sisSourceId",
+            "person.sourcedId",
+        ]
+        | None
+    ) = None
+    institution_ids: list[int] = Field(..., min_length=1)
+    show_in_course_navigation: bool = True
+    internal_notes: str | None = Field(None, max_length=5000)
+
+    @field_validator("name", "admin_name")
+    @classmethod
+    def validate_non_empty_name(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("Value cannot be blank")
+        return value
+
+    @field_validator("issuer", "auth_login_url", "auth_token_url", "key_set_url")
+    @classmethod
+    def validate_platform_url(cls, value: str) -> str:
+        value = value.strip()
+        parsed = urlparse(value)
+        if (
+            parsed.scheme not in {"http", "https"}
+            or not parsed.netloc
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.fragment
+        ):
+            raise ValueError("Must be an HTTP(S) URL without credentials or a fragment")
+        return value
+
+    @model_validator(mode="after")
+    def validate_sso_selection(self) -> "CreateManualLTIRegistration":
+        if self.provider_id == 0 and self.sso_field is not None:
+            raise ValueError("SSO field must be null when no SSO provider is selected")
+        if self.provider_id != 0 and self.sso_field is None:
+            raise ValueError("SSO field is required when an SSO provider is selected")
+        return self
+
+
+class AcceptManualLTIRegistration(BaseModel):
+    client_id: str = Field(..., min_length=1, max_length=200)
+
+    @field_validator("client_id")
+    @classmethod
+    def validate_client_id(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("Client ID cannot be blank")
+        return value
+
+
+class ManualLTIRegistrationTemplate(BaseModel):
+    id: int
+    name: str
+    admin_name: str
+    admin_email: str
+    issuer: str
+    auth_login_url: str
+    auth_token_url: str
+    key_set_url: str
+    provider_id: int
+    sso_field: (
+        Literal[
+            "canvas.sisIntegrationId",
+            "canvas.sisSourceId",
+            "person.sourcedId",
+        ]
+        | None
+    )
+    institution_ids: list[int]
+    show_in_course_navigation: bool
+
+
+class CanvasPlatformPreset(BaseModel):
+    id: str
+    label: str
+    issuer: str
+    auth_login_url: str
+    auth_token_url: str
+    key_set_url: str
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class CanvasPlatformPresets(BaseModel):
+    default_preset_id: str
+    presets: list[CanvasPlatformPreset]
 
 
 class InstitutionWithDefaultAPIKey(BaseModel):

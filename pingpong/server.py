@@ -101,9 +101,17 @@ from pingpong.followup_transform import (
     strip_followup_snippets,
 )
 from pingpong.http_utils import content_disposition
+from pingpong.lti.constants import NO_SSO_PROVIDER_ID, SSO_FIELD_FULL_NAME
 from pingpong.lti.lti_course import (
     find_class_by_course_id,
     find_class_by_course_id_search_by_canvas_account_lti_guid,
+)
+from pingpong.lti.manual_registration import (
+    CANVAS_PLATFORM_PRESETS,
+    DEFAULT_CANVAS_PLATFORM_PRESET_ID,
+    build_canvas_manual_configuration,
+    build_canvas_openid_configuration,
+    extract_registration_settings,
 )
 from pingpong.realtime import browser_realtime_websocket
 from pingpong.say_transform import transform_say_text
@@ -1919,6 +1927,140 @@ async def list_lti_registrations(request: StateRequest):
     return {"registrations": registrations}
 
 
+def _manual_lti_configuration(
+    registration: models.LTIRegistration,
+) -> dict[str, Any] | None:
+    if registration.registration_method != schemas.LTIRegistrationMethod.MANUAL:
+        return None
+    try:
+        configuration = json.loads(registration.registration_data or "{}")
+    except (json.JSONDecodeError, TypeError):
+        return None
+    if not isinstance(configuration, dict):
+        return None
+
+    configuration.pop("deployment_id", None)
+    return configuration
+
+
+def _manual_lti_configuration_url(registration: models.LTIRegistration) -> str | None:
+    if _manual_lti_configuration(registration) is None:
+        return None
+    return config.url(f"/api/v1/lti/registrations/{registration.id}/configuration.json")
+
+
+@v1.get("/lti/registrations/{registration_id}/configuration.json")
+async def get_public_manual_lti_configuration(
+    registration_id: int, request: StateRequest
+):
+    registration = await models.LTIRegistration.get_by_id(
+        request.state["db"], registration_id
+    )
+    if registration is None:
+        raise HTTPException(status_code=404, detail="LTI configuration not found")
+    configuration = _manual_lti_configuration(registration)
+    if configuration is None:
+        raise HTTPException(status_code=404, detail="LTI configuration not found")
+    return JSONResponse(
+        content=configuration,
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+@v1.post(
+    "/admin/lti/registrations/manual",
+    dependencies=[Depends(Authz("admin"))],
+    response_model=schemas.LTIRegistrationDetail,
+)
+async def create_manual_lti_registration(
+    body: schemas.CreateManualLTIRegistration,
+    request: StateRequest,
+):
+    try:
+        admin_email = validate_email(
+            body.admin_email, check_deliverability=False
+        ).normalized
+    except EmailSyntaxError as e:
+        raise HTTPException(status_code=400, detail=f"Invalid email: {str(e)}")
+
+    if not await models.Institution.all_have_default_api_key(
+        request.state["db"], body.institution_ids
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="All selected institutions must have a default API key configured",
+        )
+
+    if body.provider_id != NO_SSO_PROVIDER_ID:
+        provider = await models.ExternalLoginProvider.get_by_id(
+            request.state["db"], body.provider_id
+        )
+        if provider is None:
+            raise HTTPException(status_code=400, detail="Unknown SSO provider")
+
+    sso_field_full_name = (
+        None if body.sso_field is None else SSO_FIELD_FULL_NAME[body.sso_field]
+    )
+    manual_configuration = build_canvas_manual_configuration(
+        public_url=config.public_url,
+        provider_id=body.provider_id,
+        sso_field_full_name=sso_field_full_name,
+        show_in_course_navigation=body.show_in_course_navigation,
+    )
+    openid_configuration = build_canvas_openid_configuration(
+        issuer=body.issuer,
+        authorization_endpoint=body.auth_login_url,
+        token_endpoint=body.auth_token_url,
+        jwks_uri=body.key_set_url,
+    )
+
+    created_registration = await models.LTIRegistration.create(
+        request.state["db"],
+        {
+            "issuer": body.issuer,
+            "client_id": None,
+            "auth_login_url": body.auth_login_url,
+            "auth_token_url": body.auth_token_url,
+            "key_set_url": body.key_set_url,
+            "token_algorithm": schemas.LTITokenAlgorithm.RS256,
+            "lms_platform": schemas.LMSPlatform.CANVAS,
+            "openid_configuration": json.dumps(openid_configuration),
+            "registration_data": json.dumps(manual_configuration),
+            "admin_name": body.admin_name,
+            "admin_email": admin_email,
+            "friendly_name": body.name,
+            "internal_notes": body.internal_notes,
+            "enabled": False,
+            "review_status": schemas.LTIRegistrationReviewStatus.PENDING,
+        },
+        body.institution_ids,
+    )
+    registration = await models.LTIRegistration.get_by_id(
+        request.state["db"], created_registration.id
+    )
+    if registration is None:
+        raise HTTPException(status_code=500, detail="Failed to create LTI registration")
+    detail = schemas.LTIRegistrationDetail.model_validate(registration)
+    return detail.model_copy(
+        update={
+            "lti_classes_count": 0,
+            "manual_configuration_url": _manual_lti_configuration_url(registration),
+        }
+    )
+
+
+@v1.get(
+    "/admin/lti/registrations/manual/presets",
+    dependencies=[Depends(Authz("admin"))],
+    response_model=schemas.CanvasPlatformPresets,
+)
+async def get_canvas_platform_presets():
+    return {
+        "default_preset_id": DEFAULT_CANVAS_PLATFORM_PRESET_ID,
+        "presets": CANVAS_PLATFORM_PRESETS,
+    }
+
+
 @v1.get(
     "/admin/lti/registrations/{registration_id}",
     dependencies=[Depends(Authz("admin"))],
@@ -1933,7 +2075,45 @@ async def get_lti_registration(registration_id: int, request: StateRequest):
 
     detail = schemas.LTIRegistrationDetail.model_validate(registration)
     return detail.model_copy(
-        update={"lti_classes_count": len(registration.lti_classes or [])}
+        update={
+            "lti_classes_count": len(registration.lti_classes or []),
+            "manual_configuration_url": _manual_lti_configuration_url(registration),
+        }
+    )
+
+
+@v1.get(
+    "/admin/lti/registrations/{registration_id}/manual-template",
+    dependencies=[Depends(Authz("admin"))],
+    response_model=schemas.ManualLTIRegistrationTemplate,
+)
+async def get_manual_lti_registration_template(
+    registration_id: int, request: StateRequest
+):
+    registration = await models.LTIRegistration.get_by_id(
+        request.state["db"], registration_id
+    )
+    if registration is None:
+        raise HTTPException(status_code=404, detail="LTI registration not found")
+
+    settings = extract_registration_settings(registration.registration_data)
+    return schemas.ManualLTIRegistrationTemplate(
+        id=registration.id,
+        name=(
+            registration.friendly_name
+            or registration.canvas_account_name
+            or registration.issuer
+        ),
+        admin_name=registration.admin_name or "",
+        admin_email=registration.admin_email or "",
+        issuer=registration.issuer,
+        auth_login_url=registration.auth_login_url,
+        auth_token_url=registration.auth_token_url,
+        key_set_url=registration.key_set_url,
+        provider_id=settings.provider_id,
+        sso_field=settings.sso_field,
+        institution_ids=[institution.id for institution in registration.institutions],
+        show_in_course_navigation=settings.show_in_course_navigation,
     )
 
 
@@ -1977,6 +2157,15 @@ async def set_lti_registration_status(
         raise HTTPException(status_code=404, detail="LTI registration not found")
 
     previous_status = current_registration.review_status
+
+    if (
+        body.review_status == schemas.LTIRegistrationReviewStatus.APPROVED
+        and not current_registration.client_id
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="A Canvas client ID is required before approval",
+        )
 
     data: dict[str, Any] = {"review_status": body.review_status}
     if body.review_status == schemas.LTIRegistrationReviewStatus.APPROVED:
@@ -2024,6 +2213,51 @@ async def set_lti_registration_status(
             )
 
     return registration
+
+
+@v1.post(
+    "/admin/lti/registrations/{registration_id}/manual/accept",
+    dependencies=[Depends(Authz("admin"))],
+    response_model=schemas.LTIRegistration,
+)
+async def accept_manual_lti_registration(
+    registration_id: int,
+    body: schemas.AcceptManualLTIRegistration,
+    request: StateRequest,
+):
+    registration = await models.LTIRegistration.get_by_id(
+        request.state["db"], registration_id
+    )
+    if not registration:
+        raise HTTPException(status_code=404, detail="LTI registration not found")
+    if registration.registration_method != schemas.LTIRegistrationMethod.MANUAL:
+        raise HTTPException(
+            status_code=400, detail="Only manual registrations can be accepted here"
+        )
+
+    client_id = body.client_id
+    existing = await models.LTIRegistration.get_by_issuer_and_client_id(
+        request.state["db"], registration.issuer, client_id
+    )
+    if existing is not None and existing.id != registration.id:
+        raise HTTPException(
+            status_code=409,
+            detail="That Canvas client ID is already registered for this issuer",
+        )
+
+    updated = await models.LTIRegistration.update(
+        request.state["db"],
+        registration_id,
+        {
+            "client_id": client_id,
+            "review_status": schemas.LTIRegistrationReviewStatus.APPROVED,
+            "enabled": True,
+        },
+        reviewer_id=request.state["session"].user.id,
+    )
+    if updated is None:
+        raise HTTPException(status_code=404, detail="LTI registration not found")
+    return updated
 
 
 @v1.patch(
