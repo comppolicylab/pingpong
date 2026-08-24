@@ -1644,3 +1644,88 @@ def test_get_known_response_message_phase_returns_known_phase_only():
 def test_get_response_message_phase_value_preserves_unknown_sdk_phase():
     assert ai.get_response_message_phase_value("future_phase") == "future_phase"
     assert ai.get_response_message_phase_value(None) is None
+
+
+@pytest.mark.asyncio
+async def test_build_response_input_item_list_uses_current_refusal_type(db):
+    async with db.async_session() as session:
+        thread = models.Thread(thread_id="thread_refusal_context", version=3)
+        session.add(thread)
+        await session.flush()
+
+        run = models.Run(status=schemas.RunStatus.COMPLETED, thread_id=thread.id)
+        session.add(run)
+        await session.flush()
+
+        session.add(
+            models.Message(
+                message_status=schemas.MessageStatus.COMPLETED,
+                run_id=run.id,
+                thread_id=thread.id,
+                output_index=1,
+                role=schemas.MessageRole.ASSISTANT,
+                content=[
+                    models.MessagePart(
+                        part_index=0,
+                        type=schemas.MessagePartType.REFUSAL,
+                        refusal="I cannot help with that.",
+                    )
+                ],
+            )
+        )
+        await session.commit()
+        thread_id = thread.id
+
+    async with db.async_session() as session:
+        items = await build_response_input_item_list(session, thread_id=thread_id)
+
+    assert items[0]["content"] == [
+        {"refusal": "I cannot help with that.", "type": "refusal"}
+    ]
+
+
+@pytest.mark.asyncio
+async def test_build_response_input_item_list_uses_current_find_action_type(db):
+    async with db.async_session() as session:
+        thread = models.Thread(thread_id="thread_find_action_context", version=3)
+        session.add(thread)
+        await session.flush()
+
+        run = models.Run(status=schemas.RunStatus.COMPLETED, thread_id=thread.id)
+        session.add(run)
+        await session.flush()
+
+        tool_call = models.ToolCall(
+            tool_call_id="web-search-1",
+            type=schemas.ToolCallType.WEB_SEARCH,
+            status=schemas.ToolCallStatus.COMPLETED,
+            run_id=run.id,
+            thread_id=thread.id,
+            output_index=1,
+            web_search_actions=[
+                models.WebSearchCallAction(
+                    type=schemas.WebSearchActionType.FIND,
+                    pattern="needle",
+                    url="https://example.com/page",
+                )
+            ],
+        )
+        session.add(tool_call)
+        await session.commit()
+        thread_id = thread.id
+
+    async with db.async_session() as session:
+        items = await build_response_input_item_list(session, thread_id=thread_id)
+
+    assert items == [
+        {
+            "id": "web-search-1",
+            "action": {
+                "type": "find_in_page",
+                "pattern": "needle",
+                "url": "https://example.com/page",
+            },
+            "status": "completed",
+            "type": "web_search_call",
+        }
+    ]

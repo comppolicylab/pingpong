@@ -22,7 +22,7 @@ from typing import Any, TypeVar, TypedDict, cast
 import openai
 import sentry_sdk
 import tiktoken
-from openai.types import Reasoning
+from openai.types.shared_params import Reasoning
 import uuid_utils as uuid
 from openai.types.responses.response_input_param import ResponseInputParam
 from pydantic import (

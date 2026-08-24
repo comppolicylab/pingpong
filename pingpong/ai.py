@@ -74,8 +74,8 @@ from openai.types.beta.assistant_stream_event import (
     ThreadRunStepFailed,
     ThreadRunFailed,
 )
+from openai import AsyncStream
 from openai.types.responses import ToolParam, FileSearchToolParam, WebSearchToolParam
-from openai._streaming import AsyncStream
 from openai.types.responses.tool_param import (
     CodeInterpreter,
     Mcp,
@@ -151,11 +151,11 @@ from openai.types.responses.response_reasoning_item_param import (
     Content,
 )
 from openai.types.responses.response_output_text_param import (
-    Annotation,
-    AnnotationFileCitation,
-    AnnotationURLCitation,
-    AnnotationContainerFileCitation,
-    AnnotationFilePath,
+    Annotation as AnnotationParam,
+    AnnotationFileCitation as AnnotationFileCitationParam,
+    AnnotationURLCitation as AnnotationURLCitationParam,
+    AnnotationContainerFileCitation as AnnotationContainerFileCitationParam,
+    AnnotationFilePath as AnnotationFilePathParam,
 )
 from openai.types.responses.response_file_search_tool_call_param import (
     ResponseFileSearchToolCallParam,
@@ -167,9 +167,18 @@ from openai.types.responses.response_code_interpreter_tool_call_param import (
     OutputLogs,
 )
 from openai.types.responses.response_function_web_search_param import (
+    ActionFind as ActionFindParam,
+    ActionOpenPage as ActionOpenPageParam,
+    ActionSearch as ActionSearchParam,
     ResponseFunctionWebSearchParam,
 )
-from openai.types.shared.reasoning import Reasoning
+from openai.types.responses.response_output_text_annotation_added_event import (
+    AnnotationContainerFileCitation as AnnotationContainerFileCitationEvent,
+    AnnotationFileCitation as AnnotationFileCitationEvent,
+    AnnotationURLCitation as AnnotationURLCitationEvent,
+    ResponseOutputTextAnnotationAddedEvent,
+)
+from openai.types.shared_params import Reasoning
 from openai.types.responses.response_text_config_param import ResponseTextConfigParam
 from openai.types.beta.threads import ImageFile, MessageContentPartParam
 from openai.types.beta.threads.annotation import FileCitationAnnotation
@@ -862,7 +871,7 @@ async def build_response_input_item_list(
                         )
                     )
                 case MessagePartType.OUTPUT_TEXT:
-                    annotations: list[Annotation] = []
+                    annotations: list[AnnotationParam] = []
                     stored_annotations = list(content.annotations)
                     present_annotation_types = {
                         annotation.type
@@ -891,7 +900,7 @@ async def build_response_input_item_list(
                         match annotation.type:
                             case AnnotationType.FILE_CITATION:
                                 annotations.append(
-                                    AnnotationFileCitation(
+                                    AnnotationFileCitationParam(
                                         file_id=annotation.file_id,
                                         filename=annotation.filename,
                                         index=annotation.index or 0,
@@ -900,7 +909,7 @@ async def build_response_input_item_list(
                                 )
                             case AnnotationType.FILE_PATH:
                                 annotations.append(
-                                    AnnotationFilePath(
+                                    AnnotationFilePathParam(
                                         file_id=annotation.file_id,
                                         index=annotation.index or 0,
                                         type="file_path",
@@ -908,7 +917,7 @@ async def build_response_input_item_list(
                                 )
                             case AnnotationType.URL_CITATION:
                                 annotations.append(
-                                    AnnotationURLCitation(
+                                    AnnotationURLCitationParam(
                                         url=annotation.url,
                                         start_index=annotation.start_index or 0,
                                         end_index=annotation.end_index or 0,
@@ -922,7 +931,7 @@ async def build_response_input_item_list(
                                 ):
                                     continue
                                 annotations.append(
-                                    AnnotationContainerFileCitation(
+                                    AnnotationContainerFileCitationParam(
                                         file_id=annotation.file_id,
                                         container_id=annotation.container_id,
                                         filename=annotation.filename,
@@ -944,7 +953,7 @@ async def build_response_input_item_list(
                 case MessagePartType.REFUSAL:
                     content_list.append(
                         ResponseOutputRefusalParam(
-                            refusal=content.refusal, type="output_refusal"
+                            refusal=content.refusal, type="refusal"
                         )
                     )
 
@@ -1096,18 +1105,18 @@ async def build_response_input_item_list(
                     if action_rec:
                         match action_rec.type:
                             case WebSearchActionType.SEARCH:
-                                action = ActionSearch(
+                                action = ActionSearchParam(
                                     type="search",
                                     query=action_rec.query or "",
                                 )
                             case WebSearchActionType.OPEN_PAGE:
-                                action = ActionOpenPage(
+                                action = ActionOpenPageParam(
                                     type="open_page",
                                     url=action_rec.url or "",
                                 )
                             case WebSearchActionType.FIND:
-                                action = ActionFind(
-                                    type="find",
+                                action = ActionFindParam(
+                                    type="find_in_page",
                                     pattern=action_rec.pattern or "",
                                     url=action_rec.url or "",
                                 )
@@ -1704,7 +1713,9 @@ class BufferedResponseStreamHandler:
         self.enqueue_message_text_delta(display_delta)
 
     async def on_output_text_container_file_citation_added(
-        self, data: AnnotationContainerFileCitation, annotation_index: int | None = None
+        self,
+        data: AnnotationContainerFileCitationEvent,
+        annotation_index: int | None = None,
     ):
         if not self.run_id:
             logger.exception(
@@ -1713,9 +1724,9 @@ class BufferedResponseStreamHandler:
             return
 
         file_content = await self.openai_cli.containers.files.content.retrieve(
-            file_id=data["file_id"], container_id=data["container_id"]
+            file_id=data.file_id, container_id=data.container_id
         )
-        filename = data["filename"] or f"container_file_{data['file_id']}"
+        filename = data.filename or f"container_file_{data.file_id}"
         inferred_content_type = file_extension_to_mime_type(filename.rsplit(".", 1)[-1])
         content_type = inferred_content_type or "application/octet-stream"
         upload_file = UploadFile(
@@ -1755,7 +1766,7 @@ class BufferedResponseStreamHandler:
             else:
                 file = await handle_create_generated_file(
                     **common_args,
-                    source_file_id=data["file_id"],
+                    source_file_id=data.file_id,
                 )
             await session_.commit()
             return file
@@ -1803,14 +1814,14 @@ class BufferedResponseStreamHandler:
 
         annotation_data = {
             "type": AnnotationType.CONTAINER_FILE_CITATION,
-            "file_id": data["file_id"],
+            "file_id": data.file_id,
             "file_object_id": file.id if not file.vision_file_id else None,
             "vision_file_id": file.vision_file_id,
             "vision_file_object_id": file.id if file.vision_file_id else None,
             "filename": file.name,
-            "container_id": data["container_id"],
-            "start_index": data["start_index"],
-            "end_index": data["end_index"],
+            "container_id": data.container_id,
+            "start_index": data.start_index,
+            "end_index": data.end_index,
             "annotation_index": annotation_index,
             "message_part_id": self.message_part_id,
         }
@@ -1855,8 +1866,8 @@ class BufferedResponseStreamHandler:
                                     "annotations": [
                                         {
                                             "type": "file_path",
-                                            "end_index": data["end_index"],
-                                            "start_index": data["start_index"],
+                                            "end_index": data.end_index,
+                                            "start_index": data.start_index,
                                             "file_path": {"file_id": str(file.id)},
                                             "text": "",
                                         }
@@ -1870,7 +1881,9 @@ class BufferedResponseStreamHandler:
             )
 
     async def on_output_text_file_citation_added(
-        self, data: AnnotationFileCitation, annotation_index: int | None = None
+        self,
+        data: AnnotationFileCitationEvent,
+        annotation_index: int | None = None,
     ):
         if not self.message_part_id:
             logger.exception(
@@ -1881,9 +1894,9 @@ class BufferedResponseStreamHandler:
         annotation_data = {
             "message_part_id": self.message_part_id,
             "type": AnnotationType.FILE_CITATION,
-            "file_id": data["file_id"],
-            "filename": data["filename"],
-            "index": data["index"],
+            "file_id": data.file_id,
+            "filename": data.filename,
+            "index": data.index,
             "annotation_index": annotation_index,
         }
 
@@ -1896,10 +1909,10 @@ class BufferedResponseStreamHandler:
 
         await add_cached_message_part_on_output_text_file_citation_added()
 
-        _file_record = self.file_search_results.get(data["file_id"])
+        _file_record = self.file_search_results.get(data.file_id)
         if _file_record:
-            if data["file_id"] not in self.file_ids_file_citation_annotation:
-                self.file_ids_file_citation_annotation.add(data["file_id"])
+            if data.file_id not in self.file_ids_file_citation_annotation:
+                self.file_ids_file_citation_annotation.add(data.file_id)
                 if not self.show_file_search_document_names:
                     return
                 self.enqueue(
@@ -1918,8 +1931,8 @@ class BufferedResponseStreamHandler:
                                                 "end_index": 0,
                                                 "start_index": 0,
                                                 "file_citation": {
-                                                    "file_id": data["file_id"],
-                                                    "file_name": data["filename"],
+                                                    "file_id": data.file_id,
+                                                    "file_name": data.filename,
                                                     "quote": _file_record.text
                                                     if self.show_file_search_result_quotes
                                                     else "",
@@ -1936,7 +1949,9 @@ class BufferedResponseStreamHandler:
                 )
 
     async def on_output_text_url_citation_added(
-        self, data: AnnotationURLCitation, annotation_index: int | None = None
+        self,
+        data: AnnotationURLCitationEvent,
+        annotation_index: int | None = None,
     ):
         if not self.message_part_id:
             logger.exception(
@@ -1947,10 +1962,10 @@ class BufferedResponseStreamHandler:
         annotation_data = {
             "message_part_id": self.message_part_id,
             "type": AnnotationType.URL_CITATION,
-            "end_index": data["end_index"],
-            "start_index": data["start_index"],
-            "title": data["title"],
-            "url": data["url"],
+            "end_index": data.end_index,
+            "start_index": data.start_index,
+            "title": data.title,
+            "url": data.url,
             "annotation_index": annotation_index,
         }
 
@@ -1976,10 +1991,10 @@ class BufferedResponseStreamHandler:
                                 "annotations": [
                                     {
                                         "type": "url_citation",
-                                        "end_index": data["end_index"],
-                                        "start_index": data["start_index"],
-                                        "url": data["url"],
-                                        "title": data["title"],
+                                        "end_index": data.end_index,
+                                        "start_index": data.start_index,
+                                        "url": data.url,
+                                        "title": data.title,
                                     }
                                 ],
                             },
@@ -2374,7 +2389,7 @@ class BufferedResponseStreamHandler:
                     if self.show_web_search_sources
                     else [],
                 }
-            case "find":
+            case "find_in_page":
                 return {
                     "type": WebSearchActionType.FIND.value,
                     "pattern": action.pattern,
@@ -3050,7 +3065,7 @@ class BufferedResponseStreamHandler:
                             source_data
                         )
 
-                case "find":
+                case "find_in_page":
                     find_data = {
                         "tool_call_id": tool_call.tool_call_id,
                         "pattern": data.action.pattern,
@@ -3836,6 +3851,34 @@ class BufferedResponseStreamHandler:
         )
 
 
+async def _dispatch_response_output_text_annotation_added(
+    handler: BufferedResponseStreamHandler,
+    event: ResponseOutputTextAnnotationAddedEvent,
+) -> None:
+    annotation = event.annotation
+    if annotation is None:
+        return
+
+    match annotation.type:
+        case "container_file_citation":
+            await handler.on_output_text_container_file_citation_added(
+                annotation,
+                event.annotation_index,
+            )
+        case "file_citation":
+            await handler.on_output_text_file_citation_added(
+                annotation,
+                event.annotation_index,
+            )
+        case "url_citation":
+            await handler.on_output_text_url_citation_added(
+                annotation,
+                event.annotation_index,
+            )
+        case _:
+            pass
+
+
 async def poll_vector_store_files(
     cli: openai.AsyncClient,
     *,
@@ -4464,26 +4507,10 @@ async def run_response(
                                                 )
                                     await _tts_drain_flush_signals()
                             case "response.output_text.annotation.added":
-                                match event.annotation["type"]:
-                                    case "container_file_citation":
-                                        await handler.on_output_text_container_file_citation_added(
-                                            event.annotation,
-                                            event.annotation_index,
-                                        )
-                                    case "file_citation":
-                                        await (
-                                            handler.on_output_text_file_citation_added(
-                                                event.annotation,
-                                                event.annotation_index,
-                                            )
-                                        )
-                                    case "url_citation":
-                                        await handler.on_output_text_url_citation_added(
-                                            event.annotation,
-                                            event.annotation_index,
-                                        )
-                                    case _:
-                                        pass
+                                await _dispatch_response_output_text_annotation_added(
+                                    handler,
+                                    event,
+                                )
                             case "response.content_part.done":
                                 match event.part.type:
                                     case "output_text":

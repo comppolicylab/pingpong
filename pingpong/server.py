@@ -4884,7 +4884,7 @@ async def get_thread(
                             action_obj = ActionFind(
                                 url=action.url or "",
                                 pattern=action.pattern or "",
-                                type="find",
+                                type="find_in_page",
                             )
                         case schemas.WebSearchActionType.OPEN_PAGE:
                             action_obj = ActionOpenPage(
@@ -7527,7 +7527,7 @@ async def list_thread_messages(
                             action_obj = ActionFind(
                                 url=action.url or "",
                                 pattern=action.pattern or "",
-                                type="find",
+                                type="find_in_page",
                             )
                         case schemas.WebSearchActionType.OPEN_PAGE:
                             action_obj = ActionOpenPage(

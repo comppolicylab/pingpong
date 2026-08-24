@@ -1,7 +1,7 @@
 import hashlib
 import logging
 import openai
-from openai.types import Reasoning
+from openai.types.shared_params import Reasoning
 from pingpong.auth import generate_auth_link
 from .authz import AuthzClient
 from pingpong.config import config

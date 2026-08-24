@@ -4,7 +4,6 @@ from typing import Any, Generic, Literal, NotRequired, TypeVar, Union
 from urllib.parse import urlparse
 from typing_extensions import TypedDict, Annotated, TypeAlias
 
-from openai._utils import PropertyInfo
 from openai.types.beta.threads import (
     ImageFileContentBlock,
     TextContentBlock,
@@ -786,7 +785,7 @@ InteractiveLessonInteractionRequest: TypeAlias = Annotated[
         InteractiveLessonSeekedRequest,
         InteractiveLessonEndedRequest,
     ],
-    PropertyInfo(discriminator="type"),
+    Field(discriminator="type"),
 ]
 
 
@@ -1660,7 +1659,7 @@ LectureVideoInteractionRequest: TypeAlias = Annotated[
         LectureVideoSeekedRequest,
         LectureVideoEndedRequest,
     ],
-    PropertyInfo(discriminator="type"),
+    Field(discriminator="type"),
 ]
 
 
@@ -3835,7 +3834,7 @@ class MessagePhase(StrEnum):
 
 ThreadAnnotation: TypeAlias = Annotated[
     Union[FileCitationAnnotation, FilePathAnnotation, AnnotationURLCitation],
-    PropertyInfo(discriminator="type"),
+    Field(discriminator="type"),
 ]
 
 
@@ -3860,7 +3859,7 @@ ThreadMessageContent: TypeAlias = Annotated[
         RefusalContentBlock,
         ThreadFollowupSuggestionsContentBlock,
     ],
-    PropertyInfo(discriminator="type"),
+    Field(discriminator="type"),
 ]
 
 

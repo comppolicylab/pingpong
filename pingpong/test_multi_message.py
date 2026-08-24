@@ -4,10 +4,15 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 import importlib
 from types import SimpleNamespace
+from typing import cast
 from unittest.mock import AsyncMock
 
 import orjson
 import pytest
+from openai.types.responses.response_output_text_annotation_added_event import (
+    AnnotationContainerFileCitation,
+    ResponseOutputTextAnnotationAddedEvent,
+)
 from sqlalchemy import select
 
 from pingpong import ai as ai_module
@@ -17,6 +22,69 @@ from pingpong.testutil import with_authz, with_user
 
 pytestmark = pytest.mark.asyncio
 server_module = importlib.import_module("pingpong.server")
+
+
+@pytest.mark.parametrize(
+    ("annotation", "handler_method"),
+    [
+        (
+            {
+                "type": "container_file_citation",
+                "file_id": "cfile-1",
+                "container_id": "container-1",
+                "filename": "generated.csv",
+                "start_index": 10,
+                "end_index": 20,
+            },
+            "on_output_text_container_file_citation_added",
+        ),
+        (
+            {
+                "type": "file_citation",
+                "file_id": "file-1",
+                "filename": "source.pdf",
+                "index": 12,
+            },
+            "on_output_text_file_citation_added",
+        ),
+        (
+            {
+                "type": "url_citation",
+                "url": "https://example.com",
+                "title": "Example",
+                "start_index": 4,
+                "end_index": 11,
+            },
+            "on_output_text_url_citation_added",
+        ),
+    ],
+)
+async def test_dispatch_response_output_text_annotation_uses_sdk_models(
+    annotation,
+    handler_method,
+):
+    event = ResponseOutputTextAnnotationAddedEvent.model_validate(
+        {
+            "type": "response.output_text.annotation.added",
+            "annotation": annotation,
+            "annotation_index": 2,
+            "content_index": 0,
+            "item_id": "message-1",
+            "output_index": 0,
+            "sequence_number": 1,
+        }
+    )
+    raw_handler = SimpleNamespace(
+        on_output_text_container_file_citation_added=AsyncMock(),
+        on_output_text_file_citation_added=AsyncMock(),
+        on_output_text_url_citation_added=AsyncMock(),
+    )
+    handler = cast(BufferedResponseStreamHandler, raw_handler)
+
+    await ai_module._dispatch_response_output_text_annotation_added(handler, event)
+
+    selected_handler = getattr(raw_handler, handler_method)
+    selected_handler.assert_awaited_once_with(event.annotation, 2)
 
 
 async def _create_handler_context(
@@ -448,14 +516,14 @@ async def test_container_file_citation_preserves_container_file_id(db, monkeypat
     monkeypatch.setattr(ai_module, "handle_create_file", fake_handle_create_file)
 
     await handler.on_output_text_container_file_citation_added(
-        {
-            "type": "container_file_citation",
-            "file_id": "cfile-original-container",
-            "container_id": "cntr-original",
-            "filename": "random_names_emails.csv",
-            "start_index": 10,
-            "end_index": 30,
-        },
+        AnnotationContainerFileCitation(
+            type="container_file_citation",
+            file_id="cfile-original-container",
+            container_id="cntr-original",
+            filename="random_names_emails.csv",
+            start_index=10,
+            end_index=30,
+        ),
         annotation_index=0,
     )
 
@@ -516,14 +584,14 @@ async def test_container_file_citation_persists_non_ci_generated_file(db, monkey
     monkeypatch.setattr(ai_module, "handle_create_generated_file", generated_file)
 
     await handler.on_output_text_container_file_citation_added(
-        {
-            "type": "container_file_citation",
-            "file_id": "cfile-calendar",
-            "container_id": "cntr-original",
-            "filename": "reminders.ics",
-            "start_index": 10,
-            "end_index": 23,
-        },
+        AnnotationContainerFileCitation(
+            type="container_file_citation",
+            file_id="cfile-calendar",
+            container_id="cntr-original",
+            filename="reminders.ics",
+            start_index=10,
+            end_index=23,
+        ),
         annotation_index=0,
     )
 
