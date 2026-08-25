@@ -98,6 +98,7 @@ from pingpong.migrations.m21_finalize_v2_threads_to_v3 import (
     finalize_v2_threads_to_v3,
     revert_finalized_v3_threads_to_v2,
 )
+from pingpong.migrations.m21_check_v2_threads_to_v3 import check_v2_threads_to_v3
 from pingpong.now import _get_next_run_time, croner, utcnow
 from pingpong.schemas import LMSType, RunStatus
 from pingpong.lti.course_bridge import course_bridge_sync_all
@@ -1278,6 +1279,49 @@ def m21_finalize_v2_threads_to_v3() -> None:
             logger.info("Done!")
 
     asyncio.run(_m21_finalize_v2_threads_to_v3())
+
+
+@db.command("m21_check_v2_threads_to_v3")
+@click.option("--concurrency", default=8, show_default=True, type=click.IntRange(1, 64))
+@click.option(
+    "--openai-max-retries",
+    default=5,
+    show_default=True,
+    type=click.IntRange(min=0),
+    help="SDK retries per OpenAI request; 429 retries honor Retry-After.",
+)
+@click.option("--shard-count", default=1, show_default=True, type=click.IntRange(min=1))
+@click.option("--shard-index", default=0, show_default=True, type=click.IntRange(min=0))
+@click.option("--limit", default=None, type=click.IntRange(min=1))
+def m21_check_v2_threads_to_v3(
+    concurrency: int,
+    openai_max_retries: int,
+    shard_count: int,
+    shard_index: int,
+    limit: int | None,
+) -> None:
+    """Check m21-eligible threads against OpenAI without modifying them."""
+    if shard_index >= shard_count:
+        raise click.UsageError("--shard-index must be less than --shard-count")
+
+    summary = asyncio.run(
+        check_v2_threads_to_v3(
+            config.db.driver,
+            concurrency=concurrency,
+            openai_max_retries=openai_max_retries,
+            shard_count=shard_count,
+            shard_index=shard_index,
+            limit=limit,
+        )
+    )
+    if summary.failed_threads:
+        raise click.ClickException(
+            f"{summary.failed_threads} of {summary.checked_threads} thread(s) failed "
+            f"verification; failed thread IDs: {summary.failed_thread_ids}"
+        )
+    logger.info(
+        "Done! All %s checked thread(s) matched OpenAI.", summary.checked_threads
+    )
 
 
 @db.command("m21_revert_finalized_v3_threads_to_v2")
