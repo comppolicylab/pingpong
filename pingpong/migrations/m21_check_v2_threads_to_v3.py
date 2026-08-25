@@ -360,7 +360,9 @@ async def _check_thread(
         return ThreadVerificationResult(
             thread_id=thread_id,
             openai_thread_id="",
-            issues=[VerificationIssue("thread_missing", "local thread no longer exists")],
+            issues=[
+                VerificationIssue("thread_missing", "local thread no longer exists")
+            ],
         )
 
     result = ThreadVerificationResult(header.id, header.thread_id)
@@ -428,9 +430,7 @@ async def _check_thread(
         expected_runs,
         expected_user_ids,
     )
-    _compare_tool_calls(
-        result, thread, expected_tools, local_run_ids_by_sequence
-    )
+    _compare_tool_calls(result, thread, expected_tools, local_run_ids_by_sequence)
 
     referenced_files: dict[int, set[str]] = {}
     for openai_message_id in sorted(set(openai_messages_by_id) & set(local_messages)):
@@ -496,16 +496,16 @@ async def _build_expected_history(
             output_index += 1
             message_indexes[turn.user_message.id] = output_index
 
-        assistant_messages = {message.id: message for message in turn.assistant_messages}
+        assistant_messages = {
+            message.id: message for message in turn.assistant_messages
+        }
         stored_assistant_message_ids: set[str] = set()
         for openai_run in turn.openai_runs:
             for run_step in await m15._list_run_steps(
                 client, thread.thread_id, openai_run.id
             ):
                 if isinstance(run_step.step_details, MessageCreationStepDetails):
-                    message_id = (
-                        run_step.step_details.message_creation.message_id
-                    )
+                    message_id = run_step.step_details.message_creation.message_id
                     if (
                         message_id in assistant_messages
                         and message_id not in stored_assistant_message_ids
@@ -785,7 +785,9 @@ def _compare_tool_calls(
             "created": expected.created,
             "completed": expected.completed,
             "code": expected.code,
-            "queries": "" if expected.type == schemas.ToolCallType.FILE_SEARCH else None,
+            "queries": ""
+            if expected.type == schemas.ToolCallType.FILE_SEARCH
+            else None,
             "container_id": None,
         }
         for field_name, expected_value in expected_fields.items():
@@ -890,12 +892,14 @@ def _compare_parts_and_annotations(
                     )
                 )
             else:
-                referenced_files.setdefault(
-                    part.input_image_file_object_id, set()
-                ).add(expected["input_image_file_id"])
+                referenced_files.setdefault(part.input_image_file_object_id, set()).add(
+                    expected["input_image_file_id"]
+                )
 
         expected_annotations = Counter(expected["annotations"])
-        actual_annotations = Counter(_annotation_key(annotation) for annotation in part.annotations)
+        actual_annotations = Counter(
+            _annotation_key(annotation) for annotation in part.annotations
+        )
         if actual_annotations != expected_annotations:
             result.issues.append(
                 VerificationIssue(
@@ -917,9 +921,7 @@ def _compare_parts_and_annotations(
                         )
                     )
                 else:
-                    openai_file_id = (
-                        annotation.vision_file_id or annotation.file_id
-                    )
+                    openai_file_id = annotation.vision_file_id or annotation.file_id
                     if openai_file_id:
                         referenced_files.setdefault(object_id, set()).add(
                             openai_file_id
@@ -959,11 +961,7 @@ def _expected_parts(source: OpenAIMessage) -> list[dict[str, Any]]:
                     for annotation_index, annotation in enumerate(
                         content.text.annotations or []
                     )
-                    if (
-                        key := _source_annotation_key(
-                            annotation_index, annotation
-                        )
-                    )
+                    if (key := _source_annotation_key(annotation_index, annotation))
                     is not None
                 ],
             }
@@ -1009,9 +1007,7 @@ def _expected_parts(source: OpenAIMessage) -> list[dict[str, Any]]:
     return parts
 
 
-def _source_annotation_key(
-    annotation_index: int, annotation
-) -> tuple[Any, ...] | None:
+def _source_annotation_key(annotation_index: int, annotation) -> tuple[Any, ...] | None:
     common = (
         annotation.start_index,
         annotation.end_index,
