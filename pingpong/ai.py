@@ -778,6 +778,7 @@ async def build_response_input_item_list(
     current_run_id: int | None = None,
     user_assistant_messages_only: bool = False,
     include_developer_messages: bool = False,
+    omit_message_ids: bool = False,
 ) -> list[ResponseInputItemParam]:
     """Build a list of ResponseInputItem from a thread run step."""
     response_input_items: list[ResponseInputItemParam] = []
@@ -966,7 +967,7 @@ async def build_response_input_item_list(
                 "role": message.role,
                 "content": content_list,
                 "type": "message",
-                "id": message.message_id,
+                **({} if omit_message_ids else {"id": message.message_id}),
             }
             response_item = input_message
         else:
@@ -974,7 +975,7 @@ async def build_response_input_item_list(
                 "role": message.role,
                 "content": content_list,
                 "type": "message",
-                "id": message.message_id,
+                **({} if omit_message_ids else {"id": message.message_id}),
             }
             if phase is not None:
                 assistant_response_message["phase"] = phase
@@ -3951,6 +3952,7 @@ async def run_response(
     tts_voice_settings: Mapping[str, Any] | None = None,
     user_assistant_messages_only: bool = False,
     include_developer_messages: bool = False,
+    omit_message_ids: bool = False,
     lecture_video_dual_text_mode: bool = False,
     lecture_video_followups_mode: bool = False,
 ):
@@ -4002,6 +4004,7 @@ async def run_response(
                     current_run_id=run.id,
                     user_assistant_messages_only=user_assistant_messages_only,
                     include_developer_messages=include_developer_messages,
+                    omit_message_ids=omit_message_ids,
                 )
                 max_output_index = await models.Thread.get_max_output_sequence(
                     session_, run.thread_id
