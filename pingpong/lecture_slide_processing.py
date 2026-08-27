@@ -2154,6 +2154,20 @@ async def _deck_has_slide_manifest(deck_id: int) -> bool:
         return bool(question_count)
 
 
+async def _deck_has_complete_manual_slide_manifest(deck_id: int) -> bool:
+    async with config.db.driver.async_session() as session:
+        deck = await models.LectureSlideDeck.get_by_id_with_processing_context(
+            session, deck_id
+        )
+        if deck is None:
+            return False
+        question_inputs = _manual_slide_question_inputs_from_context(deck.context_data)
+        return bool(question_inputs) and all(
+            question.mode == schemas.LectureSlideQuestionDraftMode.COMPLETE
+            for question in question_inputs
+        )
+
+
 async def _process_claimed_slide_run(run_id: int, lease_token: str) -> None:
     try:
         async with config.db.driver.async_session() as session:
@@ -2301,13 +2315,27 @@ async def _process_claimed_slide_run(run_id: int, lease_token: str) -> None:
                         force_manifest_generation
                         or current_run.force_manifest_generation
                     )
+                has_complete_manual_manifest = (
+                    await _deck_has_complete_manual_slide_manifest(deck_id)
+                )
                 has_manifest = await _deck_has_slide_manifest(deck_id)
+                skip_manifest_generation = not force_manifest_generation and (
+                    has_complete_manual_manifest
+                    or (
+                        original_start_stage
+                        == schemas.LectureSlideProcessingStage.NARRATION_AUDIO
+                        and has_manifest
+                    )
+                )
+                if has_complete_manual_manifest and skip_manifest_generation:
+                    await _persist_manual_slide_manifest(
+                        run_id, lease_token, deck_id, transcript
+                    )
+                    if not await _ensure_run_can_continue(run_id, lease_token):
+                        return
                 start_stage = (
                     schemas.LectureSlideProcessingStage.COMPOSITE_ARTIFACTS
-                    if original_start_stage
-                    == schemas.LectureSlideProcessingStage.NARRATION_AUDIO
-                    and has_manifest
-                    and not force_manifest_generation
+                    if skip_manifest_generation
                     else schemas.LectureSlideProcessingStage.MANIFEST_GENERATION
                 )
                 if (
@@ -5029,6 +5057,47 @@ async def _persist_slide_manifest(
                 deck.context_version = None
                 deck.lecture_slide_chat_available = False
         deck.transcript_data = transcript_data_from_words(transcript)
+        await session.commit()
+
+
+async def _persist_manual_slide_manifest(
+    run_id: int,
+    lease_token: str,
+    deck_id: int,
+    transcript: list[schemas.LectureVideoManifestWordV3],
+) -> None:
+    async with config.db.driver.async_session() as session:
+        run = await models.LectureSlideProcessingRun.get_by_id(session, run_id)
+        deck = await models.LectureSlideDeck.get_by_id_with_processing_context(
+            session, deck_id
+        )
+        if (
+            run is None
+            or deck is None
+            or run.status != schemas.LectureSlideProcessingRunStatus.RUNNING
+            or run.lease_token != lease_token
+        ):
+            return
+
+        question_inputs = _manual_slide_question_inputs_from_context(deck.context_data)
+        if not question_inputs or any(
+            question.mode != schemas.LectureSlideQuestionDraftMode.COMPLETE
+            for question in question_inputs
+        ):
+            return
+
+        await lecture_slide_service.apply_lecture_slide_question_drafts(
+            session,
+            deck,
+            question_inputs,
+        )
+        deck.transcript_data = transcript_data_from_words(transcript)
+        if transcript:
+            deck.context_version = 4
+            deck.lecture_slide_chat_available = True
+        else:
+            deck.context_version = None
+            deck.lecture_slide_chat_available = False
         await session.commit()
 
 
