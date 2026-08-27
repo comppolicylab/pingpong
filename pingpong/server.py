@@ -82,8 +82,8 @@ from pingpong.class_credentials import (
     validate_class_credential,
 )
 from pingpong.elevenlabs import (
+    ELEVENLABS_FLASH_V2_5_LANGUAGES,
     ELEVENLABS_TTS_VOICE_SETTINGS,
-    ELEVENLABS_V3_LANGUAGES,
     ELEVENLABS_VOICE_SAMPLE_TEXT_HEADER,
     synthesize_elevenlabs_voice_sample,
 )
@@ -11567,7 +11567,7 @@ def _lecture_slide_languages(
                     code=language.code,
                     name=language.name,
                 )
-                for language in ELEVENLABS_V3_LANGUAGES
+                for language in ELEVENLABS_FLASH_V2_5_LANGUAGES
             ],
         ],
     )
@@ -11616,7 +11616,7 @@ async def get_lecture_slide_translation_status(
             status="ready",
         )
     if not any(
-        language.code == normalized_code for language in ELEVENLABS_V3_LANGUAGES
+        language.code == normalized_code for language in ELEVENLABS_FLASH_V2_5_LANGUAGES
     ):
         raise HTTPException(
             422,
@@ -11667,7 +11667,11 @@ async def prepare_lecture_slide_translation(
     if normalized_code == "original":
         raise HTTPException(400, "The original lesson does not require preparation.")
     language = next(
-        (item for item in ELEVENLABS_V3_LANGUAGES if item.code == normalized_code),
+        (
+            item
+            for item in ELEVENLABS_FLASH_V2_5_LANGUAGES
+            if item.code == normalized_code
+        ),
         None,
     )
     if language is None:
