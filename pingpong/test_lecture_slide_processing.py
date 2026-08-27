@@ -486,6 +486,9 @@ async def test_translation_uses_one_structured_call_for_eligible_pages(db, monke
     assert '"slide_position": 1' not in payload
     assert '"slide_position": 2' not in payload
     assert captured_calls[0]["model"] == "gpt-4.1-mini"
+    assert (
+        "---ElevenLabs Pronunciation Metadata---" in captured_calls[0]["instructions"]
+    )
 
 
 async def test_translation_chunks_large_source_payloads(db, monkeypatch):
@@ -614,6 +617,7 @@ async def test_translation_audio_passes_language_code_and_persists_timings(
             translation=translation,
             position=0,
             narration_text="Narración traducida",
+            narration_tts_text="Narración pronunsiada",
         )
         run = models.LectureSlideTranslationRun(
             translation=translation,
@@ -633,21 +637,28 @@ async def test_translation_audio_passes_language_code_and_persists_timings(
         page_id = page.id
 
     captured_language_codes = []
+    captured_texts = []
 
     async def fake_api_key(_class_id):
         return "elevenlabs-key"
 
     async def fake_synthesize(_api_key, _voice_id, _text, *, language_code):
         captured_language_codes.append(language_code)
+        captured_texts.append(_text)
         return SimpleNamespace(
             audio=b"audio",
             content_type="audio/webm",
             words=[
                 lecture_slide_processing.ElevenLabsSpeechWordTiming(
-                    word="Hola",
+                    word="Narración",
                     start_ms=0,
+                    end_ms=200,
+                ),
+                lecture_slide_processing.ElevenLabsSpeechWordTiming(
+                    word="pronunsiada",
+                    start_ms=200,
                     end_ms=400,
-                )
+                ),
             ],
         )
 
@@ -683,11 +694,15 @@ async def test_translation_audio_passes_language_code_and_persists_timings(
 
     assert completed is True
     assert captured_language_codes == ["es"]
+    assert captured_texts == ["Narración pronunsiada"]
     async with db.async_session() as session:
         page = await session.get(models.LectureSlideTranslationPage, page_id)
         assert page is not None
         assert page.narration_stored_object_id is not None
-        assert page.word_timings == [{"word": "Hola", "start_ms": 0, "end_ms": 400}]
+        assert page.word_timings == [
+            {"word": "Narración", "start_ms": 0, "end_ms": 200},
+            {"word": "traducida", "start_ms": 200, "end_ms": 400},
+        ]
 
 
 async def test_translation_composite_retry_reuses_committed_artifacts(db, monkeypatch):
@@ -1608,7 +1623,8 @@ async def test_generate_narration_text_requires_exact_slide_count(
 
     assert narration_set is not None
     assert len(narration_set.slides) == 2
-    assert captured["instructions"] == "Narration prompt"
+    assert str(captured["instructions"]).startswith("Narration prompt")
+    assert "---ElevenLabs Pronunciation Metadata---" in str(captured["instructions"])
     response_model = captured["text_format"]
     assert issubclass(
         response_model, lecture_slide_processing.GeneratedSlideNarrationSet
@@ -1696,13 +1712,87 @@ async def test_generate_narration_text_appends_faithful_transcript_addendum(db):
     assert narration_set is not None
     instructions = captured["instructions"]
     assert instructions.startswith("Narration prompt")
+    assert (
+        lecture_slide_processing.FAITHFUL_TRANSCRIPT_NARRATION_ADDENDUM in instructions
+    )
     assert instructions.endswith(
-        lecture_slide_processing.FAITHFUL_TRANSCRIPT_NARRATION_ADDENDUM
+        "Apply pronunciation metadata only inside `narration_text`."
     )
     payload = json.dumps(captured["input"])
     assert "Filename: transcript.txt" in payload
     assert "marked FAITHFUL" in payload
     assert "file-transcript" in payload
+
+
+def test_generated_slide_question_separates_tts_pronunciation_metadata():
+    tagged = '\ue200say\ue202{"speech":"leed","content":"lead"}\ue201'
+    question = lecture_slide_processing.GeneratedSlideQuestion(
+        slide_position=0,
+        question_text="What happens next?",
+        intro_text=f"You {tagged} the process.",
+        options=[
+            lecture_slide_processing.GeneratedSlideChoice(
+                option_text="Continue",
+                post_answer_text=f"That will {tagged} onward.",
+                correct=True,
+            ),
+            lecture_slide_processing.GeneratedSlideChoice(
+                option_text="Stop",
+                post_answer_text="Not quite.",
+                correct=False,
+            ),
+        ],
+    )
+
+    result = lecture_slide_processing._generated_slide_question_to_input(question)
+
+    assert result.intro_text == "You lead the process."
+    assert result.intro_tts_text == "You leed the process."
+    assert result.options[0].post_answer_text == "That will lead onward."
+    assert result.options[0].post_answer_tts_text == "That will leed onward."
+
+
+async def test_persist_slide_narration_separates_tts_pronunciation_override(db):
+    await _create_class_and_deck(db)
+    async with db.async_session() as session:
+        session.add(models.LectureSlidePage(lecture_slide_deck_id=1, position=0))
+        run = models.LectureSlideProcessingRun(
+            lecture_slide_deck_id=1,
+            lecture_slide_deck_id_snapshot=1,
+            class_id=1,
+            stage=schemas.LectureSlideProcessingStage.NARRATION_TEXT,
+            attempt_number=1,
+            status=schemas.LectureSlideProcessingRunStatus.RUNNING,
+            lease_token="lease",
+        )
+        session.add(run)
+        await session.commit()
+        run_id = run.id
+
+    tagged = '\ue200say\ue202{"speech":"leed","content":"lead"}\ue201'
+    await lecture_slide_processing._persist_narration_text(
+        run_id,
+        "lease",
+        1,
+        lecture_slide_processing.GeneratedSlideNarrationSet(
+            slides=[
+                lecture_slide_processing.GeneratedSlideNarration(
+                    slide_position=0,
+                    narration_text=f"These pipes {tagged} water away.",
+                )
+            ]
+        ),
+    )
+
+    async with db.async_session() as session:
+        page = await session.scalar(
+            select(models.LectureSlidePage).where(
+                models.LectureSlidePage.lecture_slide_deck_id == 1
+            )
+        )
+        assert page is not None
+        assert page.narration_text == "These pipes lead water away."
+        assert page.narration_tts_text == "These pipes leed water away."
 
 
 async def test_generated_narration_model_requires_each_requested_position_once():
@@ -2485,10 +2575,12 @@ async def test_apply_question_drafts_matches_questions_and_options_by_id(db):
             ]
         )
         intro_narration = models.LectureSlideNarration(
-            status=schemas.LectureSlideNarrationStatus.READY
+            status=schemas.LectureSlideNarrationStatus.READY,
+            tts_text="Existing in-tro.",
         )
         option_narration = models.LectureSlideNarration(
-            status=schemas.LectureSlideNarrationStatus.READY
+            status=schemas.LectureSlideNarrationStatus.READY,
+            tts_text="First feed-back.",
         )
         question = models.LectureSlideQuestion(
             lecture_slide_deck_id=1,
@@ -2546,9 +2638,12 @@ async def test_apply_question_drafts_matches_questions_and_options_by_id(db):
                     slide_position=0,
                     question_text="Inserted question?",
                     intro_text="Inserted intro.",
+                    intro_tts_text="Inserted in-tro.",
                     options=[
                         schemas.LectureSlideQuestionOptionInput(
                             option_text="Inserted correct",
+                            post_answer_text="Inserted feedback.",
+                            post_answer_tts_text="Inserted feed-back.",
                             correct=True,
                         ),
                         schemas.LectureSlideQuestionOptionInput(
@@ -2588,6 +2683,12 @@ async def test_apply_question_drafts_matches_questions_and_options_by_id(db):
                 select(models.LectureSlideQuestion)
                 .where(models.LectureSlideQuestion.lecture_slide_deck_id == 1)
                 .options(selectinload(models.LectureSlideQuestion.options))
+                .options(selectinload(models.LectureSlideQuestion.intro_narration))
+                .options(
+                    selectinload(models.LectureSlideQuestion.options).selectinload(
+                        models.LectureSlideQuestionOption.post_narration
+                    )
+                )
                 .options(selectinload(models.LectureSlideQuestion.correct_option))
                 .order_by(models.LectureSlideQuestion.position)
             )
@@ -2596,15 +2697,23 @@ async def test_apply_question_drafts_matches_questions_and_options_by_id(db):
     assert len(questions) == 2
     inserted_question, existing_question = questions
     assert inserted_question.id != question_id
+    assert inserted_question.intro_narration is not None
+    assert inserted_question.intro_narration.tts_text == "Inserted in-tro."
+    assert inserted_question.options[0].post_narration is not None
+    assert inserted_question.options[0].post_narration.tts_text == "Inserted feed-back."
     assert existing_question.id == question_id
     assert existing_question.position == 1
     assert existing_question.slide_position == 1
     assert existing_question.intro_narration_id == intro_narration_id
+    assert existing_question.intro_narration is not None
+    assert existing_question.intro_narration.tts_text == "Existing in-tro."
     assert [option.id for option in existing_question.options] == [
         second_option_id,
         first_option_id,
     ]
     assert existing_question.options[1].post_narration_id == option_narration_id
+    assert existing_question.options[1].post_narration is not None
+    assert existing_question.options[1].post_narration.tts_text == "First feed-back."
     assert existing_question.correct_option is not None
     assert existing_question.correct_option.id == second_option_id
 
@@ -3135,6 +3244,7 @@ async def test_synthesize_slide_audio_skips_empty_pages_and_stores_ogg_metadata(
                 lecture_slide_deck_id=1,
                 position=0,
                 narration_text="First narration.",
+                narration_tts_text="First nuh-ray-shun.",
             ),
             models.LectureSlidePage(
                 lecture_slide_deck_id=1,
@@ -3169,7 +3279,17 @@ async def test_synthesize_slide_audio_skips_empty_pages_and_stores_ogg_metadata(
 
     async def fake_synthesize_speech_with_timings(_api_key, _voice_id, text):
         requested_texts.append(text)
-        return SimpleNamespace(audio=f"audio-{text}".encode("utf-8"), words=())
+        return SimpleNamespace(
+            audio=f"audio-{text}".encode("utf-8"),
+            words=tuple(
+                lecture_slide_processing.ElevenLabsSpeechWordTiming(
+                    word=word,
+                    start_ms=index * 100,
+                    end_ms=(index + 1) * 100,
+                )
+                for index, word in enumerate(text.split())
+            ),
+        )
 
     async def fake_store_audio(store_key, content_type, audio):
         stored_content_types.append(content_type)
@@ -3190,10 +3310,14 @@ async def test_synthesize_slide_audio_skips_empty_pages_and_stores_ogg_metadata(
         run_id, "lease", 1
     )
 
-    assert requested_texts == ["First narration.", "Final narration."]
+    assert requested_texts == ["First nuh-ray-shun.", "Final narration."]
     assert stored_content_types == ["audio/ogg", "audio/ogg"]
     assert artifacts is not None
     assert [artifact.page_id for artifact in artifacts] == [page_ids[0], page_ids[2]]
+    assert [word.word for word in artifacts[0].word_timings] == [
+        "First",
+        "narration.",
+    ]
     assert [artifact.content_type for artifact in artifacts] == [
         "audio/ogg",
         "audio/ogg",
@@ -3811,7 +3935,8 @@ async def test_synthesize_knowledge_check_audio_deletes_uploaded_audio_when_db_l
     await _create_class_and_deck(db)
     async with db.async_session() as session:
         narration = models.LectureSlideNarration(
-            status=schemas.LectureSlideNarrationStatus.PENDING
+            status=schemas.LectureSlideNarrationStatus.PENDING,
+            tts_text="In-tro narration.",
         )
         question = models.LectureSlideQuestion(
             lecture_slide_deck_id=1,
@@ -3840,7 +3965,10 @@ async def test_synthesize_knowledge_check_audio_deletes_uploaded_audio_when_db_l
     async def fake_get_elevenlabs_api_key(_class_id):
         return "elevenlabs-key"
 
+    requested_texts: list[str] = []
+
     async def fake_synthesize_speech(_api_key, _voice_id, _text):
+        requested_texts.append(_text)
         return "audio/mpeg", b"audio"
 
     async def fake_store_audio(store_key, _content_type, _audio):
@@ -3876,6 +4004,7 @@ async def test_synthesize_knowledge_check_audio_deletes_uploaded_audio_when_db_l
         )
 
     assert deleted_keys
+    assert requested_texts == ["In-tro narration."]
 
 
 async def test_persist_composite_artifacts_deletes_uploads_when_db_lookup_raises(

@@ -69,6 +69,10 @@ from pingpong.lecture_video_service import (
 )
 from pingpong.lecture_slide_service import upload_lecture_slide_source_to_openai
 from pingpong.now import utcnow
+from pingpong.say_transform import (
+    TTS_PRONUNCIATION_INSTRUCTIONS,
+    split_tts_pronunciation_text,
+)
 from pingpong.worker_pool import (
     DEFAULT_WORKER_POLL_INTERVAL_SECONDS,
     DEFAULT_WORKER_SHUTDOWN_GRACE_SECONDS,
@@ -220,7 +224,11 @@ Rules:
 - Write natural spoken narration suitable for text-to-speech.
 - Preserve bracketed ElevenLabs delivery or audio tags where they appear.
 - Do not summarize, explain, add facts, add labels, or translate into any language other than the target language.
-- Return exactly one translated item for every supplied slide_position."""
+- Return exactly one translated item for every supplied slide_position.
+
+{pronunciation_instructions}""".format(
+    pronunciation_instructions=TTS_PRONUNCIATION_INSTRUCTIONS
+)
 LECTURE_SLIDE_TRANSLATION_SOURCE_TOKEN_BUDGET = 20_000
 
 RUN_LEASE_DURATION = timedelta(minutes=10)
@@ -501,6 +509,10 @@ QUESTIONS:
 - If a generation window is provided, create questions only after slides whose end_offset_ms is inside that same requested generation window.
 
 - Use concrete evidence from the PDF, transcript, and instructor-provided additional context. Do not invent unsupported facts.
+
+{TTS_PRONUNCIATION_INSTRUCTIONS}
+Apply pronunciation metadata only inside `intro_text` and `post_answer_text`.
+Never put it in `question_text` or `option_text`.
 
 OUTPUT FORMAT:
 Return a single JSON object matching the requested schema. Do not include any text outside the JSON.
@@ -850,6 +862,36 @@ class SlideAudioArtifact:
     store_key: str
     stored_object_id: int
     word_timings: tuple[ElevenLabsSpeechWordTiming, ...] = ()
+
+
+def _display_word_timings(
+    timings: Sequence[ElevenLabsSpeechWordTiming],
+    *,
+    display_text: str,
+    speech_text: str,
+) -> tuple[ElevenLabsSpeechWordTiming, ...]:
+    """Restore display spellings while retaining ElevenLabs timing boundaries."""
+    if display_text == speech_text:
+        return tuple(timings)
+    display_words = display_text.split()
+    speech_words = speech_text.split()
+    if len(display_words) != len(speech_words) or len(display_words) != len(timings):
+        logger.warning(
+            "Unable to map ElevenLabs pronunciation timing words to display text. "
+            "display_words=%s speech_words=%s timing_words=%s",
+            len(display_words),
+            len(speech_words),
+            len(timings),
+        )
+        return tuple(timings)
+    return tuple(
+        ElevenLabsSpeechWordTiming(
+            word=display_word,
+            start_ms=timing.start_ms,
+            end_ms=timing.end_ms,
+        )
+        for display_word, timing in zip(display_words, timings, strict=True)
+    )
 
 
 @dataclass(frozen=True)
@@ -1804,7 +1846,8 @@ async def _persist_translation_page_rows(
     translated_set: TranslatedSlideNarrationSet,
 ) -> None:
     translated_by_position = {
-        slide.slide_position: slide.narration_text for slide in translated_set.slides
+        slide.slide_position: split_tts_pronunciation_text(slide.narration_text)
+        for slide in translated_set.slides
     }
     async with config.db.driver.async_session() as session:
         run = await models.LectureSlideTranslationRun.get_by_id(session, run_id)
@@ -1835,11 +1878,16 @@ async def _persist_translation_page_rows(
             )
         ]
         for page in sorted(deck.pages, key=lambda item: item.position):
-            narration_text = (
-                page.narration_text
-                if page.content_kind == schemas.LectureSlideContentKind.VIDEO
-                else translated_by_position.get(page.position, page.narration_text)
-            )
+            translated = translated_by_position.get(page.position)
+            if (
+                page.content_kind == schemas.LectureSlideContentKind.VIDEO
+                or translated is None
+            ):
+                narration_text = page.narration_text
+                narration_tts_text = None
+            else:
+                narration_text = translated.display
+                narration_tts_text = translated.speech_override
             stored_object_id = None
             word_timings: list[dict[str, Any]] | None = None
             if (
@@ -1866,6 +1914,7 @@ async def _persist_translation_page_rows(
                     translation_id=translation.id,
                     position=page.position,
                     narration_text=narration_text,
+                    narration_tts_text=narration_tts_text,
                     narration_stored_object_id=stored_object_id,
                     word_timings=word_timings,
                 )
@@ -1876,7 +1925,12 @@ async def _persist_translation_page_rows(
             for page in deck.pages
             if page.content_kind == schemas.LectureSlideContentKind.VIDEO
             or not text_needs_audio(
-                translated_by_position.get(page.position, page.narration_text) or ""
+                (
+                    translated_by_position[page.position].display
+                    if page.position in translated_by_position
+                    else page.narration_text
+                )
+                or ""
             )
         )
         session.add(run)
@@ -1904,7 +1958,11 @@ async def _synthesize_translation_audio(
         class_id = deck.class_id
         language_code = translation.language_code
         pending_pages = [
-            (page.id, page.narration_text or "")
+            (
+                page.id,
+                page.narration_text or "",
+                page.narration_tts_text,
+            )
             for page in translation.pages
             if page.narration_stored_object_id is None
             and text_needs_audio(page.narration_text or "")
@@ -1912,7 +1970,7 @@ async def _synthesize_translation_audio(
     if pending_pages and not voice_id:
         raise RuntimeError("Lecture slide deck voice_id is required for translation.")
     api_key = await _get_elevenlabs_api_key(class_id) if pending_pages else None
-    for page_id, narration_text in pending_pages:
+    for page_id, narration_text, narration_tts_text in pending_pages:
         assert api_key is not None
         assert voice_id is not None
         synthesis = await _await_with_translation_lease_heartbeat(
@@ -1921,13 +1979,18 @@ async def _synthesize_translation_audio(
             synthesize_elevenlabs_speech_with_timings(
                 api_key,
                 voice_id,
-                narration_text,
+                narration_tts_text or narration_text,
                 language_code=language_code,
             ),
         )
         if synthesis is None:
             return False
         duration_ms = audio_duration_ms(synthesis.audio, synthesis.content_type)
+        display_timings = _display_word_timings(
+            synthesis.words,
+            display_text=narration_text,
+            speech_text=narration_tts_text or narration_text,
+        )
         store_key, content_length = await _store_audio(
             generate_slide_narration_store_key(),
             synthesis.content_type,
@@ -1960,7 +2023,7 @@ async def _synthesize_translation_audio(
                         "start_ms": word.start_ms,
                         "end_ms": word.end_ms,
                     }
-                    for word in synthesis.words
+                    for word in display_timings
                 ]
                 session.add(page)
                 run.completed_parts = min(
@@ -2943,6 +3006,13 @@ async def _generate_narration_text(
     media_content = await _lecture_slide_media_input_images(visual_media)
     if _has_faithful_transcript(additional_context_files):
         prompt = f"{prompt}\n\n{FAITHFUL_TRANSCRIPT_NARRATION_ADDENDUM}"
+    prompt = "\n\n".join(
+        [
+            prompt,
+            TTS_PRONUNCIATION_INSTRUCTIONS,
+            "Apply pronunciation metadata only inside `narration_text`.",
+        ]
+    )
 
     return await _await_with_run_lease_heartbeat(
         run_id,
@@ -3278,8 +3348,10 @@ async def _persist_narration_text(
             generated = narration_by_position.get(page.position)
             if generated is None:
                 raise ValueError(f"Missing narration for slide {page.position}.")
+            pronunciation = split_tts_pronunciation_text(generated.narration_text)
             page.title = generated.title
-            page.narration_text = generated.narration_text
+            page.narration_text = pronunciation.display
+            page.narration_tts_text = pronunciation.speech_override
             page.narration_id = None
             page.start_offset_ms = None
             page.end_offset_ms = None
@@ -3306,6 +3378,7 @@ async def _synthesize_slide_audio(
                 page.position,
                 page.content_kind,
                 page.narration_text or "",
+                page.narration_tts_text,
                 page.media_stored_object,
             )
             for page in sorted(deck.pages, key=lambda item: item.position)
@@ -3319,21 +3392,28 @@ async def _synthesize_slide_audio(
         return []
     needs_tts = any(
         content_kind != schemas.LectureSlideContentKind.VIDEO
-        for _, _, content_kind, _, _ in pages
+        for _, _, content_kind, _, _, _ in pages
     )
     if needs_tts and not voice_id:
         raise RuntimeError("Lecture slide deck voice_id is required for narration.")
     api_key = await _get_elevenlabs_api_key(class_id) if needs_tts else None
     needs_video_transcription = any(
         content_kind == schemas.LectureSlideContentKind.VIDEO
-        for _, _, content_kind, _, _ in pages
+        for _, _, content_kind, _, _, _ in pages
     )
     openai_client = None
     if needs_video_transcription:
         async with config.db.driver.async_session() as session:
             openai_client = await get_openai_client_by_class_id(session, class_id)
     artifacts: list[SlideAudioArtifact] = []
-    for page_id, page_position, content_kind, narration_text, media in pages:
+    for (
+        page_id,
+        page_position,
+        content_kind,
+        narration_text,
+        narration_tts_text,
+        media,
+    ) in pages:
         if content_kind == schemas.LectureSlideContentKind.VIDEO:
             if media is None:
                 raise RuntimeError(
@@ -3356,7 +3436,7 @@ async def _synthesize_slide_audio(
                 run_id,
                 lease_token,
                 synthesize_elevenlabs_speech_with_timings(
-                    api_key, voice_id, narration_text
+                    api_key, voice_id, narration_tts_text or narration_text
                 ),
             )
             if synthesis_result is None:
@@ -3366,7 +3446,11 @@ async def _synthesize_slide_audio(
             audio = synthesis_result.audio
             content_type = LECTURE_SLIDE_AUDIO_CONTENT_TYPE
             duration_ms = audio_duration_ms(audio, content_type)
-            word_timings = synthesis_result.words
+            word_timings = _display_word_timings(
+                synthesis_result.words,
+                display_text=narration_text,
+                speech_text=narration_tts_text or narration_text,
+            )
         store_key, content_length = await _store_audio(
             generate_slide_narration_store_key(),
             content_type,
@@ -3401,6 +3485,7 @@ async def _synthesize_slide_audio(
                 page.narration_id = narration.id
                 if content_kind == schemas.LectureSlideContentKind.VIDEO:
                     page.narration_text = narration_text
+                    page.narration_tts_text = None
                 session.add(page)
                 run.lease_expires_at = utcnow() + RUN_LEASE_DURATION
                 session.add(run)
@@ -4933,19 +5018,25 @@ def _merge_slide_chunk_manifests(
 def _generated_slide_question_to_input(
     question: GeneratedSlideQuestion,
 ) -> schemas.LectureSlideQuestionInput:
+    intro = split_tts_pronunciation_text(question.intro_text)
+    option_inputs: list[schemas.LectureSlideQuestionOptionInput] = []
+    for option in question.options:
+        feedback = split_tts_pronunciation_text(option.post_answer_text)
+        option_inputs.append(
+            schemas.LectureSlideQuestionOptionInput(
+                option_text=option.option_text,
+                post_answer_text=feedback.display,
+                post_answer_tts_text=feedback.speech_override,
+                correct=option.correct,
+            )
+        )
     return schemas.LectureSlideQuestionInput(
         mode=schemas.LectureSlideQuestionDraftMode.COMPLETE,
         slide_position=question.slide_position,
         question_text=question.question_text,
-        intro_text=question.intro_text,
-        options=[
-            schemas.LectureSlideQuestionOptionInput(
-                option_text=option.option_text,
-                post_answer_text=option.post_answer_text,
-                correct=option.correct,
-            )
-            for option in question.options
-        ],
+        intro_text=intro.display,
+        intro_tts_text=intro.speech_override,
+        options=option_inputs,
     )
 
 
@@ -5054,7 +5145,10 @@ async def _synthesize_knowledge_check_audio(
                 != schemas.LectureSlideNarrationStatus.READY
             ):
                 narration_items.append(
-                    (question.intro_narration.id, question.intro_text)
+                    (
+                        question.intro_narration.id,
+                        question.intro_narration.tts_text or question.intro_text,
+                    )
                 )
             for option in question.options:
                 if (
@@ -5064,7 +5158,10 @@ async def _synthesize_knowledge_check_audio(
                     != schemas.LectureSlideNarrationStatus.READY
                 ):
                     narration_items.append(
-                        (option.post_narration.id, option.post_answer_text)
+                        (
+                            option.post_narration.id,
+                            option.post_narration.tts_text or option.post_answer_text,
+                        )
                     )
     if not narration_items:
         return

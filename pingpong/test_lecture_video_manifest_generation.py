@@ -3,12 +3,17 @@ import subprocess
 from types import SimpleNamespace
 from typing import cast
 
+import pytest
 from google.genai import types
 from pydantic import ValidationError
-import pytest
 
 import pingpong.lecture_video_manifest_generation as manifest_generation
 import pingpong.schemas as schemas
+from pingpong.say_transform import (
+    SAY_MARKER_END,
+    SAY_MARKER_SEPARATOR,
+    SAY_MARKER_START,
+)
 
 
 def _generated_question() -> manifest_generation.GeneratedQuestion:
@@ -44,6 +49,35 @@ def _generated_question() -> manifest_generation.GeneratedQuestion:
                 resume_at=1.5,
             ),
         },
+    )
+
+
+def test_quiz_to_manifest_separates_voice_over_pronunciation_metadata() -> None:
+    say_lead = (
+        f"{SAY_MARKER_START}say{SAY_MARKER_SEPARATOR}"
+        '{"speech":"leed","content":"lead"}'
+        f"{SAY_MARKER_END}"
+    )
+    question = _generated_question()
+    question.voice_over_intro = f"You {say_lead} this step."
+    question.choice_feedback[
+        "Combine like terms"
+    ].voice_over = f"This will {say_lead} us forward."
+
+    manifest = manifest_generation._quiz_to_manifest(
+        _quiz_with_context([question]),
+        _transcript(),
+        video_duration_ms=30000,
+    )
+
+    [manifest_question] = manifest.questions
+    assert manifest_question.intro_text == "You lead this step."
+    assert manifest_question.intro_tts_text == "You leed this step."
+    assert manifest_question.options[0].post_answer_text == (
+        "This will lead us forward."
+    )
+    assert manifest_question.options[0].post_answer_tts_text == (
+        "This will leed us forward."
     )
 
 
@@ -588,6 +622,8 @@ def test_build_generation_prompt_uses_custom_video_description_window() -> None:
     assert "It should not summarize the whole lesson so far." in prompt
     assert "Good teacher-posed question:" in prompt
     assert "Good generated question:" in prompt
+    assert "---ElevenLabs Pronunciation Metadata---" in prompt
+    assert "Never put it in `question_text` or choice text." in prompt
     assert "generate the interactive question layer now" not in prompt
     assert "prior cumulative summary" not in prompt
     assert "```json" not in prompt
@@ -1156,6 +1192,7 @@ async def test_merge_chunk_manifests_reconciles_questions_with_gemini(
 
     assert captured["response_model"] is manifest_generation.ReconciledGeneratedQuiz
     assert "Ask only 1 question." in str(captured["prompt"])
+    assert "---ElevenLabs Pronunciation Metadata---" in str(captured["prompt"])
     contents = cast(list[types.Part], captured["contents"])
     payload = contents[0].text
     assert payload is not None

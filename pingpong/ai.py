@@ -38,6 +38,7 @@ from pingpong.say_transform import (
     SAY_MARKER_END,
     SAY_MARKER_SEPARATOR,
     SAY_MARKER_START,
+    TTS_PRONUNCIATION_INSTRUCTIONS,
     transform_say_text,
 )
 from pingpong.schemas import (
@@ -5113,15 +5114,12 @@ def format_instructions(
                 "but not spoken. Do not write an empty `speech` key for "
                 "show-only content; omit `speech` instead. Use a `say` block "
                 "for math, symbols, formulas, special characters, "
-                "abbreviations, notation, ambiguous words whose intended "
-                "pronunciation may not be clear to text-to-speech, or any text "
+                "abbreviations, notation, ambiguous pronunciations, or any text "
                 "that should be spelled out for speech but displayed differently "
-                "for reading. For an ambiguous word, put a simple phonetic "
-                "alternative spelling in `speech` and the correctly spelled word "
-                "in `content`; use context to select the intended pronunciation. "
-                "Use a "
+                "for reading. Use a "
                 "`mermaid` or `svg` block to wrap a Mermaid or SVG fenced "
                 "code block.\n"
+                f"{TTS_PRONUNCIATION_INSTRUCTIONS}\n"
                 "For math display, use the single dollar sign $ with spaces "
                 "surrounding it for inline math. For block-level math, use "
                 "double dollar signs $$ with newlines before and after them as "
@@ -5192,12 +5190,6 @@ def format_instructions(
                 '\ue200say\ue202{"speech":"a","content":"$ a $"}\ue201'
                 ", the other has "
                 '\ue200say\ue202{"speech":"c","content":"$ c $"}\ue201.\n'
-                "Incorrect: The pipes lead water away, and the old pipes were "
-                "made of lead.\n"
-                "Correct: The pipes "
-                '\ue200say\ue202{"speech":"leed","content":"lead"}\ue201'
-                " water away, and the old pipes were made of "
-                '\ue200say\ue202{"speech":"led","content":"lead"}\ue201.\n'
                 "When you output a Mermaid or SVG fenced code block in a "
                 "lecture-video response, you MUST wrap the entire fenced code "
                 "block in a `mermaid` or `svg` block (matching the language). "

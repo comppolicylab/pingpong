@@ -1603,7 +1603,7 @@ def _first_pending_narration_work(
                 lecture_video_id=lecture_video.id,
                 voice_id=voice_id,
                 narration_id=question.intro_narration.id,
-                text=question.intro_text,
+                text=question.intro_narration.tts_text or question.intro_text,
             )
 
         for option in sorted(question.options, key=lambda item: item.position):
@@ -1620,7 +1620,7 @@ def _first_pending_narration_work(
                     lecture_video_id=lecture_video.id,
                     voice_id=voice_id,
                     narration_id=option.post_narration.id,
-                    text=option.post_answer_text,
+                    text=option.post_narration.tts_text or option.post_answer_text,
                 )
     return None
 

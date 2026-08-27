@@ -949,6 +949,7 @@ async def apply_lecture_slide_page_notes(
             if page.narration_id is not None:
                 old_narration_ids.append(page.narration_id)
             page.narration_text = narration_text
+            page.narration_tts_text = None
             page.narration_id = None
             page.start_offset_ms = None
             page.end_offset_ms = None
@@ -1114,6 +1115,7 @@ async def apply_lecture_slide_content_items(
             if page.narration_id is not None:
                 old_narration_ids.append(page.narration_id)
             page.narration_text = narration_text
+            page.narration_tts_text = None
             page.narration_id = None
             page.start_offset_ms = None
             page.end_offset_ms = None
@@ -1265,6 +1267,7 @@ async def _reset_narration_for_text(
     session: AsyncSession,
     narration: models.LectureSlideNarration | None,
     text: str,
+    tts_text: str | None = None,
 ) -> tuple[
     models.LectureSlideNarration | None,
     bool,
@@ -1276,6 +1279,7 @@ async def _reset_narration_for_text(
     if narration is None:
         narration = models.LectureSlideNarration(
             status=schemas.LectureSlideNarrationStatus.PENDING,
+            tts_text=tts_text,
         )
         session.add(narration)
         await session.flush()
@@ -1289,6 +1293,7 @@ async def _reset_narration_for_text(
     narration.stored_object_id = None
     narration.status = schemas.LectureSlideNarrationStatus.PENDING
     narration.error_message = None
+    narration.tts_text = tts_text
     session.add(narration)
     return narration, True, [], stored_object_row
 
@@ -1332,6 +1337,10 @@ async def _apply_question_option_drafts(
     for option_position, option in enumerate(options):
         option_text = option.option_text.strip()
         post_answer_text = option.post_answer_text.strip()
+        post_answer_tts_text = (option.post_answer_tts_text or "").strip() or None
+        post_answer_tts_text_provided = (
+            "post_answer_tts_text" in option.model_fields_set
+        )
         option_row = (
             remaining_options.pop(option.id, None) if option.id is not None else None
         )
@@ -1358,6 +1367,7 @@ async def _apply_question_option_drafts(
             if _text_needs_audio(post_answer_text):
                 post_narration = models.LectureSlideNarration(
                     status=schemas.LectureSlideNarrationStatus.PENDING,
+                    tts_text=post_answer_tts_text,
                 )
                 session.add(post_narration)
                 await session.flush()
@@ -1370,14 +1380,29 @@ async def _apply_question_option_drafts(
             if option_row.option_text != option_text:
                 option_row.option_text = option_text
                 changed = True
-            if option_row.post_answer_text != post_answer_text:
+            if (
+                option_row.post_answer_text != post_answer_text
+                or (
+                    post_answer_tts_text_provided
+                    and option_row.post_narration is None
+                    and post_answer_tts_text is not None
+                )
+                or (
+                    post_answer_tts_text_provided
+                    and option_row.post_narration is not None
+                    and option_row.post_narration.tts_text != post_answer_tts_text
+                )
+            ):
                 (
                     narration,
                     narration_changed,
                     deleted_narration_ids,
                     deleted_stored_object_rows,
                 ) = await _reset_narration_for_text(
-                    session, option_row.post_narration, post_answer_text
+                    session,
+                    option_row.post_narration,
+                    post_answer_text,
+                    post_answer_tts_text if post_answer_tts_text_provided else None,
                 )
                 option_row.post_answer_text = post_answer_text
                 option_row.post_narration_id = narration.id if narration else None
@@ -1526,6 +1551,8 @@ async def apply_lecture_slide_question_drafts(
             stop_offset_ms = page.end_offset_ms
         question_text = question_input.question_text.strip()
         intro_text = question_input.intro_text.strip()
+        intro_tts_text = (question_input.intro_tts_text or "").strip() or None
+        intro_tts_text_provided = "intro_tts_text" in question_input.model_fields_set
         question = (
             remaining_questions.pop(question_input.id, None)
             if question_input.id is not None
@@ -1557,6 +1584,7 @@ async def apply_lecture_slide_question_drafts(
             if _text_needs_audio(intro_text):
                 intro_narration = models.LectureSlideNarration(
                     status=schemas.LectureSlideNarrationStatus.PENDING,
+                    tts_text=intro_tts_text,
                 )
                 session.add(intro_narration)
                 await session.flush()
@@ -1578,14 +1606,29 @@ async def apply_lecture_slide_question_drafts(
             if question.question_text != question_text:
                 question.question_text = question_text
                 question_changed = True
-            if question.intro_text != intro_text:
+            if (
+                question.intro_text != intro_text
+                or (
+                    intro_tts_text_provided
+                    and question.intro_narration is None
+                    and intro_tts_text is not None
+                )
+                or (
+                    intro_tts_text_provided
+                    and question.intro_narration is not None
+                    and question.intro_narration.tts_text != intro_tts_text
+                )
+            ):
                 (
                     narration,
                     narration_changed,
                     deleted_narration_ids,
                     deleted_stored_object_rows,
                 ) = await _reset_narration_for_text(
-                    session, question.intro_narration, intro_text
+                    session,
+                    question.intro_narration,
+                    intro_text,
+                    intro_tts_text if intro_tts_text_provided else None,
                 )
                 question.intro_text = intro_text
                 question.intro_narration_id = narration.id if narration else None
@@ -1989,6 +2032,7 @@ async def clone_lecture_slide_deck_snapshot(
             stored_object_id=narration.stored_object_id,
             status=narration.status,
             error_message=narration.error_message,
+            tts_text=narration.tts_text,
         )
         session.add(cloned_narration)
         await session.flush()
@@ -2008,6 +2052,7 @@ async def clone_lecture_slide_deck_snapshot(
                 extracted_text=page.extracted_text,
                 user_notes=page.user_notes,
                 narration_text=page.narration_text,
+                narration_tts_text=page.narration_tts_text,
                 image_description=page.image_description,
                 narration_id=await clone_narration_id(page.narration),
                 start_offset_ms=page.start_offset_ms,

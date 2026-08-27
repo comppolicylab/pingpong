@@ -647,6 +647,59 @@ async def test_persist_manifest_creates_caption_artifact(
 
 @pytest.mark.asyncio
 @with_institution(11, "Test Institution")
+async def test_persist_manifest_keeps_tts_pronunciation_overrides(
+    db, institution, config, monkeypatch, tmp_path
+):
+    monkeypatch.setattr(
+        config,
+        "video_store",
+        LocalVideoStoreSettings(type="local", save_target=str(tmp_path)),
+    )
+
+    async with db.async_session() as session:
+        class_ = models.Class(
+            id=1,
+            name="Test Class",
+            institution_id=institution.id,
+            api_key="test-key",
+        )
+        lecture_video = make_lecture_video(class_.id, "lecture.mp4")
+        session.add_all([class_, lecture_video])
+        await session.flush()
+
+        manifest = schemas.LectureVideoManifestV3.model_validate(
+            lecture_video_manifest_v3()
+        )
+        question = manifest.questions[0]
+        question.intro_tts_text = "You leed this step."
+        question.options[0].post_answer_tts_text = "This will leed onward."
+        await lecture_video_service.persist_manifest(
+            session,
+            lecture_video,
+            manifest,
+            create_narration_placeholders=True,
+        )
+        await session.commit()
+
+        loaded = await models.LectureVideo.get_by_id_with_copy_context(
+            session, lecture_video.id
+        )
+        assert loaded is not None
+        [stored_question] = loaded.questions
+        assert stored_question.intro_narration is not None
+        assert stored_question.intro_narration.tts_text == "You leed this step."
+        assert stored_question.options[0].post_narration is not None
+        assert (
+            stored_question.options[0].post_narration.tts_text
+            == "This will leed onward."
+        )
+        work_item = lecture_video_processing._first_pending_narration_work(loaded)
+        assert work_item is not None
+        assert work_item.text == "You leed this step."
+
+
+@pytest.mark.asyncio
+@with_institution(11, "Test Institution")
 async def test_persist_manifest_cleans_uploaded_caption_when_row_create_fails(
     db, institution, config, monkeypatch, tmp_path
 ):

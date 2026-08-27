@@ -8,6 +8,8 @@ from pingpong.say_transform import (
     SAY_MARKER_END,
     SAY_MARKER_SEPARATOR,
     SAY_MARKER_START,
+    TTS_PRONUNCIATION_INSTRUCTIONS,
+    split_tts_pronunciation_text,
     transform_say_text,
 )
 
@@ -69,18 +71,7 @@ def test_format_instructions_adds_block_contract_for_lecture_video_markup():
         '{"speech":"a","content":"$ a $"}'
         f"{SAY_MARKER_END}"
     ) in instructions
-    assert "ambiguous words whose intended pronunciation" in instructions
-    assert "put a simple phonetic alternative spelling in `speech`" in instructions
-    assert (
-        f"{SAY_MARKER_START}say{SAY_MARKER_SEPARATOR}"
-        '{"speech":"leed","content":"lead"}'
-        f"{SAY_MARKER_END}"
-    ) in instructions
-    assert (
-        f"{SAY_MARKER_START}say{SAY_MARKER_SEPARATOR}"
-        '{"speech":"led","content":"lead"}'
-        f"{SAY_MARKER_END}"
-    ) in instructions
+    assert TTS_PRONUNCIATION_INSTRUCTIONS in instructions
     assert "Correct Mermaid diagram:" in instructions
     assert (
         f"{SAY_MARKER_START}mermaid{SAY_MARKER_SEPARATOR}"
@@ -178,11 +169,25 @@ def test_transform_returns_body_for_display():
     assert transform_say_text(text, "display") == "Use $ x^2 $ here."
 
 
-def test_transform_routes_phonetic_spelling_only_to_speech():
-    text = "The pipes " + snippet("say", "leed", "lead") + " water away."
+def test_split_tts_pronunciation_text_returns_optional_override():
+    tagged = "The pipes " + snippet("say", "leed", "lead") + " water away."
 
-    assert transform_say_text(text, "display") == "The pipes lead water away."
-    assert transform_say_text(text, "speech") == "The pipes leed water away."
+    split = split_tts_pronunciation_text(tagged)
+    unchanged = split_tts_pronunciation_text("No ambiguous words.")
+
+    assert split.display == "The pipes lead water away."
+    assert split.speech_override == "The pipes leed water away."
+    assert unchanged.display == "No ambiguous words."
+    assert unchanged.speech_override is None
+
+
+def test_split_tts_pronunciation_text_rejects_word_count_changes():
+    tagged = "Use " + snippet("say", "lead forward", "lead") + " now."
+
+    split = split_tts_pronunciation_text(tagged)
+
+    assert split.display == "Use lead now."
+    assert split.speech_override is None
 
 
 def test_transform_accepts_content_only_snippet_for_silent_display():
