@@ -5,7 +5,7 @@ import openai
 from openai.types.beta.assistant_create_params import ToolResources
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from pingpong import models
+from pingpong import lecture_slide_service, models
 from pingpong.ai import (
     format_instructions,
     get_azure_model_deployment_name_equivalent,
@@ -418,6 +418,37 @@ async def copy_assistant(
         await client.write_safe(grant=lecture_video_grants(cloned_lecture_video))
         new_lecture_video_id = cloned_lecture_video.id
 
+    new_lecture_slide_deck_id = None
+    if assistant.lecture_slide_deck:
+        source_deck = await models.LectureSlideDeck.get_by_id_with_processing_context(
+            session, assistant.lecture_slide_deck.id
+        )
+        if source_deck is None:
+            raise ValueError("Lecture slide deck not found while copying assistant.")
+        cloned_deck = await lecture_slide_service.clone_lecture_slide_deck_snapshot(
+            session,
+            source_deck,
+            target_class_id=target_class_id,
+        )
+        new_lecture_slide_deck_id = cloned_deck.id
+
+        slide_file_ids = [
+            context_file.file_object_id
+            for context_file in source_deck.additional_context_files
+        ]
+        if source_deck.source_stored_object.openai_file_object_id is not None:
+            slide_file_ids.append(
+                source_deck.source_stored_object.openai_file_object_id
+            )
+        slide_files = await models.File.get_all_by_ids_if_exist(session, slide_file_ids)
+        await models.File.add_files_to_class(
+            session, target_class_id, [file.id for file in slide_files]
+        )
+        slide_file_grants: list[Relation] = []
+        for file in slide_files:
+            slide_file_grants.extend(_file_grants(file, target_class_id))
+        await client.write_safe(grant=slide_file_grants)
+
     if assistant.version <= 2:
         tool_resources: ToolResources = {}
         if new_vector_store_obj_id:
@@ -454,6 +485,7 @@ async def copy_assistant(
         class_id=target_class_id,
         vector_store_id=new_vector_store_id,
         lecture_video_id=new_lecture_video_id,
+        lecture_slide_deck_id=new_lecture_slide_deck_id,
         creator_id=copied_creator_id,
         published=None if force_private else assistant.published,
         should_record_user_information=assistant.should_record_user_information,

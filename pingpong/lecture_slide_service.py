@@ -1952,10 +1952,13 @@ async def _delete_lecture_slide_caption_keys_quietly(keys: Iterable[str]) -> Non
 async def clone_lecture_slide_deck_snapshot(
     session: AsyncSession,
     deck: models.LectureSlideDeck,
+    *,
+    target_class_id: int | None = None,
 ) -> models.LectureSlideDeck:
+    cloned_class_id = target_class_id if target_class_id is not None else deck.class_id
     cloned_deck = await models.LectureSlideDeck.create(
         session,
-        class_id=deck.class_id,
+        class_id=cloned_class_id,
         source_stored_object_id=deck.source_stored_object_id,
         uploader_id=deck.uploader_id,
         display_name=deck.display_name,
@@ -2019,7 +2022,7 @@ async def clone_lecture_slide_deck_snapshot(
             models.LectureSlideAdditionalContextFile(
                 lecture_slide_deck_id=cloned_deck.id,
                 file_object_id=context_file.file_object_id,
-                class_id=context_file.class_id,
+                class_id=cloned_class_id,
                 uploader_id=context_file.uploader_id,
                 position=context_file.position,
                 original_filename=context_file.original_filename,
