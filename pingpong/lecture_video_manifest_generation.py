@@ -19,6 +19,10 @@ from string import Template
 
 import pingpong.schemas as schemas
 from pingpong import gemini as gemini_helpers
+from pingpong.say_transform import (
+    TTS_PRONUNCIATION_INSTRUCTIONS,
+    split_tts_pronunciation_text,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -1479,6 +1483,10 @@ addressing the concept, your feedback IS the only place the student gets
 closure — so don't be too brief in that case.
 - The goal: feedback + resumed video = one smooth, continuous, non-repetitive experience.
 
+{TTS_PRONUNCIATION_INSTRUCTIONS}
+Apply pronunciation metadata only inside `voice_over_intro` and `voice_over`.
+Never put it in `question_text` or choice text.
+
 HOW TO SPECIFY TIMESTAMPS — CRITICAL:
 You MUST specify pause and resume points using word IDs from the transcript, NOT by inventing timestamps.
 
@@ -1614,20 +1622,24 @@ def _question_to_manifest_question(
             timestamp=feedback.resume_at,
             timestamp_kind="start",
         )
+        feedback_text = split_tts_pronunciation_text(feedback.voice_over)
         options.append(
             schemas.LectureVideoManifestOptionV1(
                 option_text=choice_text,
-                post_answer_text=feedback.voice_over,
+                post_answer_text=feedback_text.display,
+                post_answer_tts_text=feedback_text.speech_override,
                 continue_offset_ms=continue_offset_ms,
                 correct=is_correct,
             )
         )
     if correct_count != 1:
         raise ValueError("Generated question must have exactly one correct answer.")
+    intro = split_tts_pronunciation_text(question.voice_over_intro)
     return schemas.LectureVideoManifestQuestionV1(
         type=schemas.LectureVideoQuestionType.SINGLE_SELECT,
         question_text=question.question_text,
-        intro_text=question.voice_over_intro,
+        intro_text=intro.display,
+        intro_tts_text=intro.speech_override,
         stop_offset_ms=stop_offset_ms,
         options=options,
     )
@@ -1913,6 +1925,8 @@ Global requirements:
 - Do not invent word IDs or timestamps. Copy the "id", "word", "start", and "end" values from one transcript entry.
 - For teacher-posed questions, let the teacher ask the question and pause after the full question.
 - For generated questions, voice_over_intro must include both a pause cue and the question spoken aloud.
+- Apply the following pronunciation metadata contract only inside voice_over_intro and voice_over fields:
+{TTS_PRONUNCIATION_INSTRUCTIONS}
 - Output only JSON matching the requested schema.
 
 INSTRUCTOR GENERATION GUIDANCE:

@@ -1,5 +1,6 @@
 import json
 import logging
+from dataclasses import dataclass
 from typing import Literal
 
 
@@ -18,6 +19,34 @@ PuaStreamTarget = Literal["display", "speech"]
 SnippetTransformTarget = PuaStreamTarget
 
 logger = logging.getLogger(__name__)
+
+
+TTS_PRONUNCIATION_INSTRUCTIONS = f"""---ElevenLabs Pronunciation Metadata---
+Some generated fields are sent to ElevenLabs text-to-speech. Use context to identify
+words whose pronunciation is genuinely ambiguous. Only for those words, preserve the
+correctly spelled word for display while supplying a simple phonetic alternative
+spelling for speech with this exact inline form:
+{SAY_MARKER_START}say{SAY_MARKER_SEPARATOR}{{"speech":"leed","content":"lead"}}{SAY_MARKER_END}
+In each pronunciation block, both `speech` and `content` must contain exactly one
+word with no whitespace.
+For example: "The pipes
+{SAY_MARKER_START}say{SAY_MARKER_SEPARATOR}{{"speech":"leed","content":"lead"}}{SAY_MARKER_END}
+water away, and old pipes were made of
+{SAY_MARKER_START}say{SAY_MARKER_SEPARATOR}{{"speech":"led","content":"lead"}}{SAY_MARKER_END}."
+Use ordinary spelling everywhere else. Do not use IPA, SSML, markdown, or this block
+in fields that are not described as spoken narration, a spoken response, an intro,
+or spoken feedback.
+Do not mention this metadata to the learner."""
+
+
+@dataclass(frozen=True)
+class TTSPronunciationText:
+    display: str
+    speech: str
+
+    @property
+    def speech_override(self) -> str | None:
+        return self.speech if self.speech != self.display else None
 
 
 class _StreamingSnippetJsonParser:
@@ -621,6 +650,25 @@ SayTransformer = PuaStreamTransformer
 def transform_say_text(text: str, target: PuaStreamTarget) -> str:
     transformer = PuaStreamTransformer(target)
     return transformer.add(text) + transformer.flush()
+
+
+def split_tts_pronunciation_text(text: str) -> TTSPronunciationText:
+    """Split generated pronunciation metadata into display and ElevenLabs text."""
+    if SAY_MARKER_START not in text:
+        return TTSPronunciationText(display=text, speech=text)
+    display = transform_say_text(text, "display")
+    speech = transform_say_text(text, "speech")
+    display_word_count = len(display.split())
+    speech_word_count = len(speech.split())
+    if display_word_count != speech_word_count:
+        logger.warning(
+            "Ignoring generated pronunciation override with mismatched word count. "
+            "display_words=%s speech_words=%s",
+            display_word_count,
+            speech_word_count,
+        )
+        speech = display
+    return TTSPronunciationText(display=display, speech=speech)
 
 
 def _extract_followup_responses(payload: str) -> list[str]:

@@ -38,6 +38,7 @@ from pingpong.say_transform import (
     SAY_MARKER_END,
     SAY_MARKER_SEPARATOR,
     SAY_MARKER_START,
+    TTS_PRONUNCIATION_INSTRUCTIONS,
     transform_say_text,
 )
 from pingpong.schemas import (
@@ -5104,9 +5105,9 @@ def format_instructions(
                 "---Formatting: Lecture Dual Speech/Display Blocks---\n"
                 "Before producing the final answer, check whether any part of it "
                 "contains math, symbols, formulas, special characters, "
-                "notation, or any text that should be spoken differently from "
-                "how it should be displayed. If it does, you MUST emit that part "
-                "as a private-use block.\n"
+                "notation, an ambiguous pronunciation, or any text that should "
+                "be spoken differently from how it should be displayed. If it "
+                "does, you MUST emit that part as a private-use block.\n"
                 "A block payload is a compact JSON object with at least one "
                 "of `speech` or `content`. `speech` is the natural spoken "
                 "form. `content` is the exact visible form. Include both keys "
@@ -5116,10 +5117,12 @@ def format_instructions(
                 "but not spoken. Do not write an empty `speech` key for "
                 "show-only content; omit `speech` instead. Use a `say` block "
                 "for math, symbols, formulas, special characters, "
-                "abbreviations, notation, or any text that should be spelled "
-                "out for speech but displayed differently for reading. Use a "
+                "abbreviations, notation, ambiguous pronunciations, or any text "
+                "that should be spelled out for speech but displayed differently "
+                "for reading. Use a "
                 "`mermaid` or `svg` block to wrap a Mermaid or SVG fenced "
                 "code block.\n"
+                f"{TTS_PRONUNCIATION_INSTRUCTIONS}\n"
                 "For math display, use the single dollar sign $ with spaces "
                 "surrounding it for inline math. For block-level math, use "
                 "double dollar signs $$ with newlines before and after them as "

@@ -1392,6 +1392,7 @@ async def persist_manifest(
             if create_narration_placeholders and text_needs_audio(question.intro_text):
                 intro_narration = models.LectureVideoNarration(
                     status=schemas.LectureVideoNarrationStatus.PENDING,
+                    tts_text=question.intro_tts_text,
                 )
                 session.add(intro_narration)
                 await session.flush()
@@ -1431,6 +1432,7 @@ async def persist_manifest(
                 ):
                     post_narration = models.LectureVideoNarration(
                         status=schemas.LectureVideoNarrationStatus.PENDING,
+                        tts_text=option.post_answer_tts_text,
                     )
                     session.add(post_narration)
                     await session.flush()

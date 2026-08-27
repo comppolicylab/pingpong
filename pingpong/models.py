@@ -2577,6 +2577,7 @@ class LectureVideo(Base):
                     stored_object_id=question.intro_narration.stored_object_id,
                     status=question.intro_narration.status,
                     error_message=question.intro_narration.error_message,
+                    tts_text=question.intro_narration.tts_text,
                 )
                 session.add(intro_narration)
                 await session.flush()
@@ -2600,6 +2601,7 @@ class LectureVideo(Base):
                         stored_object_id=option.post_narration.stored_object_id,
                         status=option.post_narration.status,
                         error_message=option.post_narration.error_message,
+                        tts_text=option.post_narration.tts_text,
                     )
                     session.add(post_narration)
                     await session.flush()
@@ -2933,6 +2935,7 @@ class LectureVideoNarration(Base):
         server_default=schemas.LectureVideoNarrationStatus.PENDING.name,
     )
     error_message = Column(String, nullable=True)
+    tts_text = Column(Text, nullable=True)
 
     @classmethod
     async def get_by_id(
@@ -3339,6 +3342,7 @@ class LectureSlideNarration(Base):
         server_default=schemas.LectureSlideNarrationStatus.PENDING.name,
     )
     error_message = Column(String, nullable=True)
+    tts_text = Column(Text, nullable=True)
 
     @classmethod
     async def get_by_id(
@@ -3869,6 +3873,7 @@ class LectureSlideTranslationPage(Base):
     )
     position: Mapped[int] = mapped_column(Integer, nullable=False)
     narration_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    narration_tts_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     narration_stored_object_id: Mapped[int | None] = mapped_column(
         Integer,
         ForeignKey(
@@ -4245,6 +4250,7 @@ class LectureSlidePage(Base):
     extracted_text = Column(Text, nullable=True)
     user_notes = Column(Text, nullable=True)
     narration_text = Column(Text, nullable=True)
+    narration_tts_text = Column(Text, nullable=True)
     image_description = Column(Text, nullable=True)
     narration_id = Column(
         Integer,

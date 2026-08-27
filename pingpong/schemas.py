@@ -872,6 +872,7 @@ class AnonymousLinkResponse(BaseModel):
 class LectureVideoManifestOptionV1(BaseModel):
     option_text: str = Field(..., min_length=1)
     post_answer_text: str
+    post_answer_tts_text: str | None = Field(None, exclude=True)
     continue_offset_ms: int = Field(..., ge=0)
     correct: bool
 
@@ -880,6 +881,7 @@ class LectureVideoManifestQuestionV1(BaseModel):
     type: LectureVideoQuestionType
     question_text: str = Field(..., min_length=1)
     intro_text: str
+    intro_tts_text: str | None = Field(None, exclude=True)
     stop_offset_ms: int = Field(..., ge=0)
     options: list[LectureVideoManifestOptionV1] = Field(..., min_length=2)
 
@@ -1377,6 +1379,7 @@ class LectureSlideQuestionOptionInput(BaseModel):
     id: int | None = None
     option_text: str = Field("", max_length=2000)
     post_answer_text: str = Field("", max_length=5000)
+    post_answer_tts_text: str | None = Field(None, exclude=True)
     correct: bool
 
 
@@ -1386,6 +1389,7 @@ class LectureSlideQuestionInput(BaseModel):
     slide_position: int = Field(..., ge=0)
     question_text: str = Field("", max_length=5000)
     intro_text: str = Field("", max_length=5000)
+    intro_tts_text: str | None = Field(None, exclude=True)
     options: list[LectureSlideQuestionOptionInput] = Field(default_factory=list)
 
     @model_validator(mode="after")
