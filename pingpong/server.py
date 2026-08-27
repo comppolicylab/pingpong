@@ -9449,6 +9449,7 @@ async def create_run(
                 or not asst.hide_mcp_server_call_details,
                 lecture_video_dual_text_mode=_lecture_lesson_dual_text_enabled(thread),
                 lecture_video_followups_mode=_lecture_lesson_followups_enabled(thread),
+                omit_message_ids=_is_lecture_lesson_mode(thread.interaction_mode),
             )
         except Exception as e:
             logger.exception("Error running thread")
@@ -10128,6 +10129,7 @@ async def send_message(
                     if lecture_chat_prep is not None
                     else False
                 ),
+                omit_message_ids=_is_lecture_lesson_mode(thread.interaction_mode),
             )
         else:
             raise HTTPException(
