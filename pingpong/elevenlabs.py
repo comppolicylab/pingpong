@@ -44,7 +44,7 @@ ELEVENLABS_VOICE_VALIDATION_SAMPLE_TEXT = (
 ELEVENLABS_VOICE_VALIDATION_OUTPUT_FORMAT = "opus_48000_32"
 ELEVENLABS_VOICE_VALIDATION_CONTENT_TYPE = "audio/ogg"
 ELEVENLABS_VOICE_SAMPLE_TEXT_HEADER = "X-PingPong-Voice-Sample-Text"
-ELEVENLABS_TTS_MODEL = "eleven_v3"
+ELEVENLABS_TTS_MODEL = "eleven_flash_v2_5"
 ELEVENLABS_TTS_VOICE_SETTINGS: Final[Mapping[str, Any]] = MappingProxyType(
     {
         "stability": DEFAULT_ELEVENLABS_STABILITY,
@@ -81,83 +81,41 @@ class ElevenLabsLanguage:
 
 
 # Published at https://elevenlabs.io/docs/help-center/other/what-languages-do-you-support.
-# Names follow the v3 list; codes use the speech API's ISO 639-1 convention where
-# available and ElevenLabs' established identifiers for Filipino and Cebuano.
-ELEVENLABS_V3_LANGUAGES: Final[tuple[ElevenLabsLanguage, ...]] = (
-    ElevenLabsLanguage("af", "Afrikaans"),
+# Codes use the speech API's ISO 639-1 convention where available and ElevenLabs'
+# established identifier for Filipino.
+ELEVENLABS_FLASH_V2_5_LANGUAGES: Final[tuple[ElevenLabsLanguage, ...]] = (
     ElevenLabsLanguage("ar", "Arabic"),
-    ElevenLabsLanguage("hy", "Armenian"),
-    ElevenLabsLanguage("as", "Assamese"),
-    ElevenLabsLanguage("az", "Azerbaijani"),
-    ElevenLabsLanguage("be", "Belarusian"),
-    ElevenLabsLanguage("bn", "Bengali"),
-    ElevenLabsLanguage("bs", "Bosnian"),
     ElevenLabsLanguage("bg", "Bulgarian"),
-    ElevenLabsLanguage("ca", "Catalan"),
-    ElevenLabsLanguage("ceb", "Cebuano"),
-    ElevenLabsLanguage("ny", "Chichewa"),
     ElevenLabsLanguage("hr", "Croatian"),
     ElevenLabsLanguage("cs", "Czech"),
     ElevenLabsLanguage("da", "Danish"),
     ElevenLabsLanguage("nl", "Dutch"),
     ElevenLabsLanguage("en", "English"),
-    ElevenLabsLanguage("et", "Estonian"),
     ElevenLabsLanguage("fil", "Filipino"),
     ElevenLabsLanguage("fi", "Finnish"),
     ElevenLabsLanguage("fr", "French"),
-    ElevenLabsLanguage("gl", "Galician"),
-    ElevenLabsLanguage("ka", "Georgian"),
     ElevenLabsLanguage("de", "German"),
     ElevenLabsLanguage("el", "Greek"),
-    ElevenLabsLanguage("gu", "Gujarati"),
-    ElevenLabsLanguage("ha", "Hausa"),
-    ElevenLabsLanguage("he", "Hebrew"),
     ElevenLabsLanguage("hi", "Hindi"),
     ElevenLabsLanguage("hu", "Hungarian"),
-    ElevenLabsLanguage("is", "Icelandic"),
     ElevenLabsLanguage("id", "Indonesian"),
-    ElevenLabsLanguage("ga", "Irish"),
     ElevenLabsLanguage("it", "Italian"),
     ElevenLabsLanguage("ja", "Japanese"),
-    ElevenLabsLanguage("jv", "Javanese"),
-    ElevenLabsLanguage("kn", "Kannada"),
-    ElevenLabsLanguage("kk", "Kazakh"),
-    ElevenLabsLanguage("ky", "Kirghiz"),
     ElevenLabsLanguage("ko", "Korean"),
-    ElevenLabsLanguage("lv", "Latvian"),
-    ElevenLabsLanguage("ln", "Lingala"),
-    ElevenLabsLanguage("lt", "Lithuanian"),
-    ElevenLabsLanguage("lb", "Luxembourgish"),
-    ElevenLabsLanguage("mk", "Macedonian"),
     ElevenLabsLanguage("ms", "Malay"),
-    ElevenLabsLanguage("ml", "Malayalam"),
     ElevenLabsLanguage("zh", "Mandarin Chinese"),
-    ElevenLabsLanguage("mr", "Marathi"),
-    ElevenLabsLanguage("ne", "Nepali"),
     ElevenLabsLanguage("no", "Norwegian"),
-    ElevenLabsLanguage("ps", "Pashto"),
-    ElevenLabsLanguage("fa", "Persian"),
     ElevenLabsLanguage("pl", "Polish"),
     ElevenLabsLanguage("pt", "Portuguese"),
-    ElevenLabsLanguage("pa", "Punjabi"),
     ElevenLabsLanguage("ro", "Romanian"),
     ElevenLabsLanguage("ru", "Russian"),
-    ElevenLabsLanguage("sr", "Serbian"),
-    ElevenLabsLanguage("sd", "Sindhi"),
     ElevenLabsLanguage("sk", "Slovak"),
-    ElevenLabsLanguage("sl", "Slovenian"),
-    ElevenLabsLanguage("so", "Somali"),
     ElevenLabsLanguage("es", "Spanish"),
-    ElevenLabsLanguage("sw", "Swahili"),
     ElevenLabsLanguage("sv", "Swedish"),
     ElevenLabsLanguage("ta", "Tamil"),
-    ElevenLabsLanguage("te", "Telugu"),
-    ElevenLabsLanguage("th", "Thai"),
     ElevenLabsLanguage("tr", "Turkish"),
     ElevenLabsLanguage("uk", "Ukrainian"),
-    ElevenLabsLanguage("ur", "Urdu"),
     ElevenLabsLanguage("vi", "Vietnamese"),
-    ElevenLabsLanguage("cy", "Welsh"),
 )
 
 

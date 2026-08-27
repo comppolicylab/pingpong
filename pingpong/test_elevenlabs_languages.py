@@ -1,10 +1,10 @@
 import pingpong.elevenlabs as elevenlabs
 
 
-def test_published_v3_language_list_is_static_and_sorted():
-    languages = elevenlabs.ELEVENLABS_V3_LANGUAGES
+def test_published_flash_v2_5_language_list_is_static_and_sorted():
+    languages = elevenlabs.ELEVENLABS_FLASH_V2_5_LANGUAGES
 
-    assert len(languages) == 74
+    assert len(languages) == 32
     assert [language.name for language in languages] == sorted(
         (language.name for language in languages),
         key=str.casefold,

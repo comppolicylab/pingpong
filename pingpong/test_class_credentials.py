@@ -1331,7 +1331,7 @@ async def test_synthesize_elevenlabs_voice_sample_requests_direct_ogg_opus(monke
         "api_key": "elevenlabs-key",
         "voice_id": "voice-123",
         "text": elevenlabs_module.ELEVENLABS_VOICE_VALIDATION_SAMPLE_TEXT,
-        "model_id": "eleven_v3",
+        "model_id": "eleven_flash_v2_5",
         "output_format": "opus_48000_32",
         "voice_settings": elevenlabs_module.VoiceSettings(
             stability=0.5,
@@ -1475,7 +1475,7 @@ async def test_synthesize_elevenlabs_speech_omits_request_options_without_timeou
         "api_key": "elevenlabs-key",
         "voice_id": "voice-123",
         "text": "Narration text",
-        "model_id": "eleven_v3",
+        "model_id": "eleven_flash_v2_5",
         "output_format": "opus_48000_32",
         "voice_settings": elevenlabs_module.VoiceSettings(
             stability=0.5,
@@ -1568,7 +1568,7 @@ async def test_synthesize_elevenlabs_speech_with_timings_uses_source_alignment(
         "api_key": "elevenlabs-key",
         "voice_id": "voice-123",
         "text": "Hello world",
-        "model_id": "eleven_v3",
+        "model_id": "eleven_flash_v2_5",
         "output_format": "opus_48000_32",
         "voice_settings": elevenlabs_module.VoiceSettings(
             stability=0.5,
