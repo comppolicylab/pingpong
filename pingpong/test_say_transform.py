@@ -69,6 +69,18 @@ def test_format_instructions_adds_block_contract_for_lecture_video_markup():
         '{"speech":"a","content":"$ a $"}'
         f"{SAY_MARKER_END}"
     ) in instructions
+    assert "ambiguous words whose intended pronunciation" in instructions
+    assert "put a simple phonetic alternative spelling in `speech`" in instructions
+    assert (
+        f"{SAY_MARKER_START}say{SAY_MARKER_SEPARATOR}"
+        '{"speech":"leed","content":"lead"}'
+        f"{SAY_MARKER_END}"
+    ) in instructions
+    assert (
+        f"{SAY_MARKER_START}say{SAY_MARKER_SEPARATOR}"
+        '{"speech":"led","content":"lead"}'
+        f"{SAY_MARKER_END}"
+    ) in instructions
     assert "Correct Mermaid diagram:" in instructions
     assert (
         f"{SAY_MARKER_START}mermaid{SAY_MARKER_SEPARATOR}"
@@ -164,6 +176,13 @@ def test_transform_returns_body_for_display():
     text = "Use " + snippet("say", "x squared", "$ x^2 $") + " here."
 
     assert transform_say_text(text, "display") == "Use $ x^2 $ here."
+
+
+def test_transform_routes_phonetic_spelling_only_to_speech():
+    text = "The pipes " + snippet("say", "leed", "lead") + " water away."
+
+    assert transform_say_text(text, "display") == "The pipes lead water away."
+    assert transform_say_text(text, "speech") == "The pipes leed water away."
 
 
 def test_transform_accepts_content_only_snippet_for_silent_display():
