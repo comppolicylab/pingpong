@@ -13041,7 +13041,10 @@ async def create_assistant(
                 )
             if lecture_slide_questions_present:
                 await lecture_slide_service.apply_lecture_slide_question_drafts(
-                    request.state["db"], lecture_slide_deck, lecture_slide_questions
+                    request.state["db"],
+                    lecture_slide_deck,
+                    lecture_slide_questions,
+                    preserve_complete_manifest=True,
                 )
             await lecture_slide_processing.queue_lecture_slide_processing_run(
                 request.state["db"],

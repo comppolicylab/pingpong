@@ -1467,6 +1467,8 @@ async def apply_lecture_slide_question_drafts(
     session: AsyncSession,
     deck: models.LectureSlideDeck,
     questions: Iterable[schemas.LectureSlideQuestionInput],
+    *,
+    preserve_complete_manifest: bool = False,
 ) -> LectureSlideQuestionUpdateResult:
     question_inputs = list(questions)
     complete_question_inputs = [
@@ -1666,7 +1668,9 @@ async def apply_lecture_slide_question_drafts(
         audio_changed = True
 
     context_data = dict(deck.context_data or {})
-    if requires_question_generation:
+    if requires_question_generation or (
+        preserve_complete_manifest and manual_question_payload
+    ):
         context_data[schemas.LECTURE_SLIDE_MANUAL_QUESTIONS_CONTEXT_KEY] = (
             manual_question_payload
         )
