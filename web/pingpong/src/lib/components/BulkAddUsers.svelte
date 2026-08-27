@@ -83,6 +83,12 @@
 			return sadToast(validateEmailsResponse.error.detail || 'Unknown error validating emails.');
 		}
 		const emailList = validateEmailsResponse.data.results;
+		if (emailList.length === 0) {
+			$loading = false;
+			return sadToast(
+				'No email addresses were found. Enter addresses separated by commas or newlines.'
+			);
+		}
 		verifiedEmails = emailList.filter((e) => e.valid);
 		unverifiedEmails = emailList.filter((e) => !e.valid);
 
