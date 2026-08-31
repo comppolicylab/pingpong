@@ -2555,6 +2555,91 @@ async def test_apply_question_drafts_defers_timing_when_pages_are_untimed(db):
             assert option.continue_offset_ms is None
 
 
+async def test_apply_question_drafts_splits_manual_pronunciation_annotations(db):
+    await _create_class_and_deck(db)
+    async with db.async_session() as session:
+        deck = await models.LectureSlideDeck.get_by_id_with_processing_context(
+            session, 1
+        )
+        assert deck is not None
+        session.add(models.LectureSlidePage(lecture_slide_deck_id=1, position=0))
+        await session.flush()
+
+        await lecture_slide_service.apply_lecture_slide_question_drafts(
+            session,
+            deck,
+            [
+                schemas.LectureSlideQuestionInput(
+                    slide_position=0,
+                    question_text="What happens next?",
+                    intro_text="You [[lead=>leed]] the process.",
+                    options=[
+                        schemas.LectureSlideQuestionOptionInput(
+                            option_text="Continue",
+                            post_answer_text="This will [[lead=>leed]] onward.",
+                            correct=True,
+                        ),
+                        schemas.LectureSlideQuestionOptionInput(
+                            option_text="Stop",
+                            post_answer_text="Not quite.",
+                            correct=False,
+                        ),
+                    ],
+                )
+            ],
+        )
+
+        question = await session.scalar(
+            select(models.LectureSlideQuestion)
+            .where(models.LectureSlideQuestion.lecture_slide_deck_id == 1)
+            .options(selectinload(models.LectureSlideQuestion.intro_narration))
+            .options(
+                selectinload(models.LectureSlideQuestion.options).selectinload(
+                    models.LectureSlideQuestionOption.post_narration
+                )
+            )
+        )
+        assert question is not None
+        assert question.intro_text == "You lead the process."
+        assert question.intro_narration is not None
+        assert question.intro_narration.tts_text == "You leed the process."
+        [correct_option] = [
+            option for option in question.options if option.option_text == "Continue"
+        ]
+        assert correct_option.post_answer_text == "This will lead onward."
+        assert correct_option.post_narration is not None
+        assert correct_option.post_narration.tts_text == "This will leed onward."
+
+        await lecture_slide_service.apply_lecture_slide_question_drafts(
+            session,
+            deck,
+            [
+                schemas.LectureSlideQuestionInput(
+                    id=question.id,
+                    slide_position=0,
+                    question_text="What happens next?",
+                    intro_text="You lead the process.",
+                    intro_tts_text=None,
+                    options=[
+                        schemas.LectureSlideQuestionOptionInput(
+                            id=option.id,
+                            option_text=option.option_text,
+                            post_answer_text=option.post_answer_text or "",
+                            post_answer_tts_text=None,
+                            correct=option.option_text == "Continue",
+                        )
+                        for option in question.options
+                    ],
+                )
+            ],
+        )
+
+        assert question.intro_narration is not None
+        assert question.intro_narration.tts_text is None
+        assert correct_option.post_narration is not None
+        assert correct_option.post_narration.tts_text is None
+
+
 async def test_apply_question_drafts_matches_questions_and_options_by_id(db):
     await _create_class_and_deck(db, slide_count=2)
     async with db.async_session() as session:

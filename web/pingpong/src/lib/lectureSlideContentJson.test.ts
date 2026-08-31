@@ -131,4 +131,27 @@ describe('lecture slide content JSON', () => {
 		expect(applied.questions[0].mode).toBe('complete');
 		expect(applied.questions[0].options).toHaveLength(1);
 	});
+
+	it('preserves pronunciation annotations in every spoken field', () => {
+		const document = buildLectureSlideContentJson(pages, questions);
+		document.slides[0].narration_text = 'The pipes [[lead=>leed]] water away.';
+		document.slides[0].questions[0].intro_text = 'You [[lead=>leed]] this step.';
+		document.slides[0].questions[0].options[0].post_answer_text =
+			'This will [[lead=>leed]] onward.';
+
+		const parsed = parseLectureSlideContentJson(JSON.stringify(document), pages);
+
+		expect(parsed.error).toBeNull();
+		expect(parsed.content).toEqual(document);
+	});
+
+	it('rejects malformed pronunciation annotations with field context', () => {
+		const document = buildLectureSlideContentJson(pages, questions);
+		document.slides[0].questions[0].intro_text = 'Broken [[lead=leed]].';
+
+		const parsed = parseLectureSlideContentJson(JSON.stringify(document), pages);
+
+		expect(parsed.content).toBeNull();
+		expect(parsed.error).toContain('Question intro on slide 1');
+	});
 });

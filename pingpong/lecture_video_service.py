@@ -16,6 +16,10 @@ import pingpong.models as models
 import pingpong.schemas as schemas
 from .authz import AuthzClient, Relation
 from .config import config
+from .say_transform import (
+    combine_manual_tts_pronunciation_text,
+    split_manual_tts_pronunciation_text,
+)
 from .video_store import VideoStoreError
 
 logger = logging.getLogger(__name__)
@@ -289,6 +293,8 @@ async def lecture_video_summary_from_model(
 
 def lecture_video_manifest_from_model(
     lecture_video: models.LectureVideo,
+    *,
+    include_pronunciation_annotations: bool = False,
 ) -> schemas.LectureVideoManifest:
     questions: list[schemas.LectureVideoManifestQuestionV1] = []
     for question in sorted(lecture_video.questions, key=lambda item: item.position):
@@ -302,7 +308,18 @@ def lecture_video_manifest_from_model(
         options = [
             schemas.LectureVideoManifestOptionV1(
                 option_text=option.option_text,
-                post_answer_text=option.post_answer_text or "",
+                post_answer_text=(
+                    combine_manual_tts_pronunciation_text(
+                        option.post_answer_text or "",
+                        (
+                            option.post_narration.tts_text
+                            if option.post_narration is not None
+                            else None
+                        ),
+                    )
+                    if include_pronunciation_annotations
+                    else option.post_answer_text or ""
+                ),
                 continue_offset_ms=option.continue_offset_ms,
                 correct=option.id == correct_option_id,
             )
@@ -312,7 +329,18 @@ def lecture_video_manifest_from_model(
             schemas.LectureVideoManifestQuestionV1(
                 type=question.question_type,
                 question_text=question.question_text,
-                intro_text=question.intro_text or "",
+                intro_text=(
+                    combine_manual_tts_pronunciation_text(
+                        question.intro_text or "",
+                        (
+                            question.intro_narration.tts_text
+                            if question.intro_narration is not None
+                            else None
+                        ),
+                    )
+                    if include_pronunciation_annotations
+                    else question.intro_text or ""
+                ),
                 stop_offset_ms=question.stop_offset_ms,
                 options=options,
             )
@@ -736,7 +764,10 @@ def lecture_video_config_matches(
     requested_video_description_duration_ms: int,
 ) -> bool:
     try:
-        current_manifest = lecture_video_manifest_from_model(current_lecture_video)
+        current_manifest = lecture_video_manifest_from_model(
+            current_lecture_video,
+            include_pronunciation_annotations=True,
+        )
     except (ValidationError, ValueError):
         logger.warning(
             "Failed to serialize current lecture video manifest for comparison. "
@@ -1334,6 +1365,9 @@ async def persist_manifest(
     create_narration_placeholders: bool = True,
     manual_manifest: bool | None = None,
 ) -> None:
+    lecture_video_manifest = normalize_lecture_video_manifest_pronunciation(
+        lecture_video_manifest
+    )
     transcript = _manifest_transcript_as_v3(lecture_video_manifest)
     uploaded_caption_key = None
     old_caption_stored_object_id = None
@@ -1461,3 +1495,23 @@ async def persist_manifest(
                     uploaded_caption_key,
                 )
         raise
+
+
+def normalize_lecture_video_manifest_pronunciation(
+    lecture_video_manifest: schemas.LectureVideoManifest,
+) -> schemas.LectureVideoManifest:
+    normalized = lecture_video_manifest.model_copy(deep=True)
+    for question in normalized.questions:
+        intro = split_manual_tts_pronunciation_text(question.intro_text)
+        question.intro_text = intro.display
+        if intro.speech_override is not None or question.intro_tts_text is None:
+            question.intro_tts_text = intro.speech_override
+        for option in question.options:
+            feedback = split_manual_tts_pronunciation_text(option.post_answer_text)
+            option.post_answer_text = feedback.display
+            if (
+                feedback.speech_override is not None
+                or option.post_answer_tts_text is None
+            ):
+                option.post_answer_tts_text = feedback.speech_override
+    return normalized

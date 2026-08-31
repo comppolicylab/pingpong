@@ -700,6 +700,88 @@ async def test_persist_manifest_keeps_tts_pronunciation_overrides(
 
 @pytest.mark.asyncio
 @with_institution(11, "Test Institution")
+async def test_manual_manifest_pronunciation_round_trips_through_editor_manifest(
+    db, institution
+):
+    async with db.async_session() as session:
+        class_ = models.Class(
+            id=1,
+            name="Test Class",
+            institution_id=institution.id,
+            api_key="test-key",
+        )
+        lecture_video = make_lecture_video(class_.id, "lecture.mp4")
+        session.add_all([class_, lecture_video])
+        await session.flush()
+
+        manifest = schemas.LectureVideoManifestV1.model_validate(
+            lecture_video_manifest()
+        )
+        manifest.questions[0].intro_text = "You [[lead=>leed]] this step."
+        manifest.questions[0].options[
+            0
+        ].post_answer_text = "This will [[lead=>leed]] onward."
+        await lecture_video_service.persist_manifest(
+            session,
+            lecture_video,
+            manifest,
+            create_narration_placeholders=True,
+            manual_manifest=True,
+        )
+        await session.commit()
+
+        loaded = await models.LectureVideo.get_by_id_with_copy_context(
+            session, lecture_video.id
+        )
+        assert loaded is not None
+        [stored_question] = loaded.questions
+        assert stored_question.intro_text == "You lead this step."
+        assert stored_question.intro_narration is not None
+        assert stored_question.intro_narration.tts_text == "You leed this step."
+        assert stored_question.options[0].post_answer_text == ("This will lead onward.")
+        assert stored_question.options[0].post_narration is not None
+        assert stored_question.options[0].post_narration.tts_text == (
+            "This will leed onward."
+        )
+
+        editor_manifest = lecture_video_service.lecture_video_manifest_from_model(
+            loaded,
+            include_pronunciation_annotations=True,
+        )
+        assert editor_manifest.questions[0].intro_text == (
+            "You [[lead=>leed]] this step."
+        )
+        assert editor_manifest.questions[0].options[0].post_answer_text == (
+            "This will [[lead=>leed]] onward."
+        )
+
+        editor_manifest.questions[0].intro_text = "You lead this step."
+        editor_manifest.questions[0].options[
+            0
+        ].post_answer_text = "This will lead onward."
+        await lecture_video_service.persist_manifest(
+            session,
+            loaded,
+            editor_manifest,
+            create_narration_placeholders=True,
+            manual_manifest=True,
+        )
+        await session.commit()
+
+    async with db.async_session() as session:
+        reloaded = await models.LectureVideo.get_by_id_with_copy_context(
+            session, lecture_video.id
+        )
+        assert reloaded is not None
+        [reloaded_question] = reloaded.questions
+        assert reloaded_question.intro_narration is not None
+        assert reloaded_question.intro_narration.tts_text is None
+        assert reloaded_question.options[0].post_narration is not None
+        assert reloaded_question.options[0].post_narration.tts_text is None
+
+
+@pytest.mark.asyncio
+@with_institution(11, "Test Institution")
 async def test_persist_manifest_cleans_uploaded_caption_when_row_create_fails(
     db, institution, config, monkeypatch, tmp_path
 ):
@@ -7785,11 +7867,16 @@ async def test_create_lecture_video_assistant_without_manifest_queues_generation
 async def test_get_assistant_lecture_video_config_returns_manifest_and_voice_id(
     api, db, institution, valid_user_token
 ):
+    manifest = lecture_video_manifest(question_text="Config question?")
+    manifest["questions"][0]["intro_text"] = "You [[lead=>leed]] this step."
+    manifest["questions"][0]["options"][0]["post_answer_text"] = (
+        "This will [[lead=>leed]] onward."
+    )
     async with db.async_session() as session:
         class_, _lecture_video, _assistant = await create_ready_lecture_video_assistant(
             session,
             institution,
-            manifest=lecture_video_manifest(question_text="Config question?"),
+            manifest=manifest,
         )
 
     response = api.get(
@@ -7808,9 +7895,7 @@ async def test_get_assistant_lecture_video_config_returns_manifest_and_voice_id(
             "status": "ready",
             "error_message": None,
         },
-        "lecture_video_manifest": lecture_video_manifest(
-            question_text="Config question?"
-        ),
+        "lecture_video_manifest": manifest,
         "voice_id": DEFAULT_LECTURE_VIDEO_VOICE_ID,
         "lecture_video_chat_available": False,
         "video_description_duration_ms": 30000,

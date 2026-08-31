@@ -2145,6 +2145,7 @@ export type LectureSlideQuestionOptionInput = {
 	id?: number | null;
 	option_text: string;
 	post_answer_text: string;
+	post_answer_tts_text?: string | null;
 	correct: boolean;
 };
 
@@ -2166,6 +2167,7 @@ export type LectureSlideQuestionInput = {
 	slide_position: number;
 	question_text: string;
 	intro_text: string;
+	intro_tts_text?: string | null;
 	options: LectureSlideQuestionOptionInput[];
 };
 

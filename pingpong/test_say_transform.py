@@ -1,17 +1,51 @@
 import json
 import logging
 
+import pytest
+
 from pingpong import schemas
 from pingpong.ai import format_instructions
 from pingpong.say_transform import (
+    ManualTTSPronunciationError,
     PuaStreamTransformer,
     SAY_MARKER_END,
     SAY_MARKER_SEPARATOR,
     SAY_MARKER_START,
     TTS_PRONUNCIATION_INSTRUCTIONS,
+    combine_manual_tts_pronunciation_text,
+    split_manual_tts_pronunciation_text,
     split_tts_pronunciation_text,
     transform_say_text,
 )
+
+
+def test_manual_tts_pronunciation_round_trip() -> None:
+    annotated = "The pipes [[lead=>leed]] water, but old pipes used [[lead=>led]]."
+
+    split = split_manual_tts_pronunciation_text(annotated)
+
+    assert split.display == "The pipes lead water, but old pipes used lead."
+    assert split.speech == "The pipes leed water, but old pipes used led."
+    assert (
+        combine_manual_tts_pronunciation_text(split.display, split.speech_override)
+        == annotated
+    )
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Broken [[lead=leed]].",
+        "Broken [[lead=>leed].",
+        "Broken [lead=>leed]].",
+        "Broken [[two words=>spoken]].",
+        "Broken [[lead=>two words]].",
+        "Broken [[lead=>leed=>led]].",
+    ],
+)
+def test_manual_tts_pronunciation_rejects_malformed_annotations(text: str) -> None:
+    with pytest.raises(ManualTTSPronunciationError):
+        split_manual_tts_pronunciation_text(text)
 
 
 def snippet(marker: str, speech: str, body: str | None = None) -> str:

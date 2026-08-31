@@ -1734,6 +1734,8 @@ async def test_lecture_slide_config_returns_pending_question_drafts(
                 title="Random assignment",
                 extracted_text="Treatment group and control group",
                 image_description="A diagram splitting participants into two groups.",
+                narration_text="These pipes lead water away.",
+                narration_tts_text="These pipes leed water away.",
             )
         )
         await session.commit()
@@ -1751,6 +1753,9 @@ async def test_lecture_slide_config_returns_pending_question_drafts(
     assert body["pages"][0]["image_description"] == (
         "A diagram splitting participants into two groups."
     )
+    assert body["pages"][0]["narration_text"] == (
+        "These pipes [[lead=>leed]] water away."
+    )
     assert [
         (question["mode"], question["slide_position"], question["question_text"])
         for question in body["question_drafts"]
@@ -1758,6 +1763,103 @@ async def test_lecture_slide_config_returns_pending_question_drafts(
         ("partial", 0, "Use this prompt."),
         ("marker", 1, ""),
     ]
+
+
+@pytest.mark.asyncio
+@with_user(123)
+@with_institution(11, "Test Institution")
+@with_authz(grants=[("user:123", "can_edit", "assistant:1")])
+async def test_lecture_slide_config_shows_generated_question_pronunciation(
+    api, db, institution, valid_user_token
+):
+    async with db.async_session() as session:
+        class_ = models.Class(
+            id=1,
+            name="Test Class",
+            institution_id=institution.id,
+            api_key="test-key",
+        )
+        session.add(class_)
+        await session.flush()
+        source = await models.LectureSlideSourceStoredObject.create(
+            session,
+            key="lecture04.pdf",
+            original_filename="lecture04.pdf",
+            content_type="application/pdf",
+            content_length=128,
+        )
+        deck = await models.LectureSlideDeck.create(
+            session,
+            class_id=class_.id,
+            source_stored_object_id=source.id,
+            uploader_id=123,
+            display_name="lecture04.pdf",
+            slide_count=1,
+            voice_id="voice-test-id",
+        )
+        session.add_all(
+            [
+                models.Assistant(
+                    id=1,
+                    name="Physics Slides",
+                    class_id=class_.id,
+                    interaction_mode=schemas.InteractionMode.LECTURE_SLIDES,
+                    version=3,
+                    lecture_slide_deck_id=deck.id,
+                    instructions="You are a lecture assistant.",
+                    model="gpt-4o-mini",
+                    tools="[]",
+                    use_latex=False,
+                    use_image_descriptions=False,
+                    hide_prompt=False,
+                ),
+                models.LectureSlidePage(
+                    lecture_slide_deck_id=deck.id,
+                    position=0,
+                    start_offset_ms=0,
+                    end_offset_ms=1000,
+                ),
+            ]
+        )
+        await session.flush()
+        await lecture_slide_service.apply_lecture_slide_question_drafts(
+            session,
+            deck,
+            [
+                schemas.LectureSlideQuestionInput(
+                    slide_position=0,
+                    question_text="What happens next?",
+                    intro_text="You lead the process.",
+                    intro_tts_text="You leed the process.",
+                    options=[
+                        schemas.LectureSlideQuestionOptionInput(
+                            option_text="Continue",
+                            post_answer_text="This will lead onward.",
+                            post_answer_tts_text="This will leed onward.",
+                            correct=True,
+                        ),
+                        schemas.LectureSlideQuestionOptionInput(
+                            option_text="Stop",
+                            post_answer_text="Not quite.",
+                            correct=False,
+                        ),
+                    ],
+                )
+            ],
+        )
+        await session.commit()
+
+    response = api.get(
+        "/api/v1/class/1/assistant/1/lecture-slides/config",
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+
+    assert response.status_code == 200
+    [question] = response.json()["question_drafts"]
+    assert question["intro_text"] == "You [[lead=>leed]] the process."
+    assert question["options"][0]["post_answer_text"] == (
+        "This will [[lead=>leed]] onward."
+    )
 
 
 @pytest.mark.asyncio
@@ -1810,7 +1912,7 @@ async def test_apply_lecture_slide_page_notes_handles_unloaded_pages(db, institu
                 schemas.LectureSlidePageNotes(
                     position=0,
                     user_notes="New notes",
-                    narration_text="Narrate this.",
+                    narration_text="These pipes [[lead=>leed]] water away.",
                 )
             ],
         )
@@ -1829,7 +1931,34 @@ async def test_apply_lecture_slide_page_notes_handles_unloaded_pages(db, institu
 
     assert page is not None
     assert page.user_notes == "New notes"
-    assert page.narration_text == "Narrate this."
+    assert page.narration_text == "These pipes lead water away."
+    assert page.narration_tts_text == "These pipes leed water away."
+
+    async with db.async_session() as session:
+        deck = await models.LectureSlideDeck.get_by_id(session, deck_id)
+        assert deck is not None
+        await lecture_slide_service.apply_lecture_slide_page_notes(
+            session,
+            deck,
+            [
+                schemas.LectureSlidePageNotes(
+                    position=0,
+                    user_notes="New notes",
+                    narration_text="These pipes lead water away.",
+                )
+            ],
+        )
+        await session.commit()
+
+    async with db.async_session() as session:
+        page = await session.scalar(
+            select(models.LectureSlidePage).where(
+                models.LectureSlidePage.lecture_slide_deck_id == deck_id,
+                models.LectureSlidePage.position == 0,
+            )
+        )
+    assert page is not None
+    assert page.narration_tts_text is None
 
 
 @pytest.mark.asyncio

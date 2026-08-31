@@ -97,6 +97,10 @@
 		parseLectureSlideContentJson as parseLectureSlideContentJsonDocument,
 		type LectureSlideContentJson
 	} from '$lib/lectureSlideContentJson';
+	import {
+		LECTURE_PRONUNCIATION_EXAMPLE,
+		lecturePronunciationError
+	} from '$lib/lecturePronunciation';
 	import { deriveLectureSlideProcessingTriggers } from '$lib/lectureSlideProcessing';
 	import {
 		defaultLectureSlideContextFileMetadata,
@@ -371,6 +375,7 @@
 		slide_position: question.slide_position,
 		question_text: question.mode === 'marker' ? '' : question.question_text.trim(),
 		intro_text: question.mode === 'marker' ? '' : question.intro_text.trim(),
+		intro_tts_text: null,
 		options:
 			question.mode === 'marker'
 				? []
@@ -378,6 +383,7 @@
 						id: option.id,
 						option_text: option.option_text.trim(),
 						post_answer_text: option.post_answer_text.trim(),
+						post_answer_tts_text: null,
 						correct: option.correct
 					}))
 	});
@@ -439,6 +445,20 @@
 		);
 		for (let index = 0; index < sortedQuestions.length; index += 1) {
 			const question = sortedQuestions[index];
+			if (question.mode !== 'marker') {
+				const introPronunciationError = lecturePronunciationError(question.intro_text);
+				if (introPronunciationError) {
+					return `Question ${index + 1} intro: ${introPronunciationError}`;
+				}
+				for (let optionIndex = 0; optionIndex < question.options.length; optionIndex += 1) {
+					const feedbackPronunciationError = lecturePronunciationError(
+						question.options[optionIndex].post_answer_text
+					);
+					if (feedbackPronunciationError) {
+						return `Question ${index + 1}, option ${optionIndex + 1} feedback: ${feedbackPronunciationError}`;
+					}
+				}
+			}
 			if (question.mode !== 'complete') {
 				continue;
 			}
@@ -922,6 +942,19 @@
 					error: `Question ${index + 1} must include a non-empty question_text.`
 				};
 			}
+			if (typeof question.intro_text !== 'string') {
+				return {
+					manifest: null,
+					error: `Question ${index + 1} must include intro_text.`
+				};
+			}
+			const introPronunciationError = lecturePronunciationError(question.intro_text);
+			if (introPronunciationError) {
+				return {
+					manifest: null,
+					error: `Question ${index + 1} intro: ${introPronunciationError}`
+				};
+			}
 			if (
 				typeof question.stop_offset_ms !== 'number' ||
 				!Number.isFinite(question.stop_offset_ms) ||
@@ -952,6 +985,19 @@
 					return {
 						manifest: null,
 						error: `Question ${index + 1}, option ${optionIndex + 1} must include a non-empty option_text.`
+					};
+				}
+				if (typeof option.post_answer_text !== 'string') {
+					return {
+						manifest: null,
+						error: `Question ${index + 1}, option ${optionIndex + 1} must include post_answer_text.`
+					};
+				}
+				const feedbackPronunciationError = lecturePronunciationError(option.post_answer_text);
+				if (feedbackPronunciationError) {
+					return {
+						manifest: null,
+						error: `Question ${index + 1}, option ${optionIndex + 1} feedback: ${feedbackPronunciationError}`
 					};
 				}
 				if (
@@ -4400,6 +4446,16 @@
 				lectureSlideContentJsonDirty = false;
 				lectureSlideContentJson = stringifyLectureSlideContentJson();
 			}
+			for (const page of lectureSlidePageDrafts) {
+				if (page.content_kind === 'video') continue;
+				const pronunciationError = lecturePronunciationError(page.narration_text || '');
+				if (pronunciationError) {
+					sadToast(`Slide ${page.position + 1} narration: ${pronunciationError}`);
+					$loading = false;
+					$loadingMessage = '';
+					return;
+				}
+			}
 			const lectureSlideQuestionError = validateLectureSlideQuestionDrafts(
 				lectureSlideQuestionDrafts
 			);
@@ -5004,9 +5060,11 @@
 													(event.target as HTMLTextAreaElement).value
 												)}
 										/>
-										<Helper class="text-xs text-gray-400"
-											>Saving narration changes regenerates this question's audio.</Helper
-										>
+										<Helper class="text-xs text-gray-400">
+											Saving narration changes regenerates this question's audio. Use
+											<span class="font-mono">{LECTURE_PRONUNCIATION_EXAMPLE}</span> for a pronunciation
+											override.
+										</Helper>
 									</div>
 									<div class="space-y-2.5">
 										<div class="flex items-end justify-between">
@@ -5018,6 +5076,10 @@
 													{selectedLectureSlideQuestion.mode === 'partial'
 														? 'Optional: add answer hints or mark a correct-answer hint.'
 														: 'Tap the circle to mark the correct one.'}
+												</div>
+												<div class="text-xs text-gray-400">
+													Spoken feedback supports
+													<span class="font-mono">{LECTURE_PRONUNCIATION_EXAMPLE}</span>.
 												</div>
 											</div>
 											<Button
@@ -5217,9 +5279,11 @@
 												(event.target as HTMLTextAreaElement).value
 											)}
 									/>
-									<Helper class="text-xs text-gray-400"
-										>Saving manual narration edits regenerates audio.</Helper
-									>
+									<Helper class="text-xs text-gray-400">
+										Saving manual narration edits regenerates audio. Use
+										<span class="font-mono">{LECTURE_PRONUNCIATION_EXAMPLE}</span> to display “lead” and
+										pronounce it “leed.”
+									</Helper>
 								{/if}
 							</div>
 							<div class="space-y-3 border-t border-gray-200 pt-4">
@@ -6748,6 +6812,13 @@
 											? 'Provide a custom manifest to use for this lecture video.'
 											: 'Preview the manifest for this lecture video.'}</Helper
 									>
+									{#if overwriteManifest}
+										<Helper class="pb-1">
+											In spoken intro and feedback fields, use
+											<span class="font-mono">{LECTURE_PRONUNCIATION_EXAMPLE}</span> to display “lead”
+											and pronounce it “leed.”
+										</Helper>
+									{/if}
 									{#if canGenerateLectureVideoManifest && originalOverwriteManifest && !overwriteManifest}
 										<Helper class="pb-1 text-yellow-700">
 											You previously provided a custom manifest for this lecture video. On save,
@@ -6915,7 +6986,9 @@
 										<Helper class="pb-1">
 											Edit all slide notes, narration, and end-of-slide questions in one document.
 											The source_context fields are reference-only; slide timing is derived
-											automatically.
+											automatically. In spoken fields, use
+											<span class="font-mono">{LECTURE_PRONUNCIATION_EXAMPLE}</span> to display “lead”
+											and pronounce it “leed.”
 										</Helper>
 										<Textarea
 											id="lecture_slide_content_json"

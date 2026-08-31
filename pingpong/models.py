@@ -2420,6 +2420,16 @@ class LectureVideo(Base):
                     LectureVideoQuestion.correct_option
                 )
             )
+            .options(
+                selectinload(LectureVideo.questions).selectinload(
+                    LectureVideoQuestion.intro_narration
+                )
+            )
+            .options(
+                selectinload(LectureVideo.questions)
+                .selectinload(LectureVideoQuestion.options)
+                .selectinload(LectureVideoQuestionOption.post_narration)
+            )
         )
         return await session.scalar(stmt)
 
