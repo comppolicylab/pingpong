@@ -3,6 +3,7 @@ import type {
 	LectureSlideQuestionDraftMode,
 	LectureSlideQuestionType
 } from './api';
+import { lecturePronunciationError } from './lecturePronunciation';
 
 export type LectureSlideContentJsonOption = {
 	option_text: string;
@@ -145,6 +146,15 @@ export const parseLectureSlideContentJson = (
 				error: 'Each slide_number must be unique and match an existing slide.'
 			};
 		}
+		if (typeof rawSlide.narration_text === 'string') {
+			const pronunciationError = lecturePronunciationError(rawSlide.narration_text);
+			if (pronunciationError) {
+				return {
+					content: null,
+					error: `Slide ${slideNumber} narration: ${pronunciationError}`
+				};
+			}
+		}
 		seenSlideNumbers.add(slideNumber);
 		const existingPage = pages.find((page) => page.position === slideNumber - 1);
 		if (!existingPage || rawSlide.content_kind !== existingPage.content_kind) {
@@ -190,6 +200,13 @@ export const parseLectureSlideContentJson = (
 				};
 			}
 			const options: LectureSlideContentJsonOption[] = [];
+			const introPronunciationError = lecturePronunciationError(rawQuestion.intro_text);
+			if (introPronunciationError) {
+				return {
+					content: null,
+					error: `Question intro on slide ${slideNumber}: ${introPronunciationError}`
+				};
+			}
 			for (const rawOption of rawQuestion.options) {
 				if (
 					!isJsonRecord(rawOption) ||
@@ -200,6 +217,13 @@ export const parseLectureSlideContentJson = (
 					return {
 						content: null,
 						error: `Every answer option on slide ${slideNumber} must include option_text, correct, and post_answer_text.`
+					};
+				}
+				const feedbackPronunciationError = lecturePronunciationError(rawOption.post_answer_text);
+				if (feedbackPronunciationError) {
+					return {
+						content: null,
+						error: `Answer feedback on slide ${slideNumber}: ${feedbackPronunciationError}`
 					};
 				}
 				options.push({

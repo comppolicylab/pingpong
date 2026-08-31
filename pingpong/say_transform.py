@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 from dataclasses import dataclass
 from typing import Literal
 
@@ -37,6 +38,13 @@ Use ordinary spelling everywhere else. Do not use IPA, SSML, markdown, or this b
 in fields that are not described as spoken narration, a spoken response, an intro,
 or spoken feedback.
 Do not mention this metadata to the learner."""
+
+MANUAL_TTS_PRONUNCIATION_EXAMPLE = "[[lead=>leed]]"
+_MANUAL_TTS_PRONUNCIATION_PATTERN = re.compile(r"\[\[([^\s\[\]]+)=>([^\s\[\]]+)\]\]")
+
+
+class ManualTTSPronunciationError(ValueError):
+    pass
 
 
 @dataclass(frozen=True)
@@ -669,6 +677,111 @@ def split_tts_pronunciation_text(text: str) -> TTSPronunciationText:
         )
         speech = display
     return TTSPronunciationText(display=display, speech=speech)
+
+
+def split_manual_tts_pronunciation_text(text: str) -> TTSPronunciationText:
+    """Split ASCII pronunciation annotations authored in an editor.
+
+    ``[[lead=>leed]]`` displays ``lead`` and sends ``leed`` to TTS. The
+    annotation is intentionally ASCII-only; the generated-text pipeline keeps
+    using the internal private-use-character representation.
+    """
+    if "[[" not in text and "]]" not in text:
+        return split_tts_pronunciation_text(text)
+
+    converted: list[str] = []
+    cursor = 0
+    for match in _MANUAL_TTS_PRONUNCIATION_PATTERN.finditer(text):
+        between = text[cursor : match.start()]
+        if "[[" in between or "]]" in between:
+            raise ManualTTSPronunciationError(
+                "Malformed pronunciation annotation. Use [[written=>spoken]]."
+            )
+        content, speech = match.groups()
+        if "=>" in content or "=>" in speech:
+            raise ManualTTSPronunciationError(
+                "Pronunciation annotations must contain exactly one => separator."
+            )
+        converted.append(between)
+        converted.extend(
+            [
+                SAY_MARKER_START,
+                "say",
+                SAY_MARKER_SEPARATOR,
+                json.dumps(
+                    {"speech": speech, "content": content},
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                ),
+                SAY_MARKER_END,
+            ]
+        )
+        cursor = match.end()
+
+    remainder = text[cursor:]
+    if "[[" in remainder or "]]" in remainder or not converted:
+        raise ManualTTSPronunciationError(
+            "Malformed pronunciation annotation. Use [[written=>spoken]]."
+        )
+    converted.append(remainder)
+    return split_tts_pronunciation_text("".join(converted))
+
+
+def combine_manual_tts_pronunciation_text(
+    display_text: str,
+    speech_override: str | None,
+) -> str:
+    """Reconstruct editor-friendly annotations from stored display/TTS text."""
+    if not speech_override or speech_override == display_text:
+        return display_text
+
+    display_parts = re.findall(r"\s+|\S+", display_text)
+    speech_words = re.findall(r"\S+", speech_override)
+    display_word_count = sum(not part.isspace() for part in display_parts)
+    if display_word_count != len(speech_words):
+        raise ManualTTSPronunciationError(
+            "Stored pronunciation text cannot be represented as word annotations."
+        )
+
+    combined: list[str] = []
+    speech_index = 0
+    for part in display_parts:
+        if part.isspace():
+            combined.append(part)
+            continue
+        speech_word = speech_words[speech_index]
+        speech_index += 1
+        if part == speech_word:
+            combined.append(part)
+            continue
+        display_match = re.fullmatch(r"([^\w]*)(.*?)([^\w]*)", part)
+        speech_match = re.fullmatch(r"([^\w]*)(.*?)([^\w]*)", speech_word)
+        prefix = ""
+        suffix = ""
+        display_word = part
+        spoken_word = speech_word
+        if display_match is not None and speech_match is not None:
+            display_prefix, display_core, display_suffix = display_match.groups()
+            speech_prefix, speech_core, speech_suffix = speech_match.groups()
+            if (
+                display_prefix == speech_prefix
+                and display_suffix == speech_suffix
+                and display_core
+                and speech_core
+            ):
+                prefix = display_prefix
+                suffix = display_suffix
+                display_word = display_core
+                spoken_word = speech_core
+        if any(
+            token in display_word or token in spoken_word
+            for token in ("[[", "]]", "=>")
+        ):
+            raise ManualTTSPronunciationError(
+                "Stored pronunciation word conflicts with editor annotation syntax."
+            )
+        combined.append(f"{prefix}[[{display_word}=>{spoken_word}]]{suffix}")
+    return "".join(combined)
 
 
 def _extract_followup_responses(payload: str) -> list[str]:

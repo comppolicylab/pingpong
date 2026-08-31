@@ -114,7 +114,10 @@ from pingpong.lti.manual_registration import (
     extract_registration_settings,
 )
 from pingpong.realtime import browser_realtime_websocket
-from pingpong.say_transform import transform_say_text
+from pingpong.say_transform import (
+    combine_manual_tts_pronunciation_text,
+    transform_say_text,
+)
 from pingpong.session import populate_request
 from pingpong.stats import (
     get_runs_with_multiple_assistant_messages_stats,
@@ -11347,7 +11350,10 @@ async def get_assistant_lecture_video_config(
     if lecture_video.questions:
         try:
             lecture_video_manifest = (
-                lecture_video_service.lecture_video_manifest_from_model(lecture_video)
+                lecture_video_service.lecture_video_manifest_from_model(
+                    lecture_video,
+                    include_pronunciation_annotations=True,
+                )
             )
         except (ValidationError, ValueError) as e:
             logger.warning(
@@ -11468,7 +11474,13 @@ async def get_assistant_lecture_slide_config(
                 else None
             ),
             user_notes=page.user_notes,
-            narration_text=page.narration_text,
+            narration_text=(
+                combine_manual_tts_pronunciation_text(
+                    page.narration_text or "",
+                    page.narration_tts_text,
+                )
+                or None
+            ),
         )
         for page in sorted(deck.pages, key=lambda item: item.position)
     ]
@@ -11488,12 +11500,26 @@ async def get_assistant_lecture_slide_config(
                 stop_offset_ms=question.stop_offset_ms,
                 type=question.question_type,
                 question_text=question.question_text,
-                intro_text=question.intro_text,
+                intro_text=combine_manual_tts_pronunciation_text(
+                    question.intro_text,
+                    (
+                        question.intro_narration.tts_text
+                        if question.intro_narration is not None
+                        else None
+                    ),
+                ),
                 options=[
                     schemas.LectureSlideQuestionOptionView(
                         id=option.id,
                         option_text=option.option_text,
-                        post_answer_text=option.post_answer_text,
+                        post_answer_text=combine_manual_tts_pronunciation_text(
+                            option.post_answer_text or "",
+                            (
+                                option.post_narration.tts_text
+                                if option.post_narration is not None
+                                else None
+                            ),
+                        ),
                         continue_slide_position=option.continue_slide_position,
                         continue_slide_offset_ms=option.continue_slide_offset_ms,
                         continue_offset_ms=option.continue_offset_ms,
@@ -11520,12 +11546,26 @@ async def get_assistant_lecture_slide_config(
                 mode=schemas.LectureSlideQuestionDraftMode.COMPLETE,
                 slide_position=question.slide_position,
                 question_text=question.question_text,
-                intro_text=question.intro_text,
+                intro_text=combine_manual_tts_pronunciation_text(
+                    question.intro_text,
+                    (
+                        question.intro_narration.tts_text
+                        if question.intro_narration is not None
+                        else None
+                    ),
+                ),
                 options=[
                     schemas.LectureSlideQuestionOptionInput(
                         id=option.id,
                         option_text=option.option_text,
-                        post_answer_text=option.post_answer_text,
+                        post_answer_text=combine_manual_tts_pronunciation_text(
+                            option.post_answer_text or "",
+                            (
+                                option.post_narration.tts_text
+                                if option.post_narration is not None
+                                else None
+                            ),
+                        ),
                         correct=option.id
                         == (
                             question.correct_option.id

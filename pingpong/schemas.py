@@ -42,6 +42,7 @@ from pingpong.elevenlabs_defaults import (
     DEFAULT_ELEVENLABS_USE_SPEAKER_BOOST,
 )
 from .gravatar import get_email_hash, get_gravatar_image
+from .say_transform import split_manual_tts_pronunciation_text
 
 
 LECTURE_MESSAGE_POSITION_HEADING = "## Lecture Message Position"
@@ -876,6 +877,12 @@ class LectureVideoManifestOptionV1(BaseModel):
     continue_offset_ms: int = Field(..., ge=0)
     correct: bool
 
+    @field_validator("post_answer_text")
+    @classmethod
+    def validate_post_answer_pronunciation(cls, value: str) -> str:
+        split_manual_tts_pronunciation_text(value)
+        return value
+
 
 class LectureVideoManifestQuestionV1(BaseModel):
     type: LectureVideoQuestionType
@@ -884,6 +891,12 @@ class LectureVideoManifestQuestionV1(BaseModel):
     intro_tts_text: str | None = Field(None, exclude=True)
     stop_offset_ms: int = Field(..., ge=0)
     options: list[LectureVideoManifestOptionV1] = Field(..., min_length=2)
+
+    @field_validator("intro_text")
+    @classmethod
+    def validate_intro_pronunciation(cls, value: str) -> str:
+        split_manual_tts_pronunciation_text(value)
+        return value
 
     @model_validator(mode="after")
     def validate_options(self):
@@ -1331,6 +1344,13 @@ class LectureSlidePageNotes(BaseModel):
     user_notes: str | None = Field(None, max_length=20000)
     narration_text: str | None = Field(None, max_length=20000)
 
+    @field_validator("narration_text")
+    @classmethod
+    def validate_narration_pronunciation(cls, value: str | None) -> str | None:
+        if value is not None:
+            split_manual_tts_pronunciation_text(value)
+        return value
+
 
 class LectureSlideContentItemInput(BaseModel):
     content_kind: LectureSlideContentKind
@@ -1338,6 +1358,13 @@ class LectureSlideContentItemInput(BaseModel):
     media_stored_object_id: int | None = None
     user_notes: str | None = Field(None, max_length=20000)
     narration_text: str | None = Field(None, max_length=20000)
+
+    @field_validator("narration_text")
+    @classmethod
+    def validate_narration_pronunciation(cls, value: str | None) -> str | None:
+        if value is not None:
+            split_manual_tts_pronunciation_text(value)
+        return value
 
     @model_validator(mode="after")
     def validate_source(self):
@@ -1382,6 +1409,12 @@ class LectureSlideQuestionOptionInput(BaseModel):
     post_answer_tts_text: str | None = Field(None, exclude=True)
     correct: bool
 
+    @field_validator("post_answer_text")
+    @classmethod
+    def validate_post_answer_pronunciation(cls, value: str) -> str:
+        split_manual_tts_pronunciation_text(value)
+        return value
+
 
 class LectureSlideQuestionInput(BaseModel):
     id: int | None = None
@@ -1391,6 +1424,12 @@ class LectureSlideQuestionInput(BaseModel):
     intro_text: str = Field("", max_length=5000)
     intro_tts_text: str | None = Field(None, exclude=True)
     options: list[LectureSlideQuestionOptionInput] = Field(default_factory=list)
+
+    @field_validator("intro_text")
+    @classmethod
+    def validate_intro_pronunciation(cls, value: str) -> str:
+        split_manual_tts_pronunciation_text(value)
+        return value
 
     @model_validator(mode="after")
     def validate_options(self):

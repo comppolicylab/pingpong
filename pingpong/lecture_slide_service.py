@@ -27,6 +27,9 @@ from pingpong.config import config
 from pingpong.files import FILE_TYPES
 from pingpong.lecture_video_service import get_original_filename, get_upload_size
 from pingpong.now import utcnow
+from pingpong.say_transform import (
+    split_manual_tts_pronunciation_text,
+)
 from pingpong.video_store import VideoStoreError
 
 logger = logging.getLogger(__name__)
@@ -920,12 +923,18 @@ async def apply_lecture_slide_page_notes(
             )
         user_notes = (note.user_notes or "").strip() or None
         page = pages_by_position.get(note.position)
-        narration_text = (
-            page.narration_text
-            if page is not None
+        if (
+            page is not None
             and page.content_kind == schemas.LectureSlideContentKind.VIDEO
-            else (note.narration_text or "").strip() or None
-        )
+        ):
+            narration_text = page.narration_text
+            narration_tts_text = page.narration_tts_text
+        else:
+            pronunciation = split_manual_tts_pronunciation_text(
+                (note.narration_text or "").strip()
+            )
+            narration_text = pronunciation.display or None
+            narration_tts_text = pronunciation.speech_override
         if page is None:
             if user_notes is None and narration_text is None:
                 continue
@@ -934,6 +943,7 @@ async def apply_lecture_slide_page_notes(
                 position=note.position,
                 user_notes=user_notes,
                 narration_text=narration_text,
+                narration_tts_text=narration_tts_text,
             )
             session.add(page)
             notes_changed = notes_changed or user_notes is not None
@@ -945,11 +955,14 @@ async def apply_lecture_slide_page_notes(
             page.user_notes = user_notes
             session.add(page)
             notes_changed = True
-        if page.narration_text != narration_text:
+        if (
+            page.narration_text != narration_text
+            or page.narration_tts_text != narration_tts_text
+        ):
             if page.narration_id is not None:
                 old_narration_ids.append(page.narration_id)
             page.narration_text = narration_text
-            page.narration_tts_text = None
+            page.narration_tts_text = narration_tts_text
             page.narration_id = None
             page.start_offset_ms = None
             page.end_offset_ms = None
@@ -1103,19 +1116,26 @@ async def apply_lecture_slide_content_items(
             page.media_stored_object = media
 
         user_notes = (item.user_notes or "").strip() or None
-        narration_text = (
-            page.narration_text
-            if item.content_kind == schemas.LectureSlideContentKind.VIDEO
-            else (item.narration_text or "").strip() or None
-        )
+        if item.content_kind == schemas.LectureSlideContentKind.VIDEO:
+            narration_text = page.narration_text
+            narration_tts_text = page.narration_tts_text
+        else:
+            pronunciation = split_manual_tts_pronunciation_text(
+                (item.narration_text or "").strip()
+            )
+            narration_text = pronunciation.display or None
+            narration_tts_text = pronunciation.speech_override
         if page.user_notes != user_notes:
             page.user_notes = user_notes
             notes_changed = True
-        if page.narration_text != narration_text:
+        if (
+            page.narration_text != narration_text
+            or page.narration_tts_text != narration_tts_text
+        ):
             if page.narration_id is not None:
                 old_narration_ids.append(page.narration_id)
             page.narration_text = narration_text
-            page.narration_tts_text = None
+            page.narration_tts_text = narration_tts_text
             page.narration_id = None
             page.start_offset_ms = None
             page.end_offset_ms = None
@@ -1336,10 +1356,15 @@ async def _apply_question_option_drafts(
     option_rows: list[tuple[models.LectureSlideQuestionOption, bool]] = []
     for option_position, option in enumerate(options):
         option_text = option.option_text.strip()
-        post_answer_text = option.post_answer_text.strip()
-        post_answer_tts_text = (option.post_answer_tts_text or "").strip() or None
+        authored_post_answer_text = option.post_answer_text.strip()
+        pronunciation = split_manual_tts_pronunciation_text(authored_post_answer_text)
+        post_answer_text = pronunciation.display
+        explicit_tts_text = (option.post_answer_tts_text or "").strip() or None
+        post_answer_tts_text = pronunciation.speech_override or explicit_tts_text
         post_answer_tts_text_provided = (
-            "post_answer_tts_text" in option.model_fields_set
+            pronunciation.speech_override is not None
+            or "[[" in authored_post_answer_text
+            or "post_answer_tts_text" in option.model_fields_set
         )
         option_row = (
             remaining_options.pop(option.id, None) if option.id is not None else None
@@ -1552,9 +1577,16 @@ async def apply_lecture_slide_question_drafts(
             slide_offset_ms = page.end_offset_ms - page.start_offset_ms
             stop_offset_ms = page.end_offset_ms
         question_text = question_input.question_text.strip()
-        intro_text = question_input.intro_text.strip()
-        intro_tts_text = (question_input.intro_tts_text or "").strip() or None
-        intro_tts_text_provided = "intro_tts_text" in question_input.model_fields_set
+        authored_intro_text = question_input.intro_text.strip()
+        pronunciation = split_manual_tts_pronunciation_text(authored_intro_text)
+        intro_text = pronunciation.display
+        explicit_tts_text = (question_input.intro_tts_text or "").strip() or None
+        intro_tts_text = pronunciation.speech_override or explicit_tts_text
+        intro_tts_text_provided = (
+            pronunciation.speech_override is not None
+            or "[[" in authored_intro_text
+            or "intro_tts_text" in question_input.model_fields_set
+        )
         question = (
             remaining_questions.pop(question_input.id, None)
             if question_input.id is not None
