@@ -1154,18 +1154,19 @@
 	}
 
 	function handlePlayEvent() {
+		const isSegmentResumeEvent = suppressSegmentPlayEvent;
+		suppressSegmentPlayEvent = false;
 		if (videoElement) {
 			paused = videoElement.paused;
 			playbackCompleted = videoElement.ended;
 		}
 		startedPlaybackOnce = true;
-		showControls = true;
-		scheduleHide();
-		syncMediaSessionState();
-		if (suppressSegmentPlayEvent) {
-			suppressSegmentPlayEvent = false;
-			return;
+		if (!isSegmentResumeEvent) {
+			showControls = true;
+			scheduleHide();
 		}
+		syncMediaSessionState();
+		if (isSegmentResumeEvent) return;
 		onplay?.();
 	}
 
