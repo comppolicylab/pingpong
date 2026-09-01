@@ -1875,6 +1875,54 @@ async def test_elevenlabs_streaming_tts_sends_custom_voice_settings(monkeypatch)
     }
 
 
+async def test_elevenlabs_v3_streaming_uses_text_to_dialogue_protocol(monkeypatch):
+    sessions = []
+
+    class FakeWebSocket:
+        def __init__(self):
+            self.sent_json = []
+
+        async def send_json(self, payload):
+            self.sent_json.append(payload)
+
+    class FakeSession:
+        def __init__(self, *, headers):
+            self.websocket = FakeWebSocket()
+            self.url = ""
+            sessions.append(self)
+
+        async def ws_connect(self, url, timeout):
+            self.url = url
+            return self.websocket
+
+        async def close(self):
+            pass
+
+    monkeypatch.setattr(elevenlabs_module.aiohttp, "ClientSession", FakeSession)
+
+    tts = elevenlabs_module.ElevenLabsStreamingTTS(
+        "elevenlabs-key",
+        "voice-id",
+        model_id="eleven_v3",
+        voice_settings={"stability": 0.5},
+    )
+    await tts.connect()
+    await tts.send_text("Hello there ", try_trigger_generation=True)
+    await tts.send_text("friend.", flush=True)
+    await tts.close_input()
+
+    assert "/v1/text-to-dialogue/stream-input" in sessions[0].url
+    assert sessions[0].websocket.sent_json == [
+        {"voices": ["voice-id"], "voice_settings": {"stability": 0.5}},
+        {"inputs": [{"text": "Hello there ", "voice_id": "voice-id"}]},
+        {
+            "inputs": [{"text": "friend.", "voice_id": "voice-id"}],
+            "flush": True,
+        },
+        {"close_socket": True},
+    ]
+
+
 async def test_validate_elevenlabs_api_key_maps_client_construction_errors_to_unavailable(
     monkeypatch,
 ):

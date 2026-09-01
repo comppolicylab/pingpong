@@ -132,6 +132,19 @@ def test_format_instructions_adds_block_contract_for_lecture_video_markup():
     assert '"responses"' in instructions
 
 
+def test_format_instructions_uses_v3_ipa_pronunciation_contract():
+    instructions = format_instructions(
+        "Teach clearly.",
+        use_latex=True,
+        interaction_mode=schemas.InteractionMode.LECTURE_SLIDES,
+        tts_model_id="eleven_v3",
+    )
+
+    assert "ElevenLabs v3 Pronunciation Metadata" in instructions
+    assert '"speech":"/liːd/"' in instructions
+    assert "simple phonetic alternative" not in instructions
+
+
 def test_format_instructions_does_not_add_block_contract_for_normal_latex_chat():
     instructions = format_instructions(
         "Be helpful.",

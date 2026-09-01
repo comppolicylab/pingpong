@@ -50,6 +50,31 @@ MESSAGE_METADATA_LECTURE_PLAYBACK_POSITION_MS_V1 = "lecture_playback_position_ms
 MESSAGE_METADATA_LECTURE_SLIDE_NUMBER_V1 = "lecture_slide_number_v1"
 
 
+class ElevenLabsTTSModel(StrEnum):
+    FLASH_V2_5 = "eleven_flash_v2_5"
+    V3 = "eleven_v3"
+
+
+class ElevenLabsTTSProfile(BaseModel):
+    model: ElevenLabsTTSModel = ElevenLabsTTSModel.V3
+    stability: float = Field(DEFAULT_ELEVENLABS_STABILITY, ge=0.0, le=1.0)
+    similarity_boost: float = Field(DEFAULT_ELEVENLABS_SIMILARITY_BOOST, ge=0.0, le=1.0)
+    use_speaker_boost: bool = DEFAULT_ELEVENLABS_USE_SPEAKER_BOOST
+    style: float = Field(DEFAULT_ELEVENLABS_STYLE, ge=0.0, le=1.0)
+    speed: float = Field(DEFAULT_ELEVENLABS_SPEED, ge=0.7, le=1.2)
+
+
+class ElevenLabsConfig(BaseModel):
+    version: Literal[1] = 1
+    narration: ElevenLabsTTSProfile = Field(default_factory=ElevenLabsTTSProfile)
+    knowledge_check: ElevenLabsTTSProfile = Field(default_factory=ElevenLabsTTSProfile)
+    live_chat: ElevenLabsTTSProfile = Field(
+        default_factory=lambda: ElevenLabsTTSProfile(
+            model=ElevenLabsTTSModel.FLASH_V2_5
+        )
+    )
+
+
 class Statistics(BaseModel):
     """Statistics about the system."""
 
@@ -1525,6 +1550,11 @@ class LectureLessonEditorConfig(BaseModel):
 
 class ValidateLectureVideoVoiceRequest(BaseModel):
     voice_id: str
+    elevenlabs_profile: ElevenLabsTTSProfile = Field(
+        default_factory=lambda: ElevenLabsTTSProfile(
+            model=ElevenLabsTTSModel.FLASH_V2_5
+        )
+    )
     elevenlabs_stability: float = Field(DEFAULT_ELEVENLABS_STABILITY, ge=0.0, le=1.0)
     elevenlabs_similarity_boost: float = Field(
         DEFAULT_ELEVENLABS_SIMILARITY_BOOST, ge=0.0, le=1.0
@@ -1764,6 +1794,7 @@ class Assistant(BaseModel):
     elevenlabs_use_speaker_boost: bool | None = None
     elevenlabs_style: float | None = None
     elevenlabs_speed: float | None = None
+    elevenlabs_config: ElevenLabsConfig | None = None
     class_id: int
     creator_id: int
     avatar_url: str | None = None
@@ -2150,6 +2181,7 @@ class CreateAssistant(BaseModel):
     elevenlabs_use_speaker_boost: bool = DEFAULT_ELEVENLABS_USE_SPEAKER_BOOST
     elevenlabs_style: float = Field(DEFAULT_ELEVENLABS_STYLE, ge=0.0, le=1.0)
     elevenlabs_speed: float = Field(DEFAULT_ELEVENLABS_SPEED, ge=0.7, le=1.2)
+    elevenlabs_config: ElevenLabsConfig = Field(default_factory=ElevenLabsConfig)
     tools: list[ToolOption] = Field(default_factory=list)
     lecture_video_id: int | None = None
     lecture_video_manifest: LectureVideoManifest | None = None
@@ -2298,6 +2330,7 @@ class UpdateAssistant(BaseModel):
     elevenlabs_use_speaker_boost: bool | None = None
     elevenlabs_style: float | None = Field(None, ge=0.0, le=1.0)
     elevenlabs_speed: float | None = Field(None, ge=0.7, le=1.2)
+    elevenlabs_config: ElevenLabsConfig | None = None
     tools: list[ToolOption] | None = None
     published: bool | None = None
     use_latex: bool | None = None

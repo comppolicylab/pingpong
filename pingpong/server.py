@@ -83,9 +83,16 @@ from pingpong.class_credentials import (
 )
 from pingpong.elevenlabs import (
     ELEVENLABS_FLASH_V2_5_LANGUAGES,
-    ELEVENLABS_TTS_VOICE_SETTINGS,
+    ELEVENLABS_V3_LANGUAGES,
     ELEVENLABS_VOICE_SAMPLE_TEXT_HEADER,
     synthesize_elevenlabs_voice_sample,
+)
+from pingpong.elevenlabs_config import (
+    config_from_assistant,
+    config_payload,
+    profile_fingerprint,
+    profile_for,
+    voice_settings_for_profile,
 )
 from pingpong.emails import (
     parse_addresses,
@@ -406,6 +413,7 @@ def _build_run_instructions(
     instructions verbatim.
     """
     if _is_lecture_lesson_mode(thread.interaction_mode):
+        live_chat_profile = profile_for(asst, "live_chat")
         base_instructions = thread.instructions
         if base_instructions is None:
             base_instructions = asst.instructions or ""
@@ -419,6 +427,7 @@ def _build_run_instructions(
             thread_id=str(thread.id),
             user_id=user_id,
             interaction_mode=thread.interaction_mode,
+            tts_model_id=live_chat_profile.model.value,
         )
     return thread.instructions
 
@@ -9937,6 +9946,7 @@ async def send_message(
             tts_voice_id: str | None = None
             tts_api_key: str | None = None
             tts_voice_settings: dict[str, Any] | None = None
+            tts_model_id = schemas.ElevenLabsTTSModel.FLASH_V2_5.value
             if data.generate_speech is not False and (
                 (
                     thread.interaction_mode == schemas.InteractionMode.LECTURE_VIDEO
@@ -9973,10 +9983,12 @@ async def send_message(
                         )
                     )
                     if credential and credential.api_key_obj:
+                        live_chat_profile = profile_for(asst, "live_chat")
                         tts_voice_id = normalized_lesson_voice_id
                         tts_api_key = credential.api_key_obj.api_key
-                        tts_voice_settings = _elevenlabs_voice_settings_from_assistant(
-                            asst
+                        tts_model_id = live_chat_profile.model.value
+                        tts_voice_settings = voice_settings_for_profile(
+                            live_chat_profile
                         )
 
             show_reasoning_summaries = is_supervisor or (
@@ -10120,6 +10132,7 @@ async def send_message(
                 tts_voice_id=tts_voice_id,
                 tts_api_key=tts_api_key,
                 tts_voice_settings=tts_voice_settings,
+                tts_model_id=tts_model_id,
                 lecture_video_dual_text_mode=_lecture_lesson_dual_text_enabled(thread),
                 lecture_video_followups_mode=_lecture_lesson_followups_enabled(thread),
                 user_assistant_messages_only=(
@@ -11154,18 +11167,6 @@ _ELEVENLABS_VOICE_SETTING_FIELDS = (
 )
 
 
-def _elevenlabs_voice_settings_from_assistant(
-    assistant: models.Assistant,
-) -> dict[str, Any]:
-    settings: dict[str, Any] = {}
-    for model_field, settings_key in _ELEVENLABS_VOICE_SETTING_FIELDS:
-        value = getattr(assistant, model_field)
-        settings[settings_key] = (
-            value if value is not None else ELEVENLABS_TTS_VOICE_SETTINGS[settings_key]
-        )
-    return settings
-
-
 def _elevenlabs_voice_settings_from_validation_request(
     body: schemas.ValidateLectureVideoVoiceRequest | schemas.CreateAssistant,
 ) -> dict[str, Any]:
@@ -11175,24 +11176,12 @@ def _elevenlabs_voice_settings_from_validation_request(
     }
 
 
-def _elevenlabs_voice_settings_with_request_overrides(
-    assistant: models.Assistant,
-    body: schemas.UpdateAssistant,
-) -> dict[str, Any]:
-    settings = _elevenlabs_voice_settings_from_assistant(assistant)
-    for model_field, settings_key in _ELEVENLABS_VOICE_SETTING_FIELDS:
-        if model_field in body.model_fields_set:
-            value = getattr(body, model_field)
-            if value is not None:
-                settings[settings_key] = value
-    return settings
-
-
 async def _get_lecture_video_voice_sample_or_raise(
     class_id: int,
     request: StateRequest,
     voice_id: str,
     *,
+    profile: schemas.ElevenLabsTTSProfile | None = None,
     voice_settings: dict[str, Any] | None = None,
 ) -> tuple[str, str, bytes]:
     credential = await models.ClassCredential.get_by_class_id_and_purpose(
@@ -11207,10 +11196,19 @@ async def _get_lecture_video_voice_sample_or_raise(
         )
 
     try:
+        kwargs: dict[str, Any] = {
+            "voice_settings": (
+                voice_settings_for_profile(profile)
+                if profile is not None
+                else voice_settings
+            )
+        }
+        if profile is not None:
+            kwargs["model_id"] = profile.model.value
         return await synthesize_elevenlabs_voice_sample(
             credential.api_key_obj.api_key,
             voice_id,
-            voice_settings=voice_settings,
+            **kwargs,
         )
     except ClassCredentialVoiceValidationError as exc:
         raise LectureVideoVoiceValidationError(str(exc)) from exc
@@ -11221,12 +11219,14 @@ async def validate_lecture_video_voice_id_or_raise(
     request: StateRequest,
     voice_id: str,
     *,
+    profile: schemas.ElevenLabsTTSProfile | None = None,
     voice_settings: dict[str, Any] | None = None,
 ) -> None:
     await _get_lecture_video_voice_sample_or_raise(
         class_id,
         request,
         voice_id,
+        profile=profile,
         voice_settings=voice_settings,
     )
 
@@ -11258,6 +11258,7 @@ async def _validate_lecture_video_voice_id(
     request: StateRequest,
     voice_id: str,
     *,
+    profile: schemas.ElevenLabsTTSProfile | None = None,
     voice_settings: dict[str, Any] | None = None,
 ) -> Response:
     try:
@@ -11269,6 +11270,7 @@ async def _validate_lecture_video_voice_id(
             class_id,
             request,
             voice_id,
+            profile=profile,
             voice_settings=voice_settings,
         )
     except (
@@ -11599,7 +11601,13 @@ async def get_assistant_lecture_slide_config(
 def _lecture_slide_languages(
     *,
     can_prepare: bool,
+    model: schemas.ElevenLabsTTSModel = schemas.ElevenLabsTTSModel.FLASH_V2_5,
 ) -> schemas.LectureSlideLanguagesResponse:
+    supported_languages = (
+        ELEVENLABS_V3_LANGUAGES
+        if model == schemas.ElevenLabsTTSModel.V3
+        else ELEVENLABS_FLASH_V2_5_LANGUAGES
+    )
     return schemas.LectureSlideLanguagesResponse(
         can_prepare=can_prepare,
         languages=[
@@ -11609,7 +11617,7 @@ def _lecture_slide_languages(
                     code=language.code,
                     name=language.name,
                 )
-                for language in ELEVENLABS_FLASH_V2_5_LANGUAGES
+                for language in supported_languages
             ],
         ],
     )
@@ -11625,14 +11633,17 @@ async def get_lecture_slide_translation_languages(
     assistant_id: str,
     request: StateRequest,
 ):
-    await lecture_slide_service.get_lecture_slide_assistant_for_class(
+    assistant = await lecture_slide_service.get_lecture_slide_assistant_for_class(
         request.state["db"], int(assistant_id), int(class_id)
     )
     can_prepare = await (
         Authz("can_edit", f"assistant:{assistant_id}")
         | Authz("supervisor", f"class:{class_id}")
     ).test_with_cache(request)
-    return _lecture_slide_languages(can_prepare=can_prepare)
+    return _lecture_slide_languages(
+        can_prepare=can_prepare,
+        model=profile_for(assistant, "narration").model,
+    )
 
 
 @v1.get(
@@ -11657,9 +11668,13 @@ async def get_lecture_slide_translation_status(
             language_code="original",
             status="ready",
         )
-    if not any(
-        language.code == normalized_code for language in ELEVENLABS_FLASH_V2_5_LANGUAGES
-    ):
+    narration_model = profile_for(assistant, "narration").model
+    supported_languages = (
+        ELEVENLABS_V3_LANGUAGES
+        if narration_model == schemas.ElevenLabsTTSModel.V3
+        else ELEVENLABS_FLASH_V2_5_LANGUAGES
+    )
+    if not any(language.code == normalized_code for language in supported_languages):
         raise HTTPException(
             422,
             "The selected language is not supported by the configured ElevenLabs model.",
@@ -11708,12 +11723,14 @@ async def prepare_lecture_slide_translation(
     normalized_code = req.language_code.strip().lower()
     if normalized_code == "original":
         raise HTTPException(400, "The original lesson does not require preparation.")
+    narration_model = profile_for(assistant, "narration").model
+    supported_languages = (
+        ELEVENLABS_V3_LANGUAGES
+        if narration_model == schemas.ElevenLabsTTSModel.V3
+        else ELEVENLABS_FLASH_V2_5_LANGUAGES
+    )
     language = next(
-        (
-            item
-            for item in ELEVENLABS_FLASH_V2_5_LANGUAGES
-            if item.code == normalized_code
-        ),
+        (item for item in supported_languages if item.code == normalized_code),
         None,
     )
     if language is None:
@@ -11946,7 +11963,16 @@ async def validate_class_lecture_video_voice(
         int(class_id),
         request,
         body.voice_id,
-        voice_settings=_elevenlabs_voice_settings_from_validation_request(body),
+        profile=(
+            body.elevenlabs_profile
+            if "elevenlabs_profile" in body.model_fields_set
+            else None
+        ),
+        voice_settings=(
+            None
+            if "elevenlabs_profile" in body.model_fields_set
+            else _elevenlabs_voice_settings_from_validation_request(body)
+        ),
     )
 
 
@@ -11986,7 +12012,16 @@ async def validate_assistant_lecture_video_voice(
         int(class_id),
         request,
         body.voice_id,
-        voice_settings=_elevenlabs_voice_settings_from_validation_request(body),
+        profile=(
+            body.elevenlabs_profile
+            if "elevenlabs_profile" in body.model_fields_set
+            else None
+        ),
+        voice_settings=(
+            None
+            if "elevenlabs_profile" in body.model_fields_set
+            else _elevenlabs_voice_settings_from_validation_request(body)
+        ),
     )
 
 
@@ -12711,9 +12746,7 @@ async def create_assistant(
     lecture_video_voice_id_validated = False
     lecture_video_generation_prompt = None
     lecture_video_video_description_duration_ms = None
-    lecture_video_voice_settings = _elevenlabs_voice_settings_from_validation_request(
-        req
-    )
+    lecture_video_voice_profile = req.elevenlabs_config.knowledge_check
     overwrite_lecture_video_manifest = (
         bool(req.overwrite_manifest)
         if "overwrite_manifest" in req.model_fields_set
@@ -12794,7 +12827,7 @@ async def create_assistant(
                 class_id_int,
                 request,
                 lecture_video_voice_id,
-                voice_settings=lecture_video_voice_settings,
+                profile=lecture_video_voice_profile,
             )
         except (
             LectureVideoVoiceValidationError,
@@ -12823,6 +12856,7 @@ async def create_assistant(
         )
 
     if is_slides:
+        lecture_video_voice_profile = req.elevenlabs_config.narration
         if req.lecture_slide_deck_id is None:
             raise HTTPException(
                 status_code=400,
@@ -12859,7 +12893,7 @@ async def create_assistant(
                 class_id_int,
                 request,
                 lecture_slide_voice_id,
-                voice_settings=lecture_video_voice_settings,
+                profile=lecture_video_voice_profile,
             )
         except (
             LectureVideoVoiceValidationError,
@@ -13000,7 +13034,7 @@ async def create_assistant(
                         class_id_int,
                         request,
                         lecture_video_voice_id,
-                        voice_settings=lecture_video_voice_settings,
+                        profile=lecture_video_voice_profile,
                     )
                 except (
                     LectureVideoVoiceValidationError,
@@ -13755,9 +13789,24 @@ async def update_assistant(
     lecture_video_voice_id = None
     lecture_video_generation_prompt = None
     lecture_video_video_description_duration_ms = None
-    lecture_video_voice_settings = _elevenlabs_voice_settings_with_request_overrides(
-        asst, req
+    current_elevenlabs_config = config_from_assistant(asst)
+    requested_elevenlabs_config = (
+        req.elevenlabs_config
+        if "elevenlabs_config" in req.model_fields_set
+        and req.elevenlabs_config is not None
+        else current_elevenlabs_config
     )
+    narration_profile_changed = profile_fingerprint(
+        current_elevenlabs_config.narration
+    ) != profile_fingerprint(requested_elevenlabs_config.narration)
+    knowledge_check_profile_changed = profile_fingerprint(
+        current_elevenlabs_config.knowledge_check
+    ) != profile_fingerprint(requested_elevenlabs_config.knowledge_check)
+    if "elevenlabs_config" in req.model_fields_set:
+        asst.elevenlabs_config = config_payload(
+            requested_elevenlabs_config,
+            existing_raw=asst.elevenlabs_config,
+        )
     lecture_video_voice_id_validated = False
     regenerate_requested = bool(req.regenerate_requested)
     regenerate_audio_requested = bool(req.regenerate_audio_requested)
@@ -13779,7 +13828,7 @@ async def update_assistant(
         or "regenerate_audio_requested" in req.model_fields_set
     )
     lecture_video_fields_present = lecture_video_specific_fields_present or (
-        is_video and shared_lecture_fields_present
+        is_video and (shared_lecture_fields_present or knowledge_check_profile_changed)
     )
     lecture_slide_deck = asst.lecture_slide_deck
     lecture_slide_voice_id = None
@@ -13796,7 +13845,12 @@ async def update_assistant(
         or "regenerate_questions_requested" in req.model_fields_set
     )
     lecture_slide_fields_present = lecture_slide_specific_fields_present or (
-        is_slides and shared_lecture_fields_present
+        is_slides
+        and (
+            shared_lecture_fields_present
+            or narration_profile_changed
+            or knowledge_check_profile_changed
+        )
     )
 
     # Prevent updating existing assistants to lecture video mode
@@ -13897,7 +13951,7 @@ async def update_assistant(
                 int(class_id),
                 request,
                 lecture_video_voice_id,
-                voice_settings=lecture_video_voice_settings,
+                profile=requested_elevenlabs_config.knowledge_check,
             )
         except (
             LectureVideoVoiceValidationError,
@@ -13941,7 +13995,7 @@ async def update_assistant(
                 int(class_id),
                 request,
                 lecture_slide_voice_id,
-                voice_settings=lecture_video_voice_settings,
+                profile=requested_elevenlabs_config.narration,
             )
         except (
             LectureVideoVoiceValidationError,
@@ -14851,7 +14905,7 @@ async def update_assistant(
                         int(class_id),
                         request,
                         lecture_video_voice_id,
-                        voice_settings=lecture_video_voice_settings,
+                        profile=requested_elevenlabs_config.knowledge_check,
                     )
                 except (
                     LectureVideoVoiceValidationError,
@@ -14938,6 +14992,7 @@ async def update_assistant(
                 or regenerate_requested
                 or regenerate_audio_requested
                 or voice_changed
+                or knowledge_check_profile_changed
             )
             manual_manifest_takeover_only = (
                 overwrite_lecture_video_manifest
@@ -15024,7 +15079,11 @@ async def update_assistant(
                         manual_manifest=True,
                     )
                 if overwrite_lecture_video_manifest or (
-                    (voice_changed or regenerate_audio_requested)
+                    (
+                        voice_changed
+                        or regenerate_audio_requested
+                        or knowledge_check_profile_changed
+                    )
                     and not needs_manifest_generation
                 ):
                     if not overwrite_lecture_video_manifest:
@@ -15122,6 +15181,8 @@ async def update_assistant(
             target_lecture_slide_deck = lecture_slide_deck
             should_clone_current = same_lecture_slide_deck and (
                 voice_changed
+                or narration_profile_changed
+                or knowledge_check_profile_changed
                 or generation_prompt_changed
                 or narration_prompt_changed
                 or notes_present
@@ -15240,15 +15301,22 @@ async def update_assistant(
             needs_audio = (
                 regenerate_audio_requested
                 or voice_changed
+                or narration_profile_changed
+                or knowledge_check_profile_changed
                 or question_audio_changed
                 or content_items_changed
             )
             if narration_text_changed:
                 needs_audio = True
-            if regenerate_audio_requested or voice_changed:
+            if regenerate_audio_requested or voice_changed or narration_profile_changed:
                 await lecture_slide_service.clear_lecture_slide_page_narrations(
                     request.state["db"], target_lecture_slide_deck.id
                 )
+            if (
+                regenerate_audio_requested
+                or voice_changed
+                or knowledge_check_profile_changed
+            ):
                 await lecture_slide_service.reset_lecture_slide_question_narrations(
                     request.state["db"], target_lecture_slide_deck.id
                 )

@@ -642,7 +642,7 @@ async def test_translation_audio_passes_language_code_and_persists_timings(
     async def fake_api_key(_class_id):
         return "elevenlabs-key"
 
-    async def fake_synthesize(_api_key, _voice_id, _text, *, language_code):
+    async def fake_synthesize(_api_key, _voice_id, _text, *, language_code, **_kwargs):
         captured_language_codes.append(language_code)
         captured_texts.append(_text)
         return SimpleNamespace(
@@ -3362,7 +3362,7 @@ async def test_synthesize_slide_audio_skips_empty_pages_and_stores_ogg_metadata(
     async def fake_get_elevenlabs_api_key(_class_id):
         return "elevenlabs-key"
 
-    async def fake_synthesize_speech_with_timings(_api_key, _voice_id, text):
+    async def fake_synthesize_speech_with_timings(_api_key, _voice_id, text, **_kwargs):
         requested_texts.append(text)
         return SimpleNamespace(
             audio=f"audio-{text}".encode("utf-8"),
@@ -4052,7 +4052,7 @@ async def test_synthesize_knowledge_check_audio_deletes_uploaded_audio_when_db_l
 
     requested_texts: list[str] = []
 
-    async def fake_synthesize_speech(_api_key, _voice_id, _text):
+    async def fake_synthesize_speech(_api_key, _voice_id, _text, **_kwargs):
         requested_texts.append(_text)
         return "audio/mpeg", b"audio"
 

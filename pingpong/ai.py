@@ -39,6 +39,7 @@ from pingpong.say_transform import (
     SAY_MARKER_SEPARATOR,
     SAY_MARKER_START,
     TTS_PRONUNCIATION_INSTRUCTIONS,
+    TTS_PRONUNCIATION_INSTRUCTIONS_V3,
     transform_say_text,
 )
 from pingpong.schemas import (
@@ -3951,6 +3952,7 @@ async def run_response(
     tts_voice_id: str | None = None,
     tts_api_key: str | None = None,
     tts_voice_settings: Mapping[str, Any] | None = None,
+    tts_model_id: str = "eleven_flash_v2_5",
     user_assistant_messages_only: bool = False,
     include_developer_messages: bool = False,
     omit_message_ids: bool = False,
@@ -4222,6 +4224,7 @@ async def run_response(
                         tts_client = ElevenLabsStreamingTTS(
                             tts_api_key,
                             tts_voice_id,
+                            model_id=tts_model_id,
                             voice_settings=tts_voice_settings,
                         )
                         await tts_client.connect()
@@ -4320,6 +4323,7 @@ async def run_response(
                             _tts_client = ElevenLabsStreamingTTS(
                                 tts_api_key,
                                 tts_voice_id,
+                                model_id=tts_model_id,
                                 voice_settings=tts_voice_settings,
                             )
                             await _tts_client.connect()
@@ -5041,6 +5045,7 @@ def format_instructions(
     thread_id: str | None = None,
     user_id: int | None = None,
     interaction_mode: InteractionMode | None = None,
+    tts_model_id: str = "eleven_flash_v2_5",
 ) -> str:
     """Format instructions for a prompt."""
 
@@ -5048,6 +5053,11 @@ def format_instructions(
         InteractionMode.LECTURE_VIDEO,
         InteractionMode.LECTURE_SLIDES,
     }
+    tts_pronunciation_instructions = (
+        TTS_PRONUNCIATION_INSTRUCTIONS_V3
+        if tts_model_id == "eleven_v3"
+        else TTS_PRONUNCIATION_INSTRUCTIONS
+    )
 
     formatting_instructions: list[str] = []
     diagram_formatting_instructions: list[str] = []
@@ -5122,7 +5132,7 @@ def format_instructions(
                 "for reading. Use a "
                 "`mermaid` or `svg` block to wrap a Mermaid or SVG fenced "
                 "code block.\n"
-                f"{TTS_PRONUNCIATION_INSTRUCTIONS}\n"
+                f"{tts_pronunciation_instructions}\n"
                 "For math display, use the single dollar sign $ with spaces "
                 "surrounding it for inline math. For block-level math, use "
                 "double dollar signs $$ with newlines before and after them as "

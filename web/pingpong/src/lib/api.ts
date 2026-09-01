@@ -1893,11 +1893,30 @@ export type LectureVideoEditorPolicyResponse = LectureVideoAssistantEditorPolicy
 
 export type ValidateLectureVideoVoiceRequest = {
 	voice_id: string;
-	elevenlabs_stability: number;
-	elevenlabs_similarity_boost: number;
-	elevenlabs_use_speaker_boost: boolean;
-	elevenlabs_style: number;
-	elevenlabs_speed: number;
+	elevenlabs_profile: ElevenLabsTTSProfile;
+	elevenlabs_stability?: number;
+	elevenlabs_similarity_boost?: number;
+	elevenlabs_use_speaker_boost?: boolean;
+	elevenlabs_style?: number;
+	elevenlabs_speed?: number;
+};
+
+export type ElevenLabsTTSModel = 'eleven_flash_v2_5' | 'eleven_v3';
+
+export type ElevenLabsTTSProfile = {
+	model: ElevenLabsTTSModel;
+	stability: number;
+	similarity_boost: number;
+	use_speaker_boost: boolean;
+	style: number;
+	speed: number;
+};
+
+export type ElevenLabsConfig = {
+	version: 1;
+	narration: ElevenLabsTTSProfile;
+	knowledge_check: ElevenLabsTTSProfile;
+	live_chat: ElevenLabsTTSProfile;
 };
 
 export type ValidateLectureVideoVoiceResponse = {
@@ -3139,6 +3158,7 @@ export type Assistant = {
 	elevenlabs_use_speaker_boost: boolean | null;
 	elevenlabs_style: number | null;
 	elevenlabs_speed: number | null;
+	elevenlabs_config: ElevenLabsConfig | null;
 	tools: string;
 	class_id: number;
 	creator_id: number;
@@ -3307,6 +3327,7 @@ export type CreateAssistantRequest = {
 	elevenlabs_use_speaker_boost?: boolean | null;
 	elevenlabs_style?: number | null;
 	elevenlabs_speed?: number | null;
+	elevenlabs_config?: ElevenLabsConfig;
 	tools: Tool[];
 	code_interpreter_file_ids: string[];
 	file_search_file_ids: string[];
@@ -3388,6 +3409,7 @@ export type UpdateAssistantRequest = {
 	elevenlabs_use_speaker_boost?: boolean | null;
 	elevenlabs_style?: number | null;
 	elevenlabs_speed?: number | null;
+	elevenlabs_config?: ElevenLabsConfig | null;
 	tools?: Tool[];
 	code_interpreter_file_ids?: string[];
 	file_search_file_ids?: string[];

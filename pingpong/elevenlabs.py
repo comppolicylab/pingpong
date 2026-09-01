@@ -118,6 +118,83 @@ ELEVENLABS_FLASH_V2_5_LANGUAGES: Final[tuple[ElevenLabsLanguage, ...]] = (
     ElevenLabsLanguage("vi", "Vietnamese"),
 )
 
+ELEVENLABS_V3_LANGUAGES: Final[tuple[ElevenLabsLanguage, ...]] = (
+    ElevenLabsLanguage("af", "Afrikaans"),
+    ElevenLabsLanguage("ar", "Arabic"),
+    ElevenLabsLanguage("hy", "Armenian"),
+    ElevenLabsLanguage("as", "Assamese"),
+    ElevenLabsLanguage("az", "Azerbaijani"),
+    ElevenLabsLanguage("be", "Belarusian"),
+    ElevenLabsLanguage("bn", "Bengali"),
+    ElevenLabsLanguage("bs", "Bosnian"),
+    ElevenLabsLanguage("bg", "Bulgarian"),
+    ElevenLabsLanguage("ca", "Catalan"),
+    ElevenLabsLanguage("ceb", "Cebuano"),
+    ElevenLabsLanguage("ny", "Chichewa"),
+    ElevenLabsLanguage("hr", "Croatian"),
+    ElevenLabsLanguage("cs", "Czech"),
+    ElevenLabsLanguage("da", "Danish"),
+    ElevenLabsLanguage("nl", "Dutch"),
+    ElevenLabsLanguage("en", "English"),
+    ElevenLabsLanguage("et", "Estonian"),
+    ElevenLabsLanguage("fil", "Filipino"),
+    ElevenLabsLanguage("fi", "Finnish"),
+    ElevenLabsLanguage("fr", "French"),
+    ElevenLabsLanguage("gl", "Galician"),
+    ElevenLabsLanguage("ka", "Georgian"),
+    ElevenLabsLanguage("de", "German"),
+    ElevenLabsLanguage("el", "Greek"),
+    ElevenLabsLanguage("gu", "Gujarati"),
+    ElevenLabsLanguage("ha", "Hausa"),
+    ElevenLabsLanguage("he", "Hebrew"),
+    ElevenLabsLanguage("hi", "Hindi"),
+    ElevenLabsLanguage("hu", "Hungarian"),
+    ElevenLabsLanguage("is", "Icelandic"),
+    ElevenLabsLanguage("id", "Indonesian"),
+    ElevenLabsLanguage("ga", "Irish"),
+    ElevenLabsLanguage("it", "Italian"),
+    ElevenLabsLanguage("ja", "Japanese"),
+    ElevenLabsLanguage("jv", "Javanese"),
+    ElevenLabsLanguage("kn", "Kannada"),
+    ElevenLabsLanguage("kk", "Kazakh"),
+    ElevenLabsLanguage("ky", "Kirghiz"),
+    ElevenLabsLanguage("ko", "Korean"),
+    ElevenLabsLanguage("lv", "Latvian"),
+    ElevenLabsLanguage("ln", "Lingala"),
+    ElevenLabsLanguage("lt", "Lithuanian"),
+    ElevenLabsLanguage("lb", "Luxembourgish"),
+    ElevenLabsLanguage("mk", "Macedonian"),
+    ElevenLabsLanguage("ms", "Malay"),
+    ElevenLabsLanguage("ml", "Malayalam"),
+    ElevenLabsLanguage("zh", "Mandarin Chinese"),
+    ElevenLabsLanguage("mr", "Marathi"),
+    ElevenLabsLanguage("ne", "Nepali"),
+    ElevenLabsLanguage("no", "Norwegian"),
+    ElevenLabsLanguage("ps", "Pashto"),
+    ElevenLabsLanguage("fa", "Persian"),
+    ElevenLabsLanguage("pl", "Polish"),
+    ElevenLabsLanguage("pt", "Portuguese"),
+    ElevenLabsLanguage("pa", "Punjabi"),
+    ElevenLabsLanguage("ro", "Romanian"),
+    ElevenLabsLanguage("ru", "Russian"),
+    ElevenLabsLanguage("sr", "Serbian"),
+    ElevenLabsLanguage("sd", "Sindhi"),
+    ElevenLabsLanguage("sk", "Slovak"),
+    ElevenLabsLanguage("sl", "Slovenian"),
+    ElevenLabsLanguage("so", "Somali"),
+    ElevenLabsLanguage("es", "Spanish"),
+    ElevenLabsLanguage("sw", "Swahili"),
+    ElevenLabsLanguage("sv", "Swedish"),
+    ElevenLabsLanguage("ta", "Tamil"),
+    ElevenLabsLanguage("te", "Telugu"),
+    ElevenLabsLanguage("th", "Thai"),
+    ElevenLabsLanguage("tr", "Turkish"),
+    ElevenLabsLanguage("uk", "Ukrainian"),
+    ElevenLabsLanguage("ur", "Urdu"),
+    ElevenLabsLanguage("vi", "Vietnamese"),
+    ElevenLabsLanguage("cy", "Welsh"),
+)
+
 
 def get_elevenlabs_client(api_key: str) -> AsyncElevenLabs:
     if not api_key:
@@ -256,6 +333,7 @@ async def synthesize_elevenlabs_voice_sample(
     api_key: str,
     voice_id: str,
     *,
+    model_id: str = ELEVENLABS_TTS_MODEL,
     voice_settings: Mapping[str, Any] | None = None,
 ) -> tuple[str, str, bytes]:
     try:
@@ -263,6 +341,7 @@ async def synthesize_elevenlabs_voice_sample(
             api_key,
             voice_id,
             ELEVENLABS_VOICE_VALIDATION_SAMPLE_TEXT,
+            model_id=model_id,
             voice_settings=voice_settings,
             timeout_seconds=15,
         )
@@ -288,6 +367,7 @@ async def synthesize_elevenlabs_speech(
     voice_id: str,
     text: str,
     *,
+    model_id: str = ELEVENLABS_TTS_MODEL,
     voice_settings: Mapping[str, Any] | None = None,
     timeout_seconds: int | None = None,
 ) -> tuple[str, bytes]:
@@ -303,7 +383,7 @@ async def synthesize_elevenlabs_speech(
             client.text_to_speech.convert(
                 voice_id=voice_id,
                 text=text,
-                model_id=ELEVENLABS_TTS_MODEL,
+                model_id=model_id,
                 output_format=ELEVENLABS_VOICE_VALIDATION_OUTPUT_FORMAT,
                 voice_settings=VoiceSettings(
                     **(
@@ -338,6 +418,7 @@ async def synthesize_elevenlabs_speech_with_timings(
     voice_id: str,
     text: str,
     *,
+    model_id: str = ELEVENLABS_TTS_MODEL,
     language_code: str | None = None,
     voice_settings: Mapping[str, Any] | None = None,
     timeout_seconds: int | None = None,
@@ -356,7 +437,7 @@ async def synthesize_elevenlabs_speech_with_timings(
         response = await client.text_to_speech.convert_with_timestamps(
             voice_id=voice_id,
             text=text,
-            model_id=ELEVENLABS_TTS_MODEL,
+            model_id=model_id,
             output_format=ELEVENLABS_VOICE_VALIDATION_OUTPUT_FORMAT,
             voice_settings=VoiceSettings(
                 **(
@@ -830,40 +911,51 @@ class ElevenLabsStreamingTTS:
         self._voice_settings = dict(
             ELEVENLABS_TTS_VOICE_SETTINGS if voice_settings is None else voice_settings
         )
+        self._uses_dialogue_websocket = model_id.startswith("eleven_v3")
         self._session: aiohttp.ClientSession | None = None
         self._ws: aiohttp.ClientWebSocketResponse | None = None
 
     async def connect(self) -> None:
         """Open a WebSocket connection and send the initialization frame."""
-        encoded_voice_id = quote(self._voice_id, safe="")
         query = urlencode(
             {
                 "model_id": self._model_id,
                 "output_format": self._output_format,
             }
         )
-        url = (
-            f"wss://api.elevenlabs.io/v1/text-to-speech/"
-            f"{encoded_voice_id}/stream-input?{query}"
-        )
+        if self._uses_dialogue_websocket:
+            url = f"wss://api.elevenlabs.io/v1/text-to-dialogue/stream-input?{query}"
+        else:
+            encoded_voice_id = quote(self._voice_id, safe="")
+            url = (
+                f"wss://api.elevenlabs.io/v1/text-to-speech/"
+                f"{encoded_voice_id}/stream-input?{query}"
+            )
         self._session = aiohttp.ClientSession(headers={"xi-api-key": self._api_key})
         try:
             self._ws = await self._session.ws_connect(
                 url, timeout=ELEVENLABS_STREAMING_TTS_CONNECT_TIMEOUT
             )
-            # Send initializeConnection message.
-            await self._ws.send_json(
-                {
-                    "text": " ",
-                    "try_trigger_generation": True,
-                    "voice_settings": self._voice_settings,
-                    "generation_config": {
-                        "chunk_length_schedule": (
-                            ELEVENLABS_STREAMING_TTS_CHUNK_LENGTH_SCHEDULE
-                        ),
-                    },
-                }
-            )
+            if self._uses_dialogue_websocket:
+                await self._ws.send_json(
+                    {
+                        "voices": [self._voice_id],
+                        "voice_settings": self._voice_settings,
+                    }
+                )
+            else:
+                await self._ws.send_json(
+                    {
+                        "text": " ",
+                        "try_trigger_generation": True,
+                        "voice_settings": self._voice_settings,
+                        "generation_config": {
+                            "chunk_length_schedule": (
+                                ELEVENLABS_STREAMING_TTS_CHUNK_LENGTH_SCHEDULE
+                            ),
+                        },
+                    }
+                )
         except Exception:
             await self.cleanup()
             raise
@@ -883,10 +975,14 @@ class ElevenLabsStreamingTTS:
         """
         if not self._ws:
             raise RuntimeError("Not connected – call connect() first")
-        msg: dict[str, Any] = {"text": text}
+        msg: dict[str, Any]
+        if self._uses_dialogue_websocket:
+            msg = {"inputs": [{"text": text, "voice_id": self._voice_id}]}
+        else:
+            msg = {"text": text}
         if flush:
             msg["flush"] = True
-        if try_trigger_generation:
+        if try_trigger_generation and not self._uses_dialogue_websocket:
             msg["try_trigger_generation"] = True
         await self._ws.send_json(msg)
 
@@ -894,7 +990,10 @@ class ElevenLabsStreamingTTS:
         """Signal end of text input (EOS)."""
         if not self._ws:
             return
-        await self._ws.send_json({"text": ""})
+        if self._uses_dialogue_websocket:
+            await self._ws.send_json({"close_socket": True})
+        else:
+            await self._ws.send_json({"text": ""})
 
     async def receive_audio(self) -> AsyncGenerator[str, None]:
         """Yield base64-encoded audio strings until ``isFinal`` is received."""
@@ -903,7 +1002,7 @@ class ElevenLabsStreamingTTS:
         async for msg in self._ws:
             if msg.type == aiohttp.WSMsgType.TEXT:
                 data = orjson.loads(msg.data)
-                if data.get("isFinal"):
+                if data.get("isFinal") or data.get("is_final"):
                     return
                 audio = data.get("audio")
                 if audio:
