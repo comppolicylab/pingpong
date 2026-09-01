@@ -26,6 +26,11 @@ from pingpong import (
     lecture_video_poster,
 )
 from pingpong.ai import get_openai_client_by_class_id
+from pingpong.elevenlabs_config import profile_for, voice_settings_for_profile
+from pingpong.elevenlabs_pronunciation import (
+    SpeechTextItem,
+    speech_texts_for_elevenlabs,
+)
 from pingpong.audio_store import AudioStoreError
 from pingpong.class_credential_validation import (
     ClassCredentialValidationSSLError,
@@ -67,10 +72,20 @@ MAX_RUN_CREATE_RETRIES = 3
 @dataclass(frozen=True)
 class NarrationWorkItem:
     class_id: int
+    assistant_id: int
     lecture_video_id: int
     voice_id: str
     narration_id: int
-    text: str
+    display_text: str
+    speech_text: str
+    model_id: str
+    voice_settings: dict[str, Any]
+    pronunciation_items: tuple[SpeechTextItem, ...] = ()
+
+    @property
+    def text(self) -> str:
+        """Backward-compatible alias for the effective pre-model speech text."""
+        return self.speech_text
 
 
 @dataclass(frozen=True)
@@ -1122,13 +1137,28 @@ async def _process_claimed_narration_run(run_id: int, lease_token: str) -> None:
             )
 
         try:
+            pronunciation_items = work_item.pronunciation_items or (
+                SpeechTextItem(
+                    item_id=work_item.narration_id,
+                    display_text=work_item.display_text,
+                    speech_text=work_item.speech_text,
+                ),
+            )
+            prepared_speech_texts = await speech_texts_for_elevenlabs(
+                assistant_id=work_item.assistant_id,
+                component="knowledge_check",
+                scope="lecture_video_knowledge_check",
+                language_code=None,
+                items=pronunciation_items,
+            )
+            synthesis_text = prepared_speech_texts[work_item.narration_id]
             logger.debug(
                 "Lecture video narration synthesizing. run_id=%s "
                 "lecture_video_id=%s narration_id=%s text_length=%s",
                 run_id,
                 work_item.lecture_video_id,
                 work_item.narration_id,
-                len(work_item.text),
+                len(synthesis_text),
             )
             synthesis_result = await _await_with_run_lease_heartbeat(
                 run_id,
@@ -1136,7 +1166,9 @@ async def _process_claimed_narration_run(run_id: int, lease_token: str) -> None:
                 synthesize_elevenlabs_speech(
                     await _get_elevenlabs_api_key(work_item.class_id),
                     work_item.voice_id,
-                    work_item.text,
+                    synthesis_text,
+                    model_id=work_item.model_id,
+                    voice_settings=work_item.voice_settings,
                 ),
             )
         except Exception as exc:
@@ -1546,7 +1578,10 @@ async def _prepare_next_work_item(
             await session.commit()
             return "cancelled", None
 
-        if not await _lecture_video_has_attached_assistant(session, lecture_video.id):
+        attached_assistant = await models.Assistant.get_by_lecture_video_id(
+            session, lecture_video.id
+        )
+        if attached_assistant is None:
             await _mark_run_cancelled(
                 session,
                 run,
@@ -1560,7 +1595,13 @@ async def _prepare_next_work_item(
         if not voice_id:
             return "failed", (None, "Lecture video voice configuration is missing.")
 
-        work_item = _first_pending_narration_work(lecture_video)
+        knowledge_profile = profile_for(attached_assistant, "knowledge_check")
+        work_item = _first_pending_narration_work(
+            lecture_video,
+            assistant_id=attached_assistant.id,
+            model_id=knowledge_profile.model.value,
+            voice_settings=voice_settings_for_profile(knowledge_profile),
+        )
         if work_item is None:
             return "completed", None
 
@@ -1587,8 +1628,14 @@ async def _prepare_next_work_item(
 
 def _first_pending_narration_work(
     lecture_video: models.LectureVideo,
+    *,
+    assistant_id: int = 0,
+    model_id: str = "eleven_flash_v2_5",
+    voice_settings: dict[str, Any] | None = None,
 ) -> NarrationWorkItem | None:
+    effective_voice_settings = voice_settings or {}
     voice_id = (lecture_video.voice_id or "").strip()
+    pending: list[tuple[int, str, str, str]] = []
     for question in sorted(lecture_video.questions, key=lambda item: item.position):
         # Any non-READY narration still needs audio. This intentionally includes
         # PROCESSING so a reclaimed run can resume work after a stale lease.
@@ -1598,12 +1645,16 @@ def _first_pending_narration_work(
             != schemas.LectureVideoNarrationStatus.READY
             and question.intro_text.strip()
         ):
-            return NarrationWorkItem(
-                class_id=lecture_video.class_id,
-                lecture_video_id=lecture_video.id,
-                voice_id=voice_id,
-                narration_id=question.intro_narration.id,
-                text=question.intro_narration.tts_text or question.intro_text,
+            pending.append(
+                (
+                    question.intro_narration.id,
+                    question.intro_text,
+                    question.intro_narration.tts_text or question.intro_text,
+                    (
+                        f"Knowledge-check question: {question.question_text}\n"
+                        f"Spoken introduction: {question.intro_text}"
+                    ),
+                )
             )
 
         for option in sorted(question.options, key=lambda item: item.position):
@@ -1615,14 +1666,42 @@ def _first_pending_narration_work(
                 != schemas.LectureVideoNarrationStatus.READY
                 and option.post_answer_text.strip()
             ):
-                return NarrationWorkItem(
-                    class_id=lecture_video.class_id,
-                    lecture_video_id=lecture_video.id,
-                    voice_id=voice_id,
-                    narration_id=option.post_narration.id,
-                    text=option.post_narration.tts_text or option.post_answer_text,
+                pending.append(
+                    (
+                        option.post_narration.id,
+                        option.post_answer_text,
+                        option.post_narration.tts_text or option.post_answer_text,
+                        (
+                            f"Knowledge-check question: {question.question_text}\n"
+                            f"Answer option: {option.option_text}\n"
+                            f"Spoken feedback: {option.post_answer_text}"
+                        ),
+                    ),
                 )
-    return None
+    if not pending:
+        return None
+
+    narration_id, display_text, speech_text, _ = pending[0]
+    return NarrationWorkItem(
+        class_id=lecture_video.class_id,
+        assistant_id=assistant_id,
+        lecture_video_id=lecture_video.id,
+        voice_id=voice_id,
+        narration_id=narration_id,
+        display_text=display_text,
+        speech_text=speech_text,
+        model_id=model_id,
+        voice_settings=effective_voice_settings,
+        pronunciation_items=tuple(
+            SpeechTextItem(
+                item_id=item_id,
+                display_text=item_display_text,
+                speech_text=item_speech_text,
+                context=context,
+            )
+            for item_id, item_display_text, item_speech_text, context in pending
+        ),
+    )
 
 
 async def _ensure_run_can_continue(run_id: int, lease_token: str) -> bool:

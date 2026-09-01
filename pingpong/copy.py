@@ -1,3 +1,4 @@
+import copy
 import json
 import logging
 
@@ -480,6 +481,7 @@ async def copy_assistant(
         elevenlabs_use_speaker_boost=assistant.elevenlabs_use_speaker_boost,
         elevenlabs_style=assistant.elevenlabs_style,
         elevenlabs_speed=assistant.elevenlabs_speed,
+        elevenlabs_config=copy.deepcopy(assistant.elevenlabs_config),
         assistant_should_message_first=assistant.assistant_should_message_first,
         allow_lesson_timeline_bypass=assistant.allow_lesson_timeline_bypass,
         class_id=target_class_id,

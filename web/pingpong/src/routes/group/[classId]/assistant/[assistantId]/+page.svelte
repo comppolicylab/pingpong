@@ -112,6 +112,8 @@
 		LECTURE_SLIDE_CONTEXT_FILE_USAGE_OPTIONS
 	} from '$lib/lectureSlideContextFiles';
 	import LectureSlideContextFileInstructionsModal from '$lib/components/LectureSlideContextFileInstructionsModal.svelte';
+	import ElevenLabsProfileSettings from '$lib/components/ElevenLabsProfileSettings.svelte';
+	import { configForAssistant } from '$lib/elevenlabsConfig';
 	import { SvelteSet } from 'svelte/reactivity';
 	export let data;
 	$: lectureVideoDefaultInstructions = data.lectureLessonEditorConfig?.instructions || '';
@@ -775,18 +777,43 @@
 	let voiceValidationError = '';
 	let lastValidatedVoiceId = '';
 	let voiceRequiresValidation = false;
-	let voiceSampleCache: Record<string, { text: string; audioSrc: string }> = {};
-	const elevenlabsVoiceSettingsPayload = () => ({
-		elevenlabs_stability: elevenlabsStabilityValue,
-		elevenlabs_similarity_boost: elevenlabsSimilarityBoostValue,
-		elevenlabs_use_speaker_boost: elevenlabsUseSpeakerBoostValue,
-		elevenlabs_style: elevenlabsStyleValue,
-		elevenlabs_speed: elevenlabsSpeedValue
+	type ElevenLabsComponent = 'narration' | 'knowledge_check' | 'live_chat';
+	const initialElevenLabsConfig = configForAssistant(data.assistant);
+	let narrationProfile = initialElevenLabsConfig.narration;
+	let knowledgeCheckProfile = initialElevenLabsConfig.knowledge_check;
+	let liveChatProfile = initialElevenLabsConfig.live_chat;
+	const currentElevenLabsConfig = (): api.ElevenLabsConfig => ({
+		version: 1,
+		narration: { ...narrationProfile },
+		knowledge_check: { ...knowledgeCheckProfile },
+		live_chat: { ...liveChatProfile }
 	});
-	const voiceSampleCacheKey = (voiceId: string) =>
+	const profileForComponent = (component: ElevenLabsComponent) =>
+		component === 'narration'
+			? narrationProfile
+			: component === 'knowledge_check'
+				? knowledgeCheckProfile
+				: liveChatProfile;
+	let validatingVoiceComponent: ElevenLabsComponent | null = null;
+	let componentVoiceSamples: Record<
+		ElevenLabsComponent,
+		{ text: string; audioSrc: string; error: string; profileKey: string }
+	> = {
+		narration: { text: '', audioSrc: '', error: '', profileKey: '' },
+		knowledge_check: { text: '', audioSrc: '', error: '', profileKey: '' },
+		live_chat: { text: '', audioSrc: '', error: '', profileKey: '' }
+	};
+	const currentComponentVoiceSample = (component: ElevenLabsComponent) => {
+		const sample = componentVoiceSamples[component];
+		return sample.profileKey === JSON.stringify(profileForComponent(component))
+			? sample
+			: { text: '', audioSrc: '', error: '', profileKey: '' };
+	};
+	let voiceSampleCache: Record<string, { text: string; audioSrc: string }> = {};
+	const voiceSampleCacheKey = (voiceId: string, profile = liveChatProfile) =>
 		JSON.stringify({
 			voice_id: voiceId,
-			...elevenlabsVoiceSettingsPayload()
+			profile
 		});
 	const revokeVoiceSampleAudioSrc = (audioSrc: string) => {
 		if (audioSrc.startsWith('blob:')) {
@@ -820,6 +847,9 @@
 	};
 	onDestroy(() => {
 		for (const sample of Object.values(voiceSampleCache)) {
+			revokeVoiceSampleAudioSrc(sample.audioSrc);
+		}
+		for (const sample of Object.values(componentVoiceSamples)) {
 			revokeVoiceSampleAudioSrc(sample.audioSrc);
 		}
 		revokeAvatarPreview();
@@ -1336,6 +1366,13 @@
 	$: lectureVideoIdChanged =
 		(selectedLectureVideo?.id ?? null) !== (currentLectureVideo?.id ?? null);
 	$: lectureVideoVoiceChanged = voiceId.trim() !== currentVoiceId.trim();
+	$: savedElevenLabsConfig = configForAssistant(assistant);
+	$: narrationProfileChanged =
+		JSON.stringify(narrationProfile) !== JSON.stringify(savedElevenLabsConfig.narration);
+	$: knowledgeCheckProfileChanged =
+		JSON.stringify(knowledgeCheckProfile) !== JSON.stringify(savedElevenLabsConfig.knowledge_check);
+	$: liveChatProfileChanged =
+		JSON.stringify(liveChatProfile) !== JSON.stringify(savedElevenLabsConfig.live_chat);
 	$: generationPromptChanged =
 		canGenerateLectureVideoManifest && generationPrompt !== originalGenerationPrompt;
 	$: videoDescriptionDurationChanged =
@@ -1355,7 +1392,9 @@
 		isLectureVideoMode &&
 		!data.isCreating &&
 		!lectureVideoGenerationTriggeredByFormChanges &&
-		(lectureVideoVoiceChanged || (overwriteManifest && lectureVideoManifestChanged));
+		(lectureVideoVoiceChanged ||
+			knowledgeCheckProfileChanged ||
+			(overwriteManifest && lectureVideoManifestChanged));
 	$: canRegenerateLectureVideo = isLectureVideoMode && !data.isCreating;
 	$: if (!canRegenerateLectureVideo && regenerateRequested) {
 		regenerateRequested = false;
@@ -1402,6 +1441,9 @@
 			lectureSlideQuestionsChanged ||
 			lectureSlideAdditionalContextFilesChanged ||
 			lectureSlideVoiceChanged ||
+			narrationProfileChanged ||
+			knowledgeCheckProfileChanged ||
+			liveChatProfileChanged ||
 			slideGenerationPromptChanged ||
 			slideNarrationPromptChanged ||
 			regenerateSlideNarrationRequested ||
@@ -1424,7 +1466,8 @@
 	$: lectureSlideFullProcessingTriggeredByFormChanges = lectureSlideProcessingTriggers.full;
 	$: lectureSlideNarrationTriggeredByFormChanges = lectureSlideProcessingTriggers.narration;
 	$: lectureSlideQuestionsTriggeredByFormChanges = lectureSlideProcessingTriggers.questions;
-	$: lectureSlideAudioTriggeredByFormChanges = lectureSlideProcessingTriggers.audio;
+	$: lectureSlideAudioTriggeredByFormChanges =
+		lectureSlideProcessingTriggers.audio || narrationProfileChanged || knowledgeCheckProfileChanged;
 	$: if (
 		(lectureSlideNarrationTriggeredByFormChanges ||
 			lectureSlideFullProcessingTriggeredByFormChanges) &&
@@ -1463,7 +1506,10 @@
 	}
 	$: {
 		const trimmed = voiceId.trim();
-		const cached = voiceSampleCache[voiceSampleCacheKey(trimmed)];
+		const cached =
+			voiceSampleCache[
+				voiceSampleCacheKey(trimmed, isLectureSlideMode ? narrationProfile : knowledgeCheckProfile)
+			];
 		if (cached) {
 			voiceSampleAudioSrc = cached.audioSrc;
 			voiceSampleText = cached.text;
@@ -2996,6 +3042,11 @@
 			case 'elevenlabs_speed':
 				dirty = isLectureMode ? newValue !== (oldValue ?? DEFAULT_ELEVENLABS_SPEED) : false;
 				break;
+			case 'elevenlabs_config':
+				dirty = isLectureMode
+					? JSON.stringify(newValue) !== JSON.stringify(configForAssistant(assistant))
+					: false;
+				break;
 			case 'published':
 				dirty = newValue === undefined ? false : newValue !== !!oldValue;
 				break;
@@ -3081,11 +3132,7 @@
 					'realtime_speed',
 					'realtime_noise_reduction',
 					'realtime_transcription_model',
-					'elevenlabs_stability',
-					'elevenlabs_similarity_boost',
-					'elevenlabs_use_speaker_boost',
-					'elevenlabs_style',
-					'elevenlabs_speed'
+					'elevenlabs_config'
 				]
 			: ['name', 'description', 'instructions'];
 		if (
@@ -3373,6 +3420,7 @@
 			elevenlabs_speed: isLectureMode
 				? elevenlabsSpeedValue
 				: (assistant?.elevenlabs_speed ?? undefined),
+			elevenlabs_config: isLectureMode ? currentElevenLabsConfig() : undefined,
 			lecture_video_id: isLectureVideoMode ? (selectedLectureVideo?.id ?? undefined) : undefined,
 			lecture_slide_deck_id: isLectureSlideMode
 				? (selectedLectureSlideDeck?.id ?? undefined)
@@ -4152,7 +4200,9 @@
 		happyToast('Lecture video processing retried');
 	};
 
-	const validateLectureVideoVoice = async () => {
+	const validateLectureVideoVoice = async (
+		component: ElevenLabsComponent = isLectureSlideMode ? 'narration' : 'knowledge_check'
+	) => {
 		const trimmedVoiceId = voiceId.trim();
 		if (!trimmedVoiceId) {
 			sadToast('Please provide a voice ID before validating.');
@@ -4160,31 +4210,55 @@
 		}
 
 		validatingVoiceId = true;
+		validatingVoiceComponent = component;
 		voiceValidationError = '';
 		voiceSampleAudioSrc = '';
 		voiceSampleText = '';
 		try {
+			const profile = profileForComponent(component);
 			const response = await api.validateLectureVideoVoice(
 				fetch,
 				data.class.id,
 				{
 					voice_id: trimmedVoiceId,
-					...elevenlabsVoiceSettingsPayload()
+					elevenlabs_profile: profile
 				},
 				data.isCreating ? undefined : (data.assistantId ?? undefined)
 			);
 			if (api.isErrorResponse(response)) {
 				const detail = response.detail || 'Unknown error';
 				voiceValidationError = detail;
+				componentVoiceSamples = {
+					...componentVoiceSamples,
+					[component]: {
+						text: '',
+						audioSrc: '',
+						error: detail,
+						profileKey: JSON.stringify(profile)
+					}
+				};
 				sadToast(`Voice validation failed:\n${detail}`);
 				return;
 			}
 
 			const audioSrc = URL.createObjectURL(response.audio_blob);
+			const previousComponentAudio = componentVoiceSamples[component].audioSrc;
+			if (previousComponentAudio && previousComponentAudio !== audioSrc) {
+				revokeVoiceSampleAudioSrc(previousComponentAudio);
+			}
+			componentVoiceSamples = {
+				...componentVoiceSamples,
+				[component]: {
+					text: response.sample_text,
+					audioSrc,
+					error: '',
+					profileKey: JSON.stringify(profile)
+				}
+			};
 			voiceSampleText = response.sample_text;
 			voiceSampleAudioSrc = audioSrc;
 			setVoiceSampleCacheEntry(
-				voiceSampleCacheKey(trimmedVoiceId),
+				voiceSampleCacheKey(trimmedVoiceId, profile),
 				voiceSampleText,
 				voiceSampleAudioSrc
 			);
@@ -4193,9 +4267,19 @@
 		} catch (error) {
 			const detail = error instanceof Error ? error.message : 'Unknown error';
 			voiceValidationError = detail;
+			componentVoiceSamples = {
+				...componentVoiceSamples,
+				[component]: {
+					text: '',
+					audioSrc: '',
+					error: detail,
+					profileKey: JSON.stringify(profileForComponent(component))
+				}
+			};
 			sadToast(`Voice validation failed:\n${detail}`);
 		} finally {
 			validatingVoiceId = false;
+			validatingVoiceComponent = null;
 		}
 	};
 
@@ -6083,7 +6167,7 @@
 						color="light"
 						class="w-full shrink-0 sm:w-auto"
 						disabled={preventEdits || validatingVoiceId || voiceId.trim().length === 0}
-						onclick={validateLectureVideoVoice}>Validate Voice</Button
+						onclick={() => validateLectureVideoVoice()}>Validate Voice</Button
 					>
 				</div>
 				{#if validatingVoiceId}
@@ -7067,141 +7151,48 @@
 								{/if}
 							{/if}
 
-							<div class="col-span-2 mb-1">
-								<div class="mb-3 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-									<div>
-										<div class="text-sm font-medium text-gray-900">ElevenLabs voice settings</div>
-										<Helper class="pb-1"
-											>Fine-tune the generated voice used for spoken lecture chat responses.</Helper
-										>
-									</div>
-									<Button
-										type="button"
-										color="light"
-										class="w-full shrink-0 sm:w-auto"
-										disabled={preventEdits || validatingVoiceId || voiceId.trim().length === 0}
-										onclick={validateLectureVideoVoice}>Preview Voice</Button
-									>
-								</div>
-
-								<div class="grid gap-4 md:grid-cols-2">
-									<div>
-										<div class="flex items-start justify-between gap-4">
-											<div>
-												<Label for="elevenlabs_stability">Stability</Label>
-												<Helper class="pb-1"
-													>Controls how consistent each generation sounds. Lower values can sound
-													more expressive but less predictable, while higher values can sound more
-													steady and restrained.</Helper
-												>
-											</div>
-											<Input
-												id="elevenlabs_stability"
-												name="elevenlabs_stability"
-												type="number"
-												min="0"
-												max="1"
-												step="0.05"
-												bind:value={elevenlabsStabilityValue}
-												disabled={preventEdits}
-												class="w-28 shrink-0"
-											/>
-										</div>
-									</div>
-
-									<div>
-										<div class="flex items-start justify-between gap-4">
-											<div>
-												<Label for="elevenlabs_similarity_boost">Similarity boost</Label>
-												<Helper class="pb-1"
-													>Controls how strongly the generated speech follows the selected voice.
-													Higher values can preserve identity better, but may emphasize flaws from
-													low-quality source audio.</Helper
-												>
-											</div>
-											<Input
-												id="elevenlabs_similarity_boost"
-												name="elevenlabs_similarity_boost"
-												type="number"
-												min="0"
-												max="1"
-												step="0.05"
-												bind:value={elevenlabsSimilarityBoostValue}
-												disabled={preventEdits}
-												class="w-28 shrink-0"
-											/>
-										</div>
-									</div>
-
-									<div>
-										<div class="flex items-start justify-between gap-4">
-											<div>
-												<Label for="elevenlabs_speed">Voice speed</Label>
-												<Helper class="pb-1"
-													>Adjusts speech pace from 0.7x to 1.2x. The default 1.0 leaves the
-													selected voice at its normal speed.</Helper
-												>
-											</div>
-											<Input
-												id="elevenlabs_speed"
-												name="elevenlabs_speed"
-												type="number"
-												min="0.7"
-												max="1.2"
-												step="0.05"
-												bind:value={elevenlabsSpeedValue}
-												disabled={preventEdits}
-												class="w-28 shrink-0"
-											/>
-										</div>
-									</div>
-
-									<div>
-										<div class="flex items-start justify-between gap-4">
-											<div>
-												<Label for="elevenlabs_style">Style exaggeration</Label>
-												<Helper class="pb-1"
-													>Amplifies the voice's original style, which can add latency when raised.
-													<b>We recommend keeping this setting at 0 at all times.</b></Helper
-												>
-											</div>
-											<Input
-												id="elevenlabs_style"
-												name="elevenlabs_style"
-												type="number"
-												min="0"
-												max="1"
-												step="0.05"
-												bind:value={elevenlabsStyleValue}
-												disabled={preventEdits}
-												class="w-28 shrink-0"
-											/>
-										</div>
-									</div>
-								</div>
-
-								<div class="mt-3">
-									<Checkbox
-										id="elevenlabs_use_speaker_boost"
-										name="elevenlabs_use_speaker_boost"
+							<div class="col-span-2 mb-1 space-y-4">
+								{#if isLectureSlideMode}
+									<ElevenLabsProfileSettings
+										id="elevenlabs-narration"
+										title="Slide narration and translations"
+										description="Used for original slide narration and every translated narration track. The selected model determines which translation languages are available."
+										bind:profile={narrationProfile}
 										disabled={preventEdits}
-										bind:checked={elevenlabsUseSpeakerBoostValue}>Speaker boost</Checkbox
-									>
-									<Helper>Improves speaker similarity at a small latency cost.</Helper>
-								</div>
-
-								{#if validatingVoiceId}
-									<Helper class="pt-3">Generating voice preview...</Helper>
+										previewing={validatingVoiceComponent === 'narration'}
+										previewDisabled={validatingVoiceId || voiceId.trim().length === 0}
+										sampleText={currentComponentVoiceSample('narration').text}
+										sampleAudioSrc={currentComponentVoiceSample('narration').audioSrc}
+										previewError={currentComponentVoiceSample('narration').error}
+										onPreview={() => validateLectureVideoVoice('narration')}
+									/>
 								{/if}
-								{#if voiceValidationError}
-									<div class="pt-3 text-sm text-red-700">{voiceValidationError}</div>
-								{/if}
-								{#if voiceSampleAudioSrc}
-									<div class="pt-3">
-										<div class="mb-1 text-sm text-gray-700">Sample phrase: "{voiceSampleText}"</div>
-										<audio controls preload="auto" src={voiceSampleAudioSrc} class="w-full"></audio>
-									</div>
-								{/if}
+								<ElevenLabsProfileSettings
+									id="elevenlabs-knowledge-check"
+									title="Knowledge checks"
+									description="Used for spoken question introductions and answer feedback."
+									bind:profile={knowledgeCheckProfile}
+									disabled={preventEdits}
+									previewing={validatingVoiceComponent === 'knowledge_check'}
+									previewDisabled={validatingVoiceId || voiceId.trim().length === 0}
+									sampleText={currentComponentVoiceSample('knowledge_check').text}
+									sampleAudioSrc={currentComponentVoiceSample('knowledge_check').audioSrc}
+									previewError={currentComponentVoiceSample('knowledge_check').error}
+									onPreview={() => validateLectureVideoVoice('knowledge_check')}
+								/>
+								<ElevenLabsProfileSettings
+									id="elevenlabs-live-chat"
+									title="Spoken live chat"
+									description="Used when the assistant speaks an answer during lesson chat."
+									bind:profile={liveChatProfile}
+									disabled={preventEdits}
+									previewing={validatingVoiceComponent === 'live_chat'}
+									previewDisabled={validatingVoiceId || voiceId.trim().length === 0}
+									sampleText={currentComponentVoiceSample('live_chat').text}
+									sampleAudioSrc={currentComponentVoiceSample('live_chat').audioSrc}
+									previewError={currentComponentVoiceSample('live_chat').error}
+									onPreview={() => validateLectureVideoVoice('live_chat')}
+								/>
 							</div>
 
 							<hr />

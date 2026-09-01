@@ -696,6 +696,18 @@ async def test_persist_manifest_keeps_tts_pronunciation_overrides(
         work_item = lecture_video_processing._first_pending_narration_work(loaded)
         assert work_item is not None
         assert work_item.text == "You leed this step."
+        assert [item.item_id for item in work_item.pronunciation_items] == [
+            stored_question.intro_narration.id,
+            *[
+                option.post_narration.id
+                for option in stored_question.options
+                if option.post_narration is not None
+            ],
+        ]
+        assert work_item.pronunciation_items[0].context == (
+            "Knowledge-check question: What is the right answer?\n"
+            "Spoken introduction: Intro narration"
+        )
 
 
 @pytest.mark.asyncio
@@ -7615,7 +7627,10 @@ def test_lecture_video_config_matches_logs_invalid_current_manifest(
     else:
         pytest.fail("Expected invalid manifest to raise ValidationError")
 
-    def raise_validation_error(_lecture_video):  # type: ignore[no-untyped-def]
+    def raise_validation_error(
+        _lecture_video, *, include_pronunciation_annotations=False
+    ):  # type: ignore[no-untyped-def]
+        assert include_pronunciation_annotations is True
         raise validation_error
 
     current_lecture_video = make_lecture_video(1, "current.mp4")
@@ -7663,7 +7678,11 @@ def test_lecture_video_config_matches_checks_video_description_duration(
     monkeypatch.setattr(
         lecture_video_service,
         "lecture_video_manifest_from_model",
-        lambda _lecture_video: requested_manifest,
+        lambda _lecture_video, *, include_pronunciation_annotations=False: (
+            requested_manifest
+            if include_pronunciation_annotations
+            else pytest.fail("Expected pronunciation annotations to be included")
+        ),
     )
 
     assert (
@@ -8097,6 +8116,31 @@ async def test_validate_class_lecture_video_voice_returns_audio_sample(
             "style": 0.2,
             "speed": 1.1,
         },
+    )
+
+    synthesize_mock.reset_mock()
+    response = api.post(
+        "/api/v1/class/1/lecture-video/voice/validate",
+        json={
+            "voice_id": "voice-123",
+            "elevenlabs_profile": {
+                "model": "eleven_v3",
+                "stability": 1,
+                "similarity_boost": 0.4,
+                "use_speaker_boost": False,
+                "style": 0.2,
+                "speed": 1.1,
+            },
+        },
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+
+    assert response.status_code == 200
+    synthesize_mock.assert_awaited_once_with(
+        "elevenlabs-key-1234",
+        "voice-123",
+        model_id="eleven_v3",
+        voice_settings={"stability": 1.0},
     )
 
 
@@ -9070,7 +9114,7 @@ async def test_update_assistant_rejects_out_of_range_elevenlabs_speed(
         ("user:123", "admin", "class:1"),
     ]
 )
-async def test_update_assistant_voice_settings_ignore_none_overrides_for_validation(
+async def test_update_assistant_uses_legacy_component_default_for_validation(
     api, db, institution, valid_user_token, monkeypatch
 ):
     patch_lecture_video_model_list(monkeypatch)
@@ -9116,12 +9160,13 @@ async def test_update_assistant_voice_settings_ignore_none_overrides_for_validat
     synthesize_mock.assert_awaited_with(
         "shared-elevenlabs-key",
         DEFAULT_LECTURE_VIDEO_VOICE_ID,
+        model_id="eleven_flash_v2_5",
         voice_settings={
-            "stability": 0.9,
-            "similarity_boost": 0.4,
-            "use_speaker_boost": False,
-            "style": 0.2,
-            "speed": 1.1,
+            "stability": 0.5,
+            "similarity_boost": 0.8,
+            "use_speaker_boost": True,
+            "style": 0.0,
+            "speed": 1.0,
         },
     )
 

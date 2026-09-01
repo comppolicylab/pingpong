@@ -39,6 +39,18 @@ in fields that are not described as spoken narration, a spoken response, an intr
 or spoken feedback.
 Do not mention this metadata to the learner."""
 
+TTS_PRONUNCIATION_INSTRUCTIONS_V3 = f"""---ElevenLabs v3 Pronunciation Metadata---
+Some generated fields are sent to ElevenLabs v3 text-to-speech. Use context to
+identify words whose pronunciation is genuinely ambiguous. Only for those words,
+preserve the correctly spelled word for display while supplying its IPA pronunciation,
+wrapped in forward slashes, with this exact inline form:
+{SAY_MARKER_START}say{SAY_MARKER_SEPARATOR}{{"speech":"/liːd/","content":"lead"}}{SAY_MARKER_END}
+In each pronunciation block, `content` must contain exactly one word and `speech`
+must contain one IPA transcription with no whitespace. Use ordinary spelling
+everywhere else. Do not use SSML, alternative spellings, markdown, or this block in
+fields that are not described as spoken narration, a spoken response, an intro, or
+spoken feedback. Do not mention this metadata to the learner."""
+
 MANUAL_TTS_PRONUNCIATION_EXAMPLE = "[[lead=>leed]]"
 _MANUAL_TTS_PRONUNCIATION_PATTERN = re.compile(r"\[\[([^\s\[\]]+)=>([^\s\[\]]+)\]\]")
 

@@ -53,9 +53,15 @@ from pingpong.class_credential_validation import (
 from pingpong.config import config
 from pingpong.errors import sentry
 from pingpong.elevenlabs import (
+    ELEVENLABS_TTS_MODEL,
     ElevenLabsSpeechWordTiming,
     synthesize_elevenlabs_speech,
     synthesize_elevenlabs_speech_with_timings,
+)
+from pingpong.elevenlabs_config import profile_for, voice_settings_for_profile
+from pingpong.elevenlabs_pronunciation import (
+    SpeechTextItem,
+    speech_texts_for_elevenlabs,
 )
 from pingpong.lecture_video_manifest_generation import (
     DEFAULT_LECTURE_INSTRUCTIONS,
@@ -1954,6 +1960,10 @@ async def _synthesize_translation_audio(
         if translation is None:
             return False
         deck = translation.lecture_slide_deck
+        assistant = await models.Assistant.get_by_lecture_slide_deck_id(
+            session, deck.id
+        )
+        narration_profile = profile_for(assistant, "narration") if assistant else None
         voice_id = deck.voice_id
         class_id = deck.class_id
         language_code = translation.language_code
@@ -1970,17 +1980,55 @@ async def _synthesize_translation_audio(
     if pending_pages and not voice_id:
         raise RuntimeError("Lecture slide deck voice_id is required for translation.")
     api_key = await _get_elevenlabs_api_key(class_id) if pending_pages else None
+    if assistant is not None:
+        prepared_speech_texts = await _await_with_translation_lease_heartbeat(
+            run_id,
+            lease_token,
+            speech_texts_for_elevenlabs(
+                assistant_id=assistant.id,
+                component="narration",
+                scope="lecture_slide_translation_narration",
+                language_code=language_code,
+                items=[
+                    SpeechTextItem(
+                        item_id=page_id,
+                        display_text=narration_text,
+                        speech_text=narration_tts_text or narration_text,
+                        context=(f"Translated slide narration:\n{narration_text}"),
+                    )
+                    for page_id, narration_text, narration_tts_text in pending_pages
+                ],
+            ),
+        )
+        if prepared_speech_texts is None:
+            return False
+    else:
+        prepared_speech_texts = {
+            page_id: narration_tts_text or narration_text
+            for page_id, narration_text, narration_tts_text in pending_pages
+        }
     for page_id, narration_text, narration_tts_text in pending_pages:
         assert api_key is not None
         assert voice_id is not None
+        speech_text = prepared_speech_texts[page_id]
         synthesis = await _await_with_translation_lease_heartbeat(
             run_id,
             lease_token,
             synthesize_elevenlabs_speech_with_timings(
                 api_key,
                 voice_id,
-                narration_tts_text or narration_text,
+                speech_text,
                 language_code=language_code,
+                model_id=(
+                    narration_profile.model.value
+                    if narration_profile is not None
+                    else ELEVENLABS_TTS_MODEL
+                ),
+                voice_settings=(
+                    voice_settings_for_profile(narration_profile)
+                    if narration_profile is not None
+                    else None
+                ),
             ),
         )
         if synthesis is None:
@@ -3398,6 +3446,10 @@ async def _synthesize_slide_audio(
         )
         if deck is None:
             return None
+        assistant = await models.Assistant.get_by_lecture_slide_deck_id(
+            session, deck.id
+        )
+        narration_profile = profile_for(assistant, "narration") if assistant else None
         class_id = deck.class_id
         voice_id = deck.voice_id
         pages = [
@@ -3433,6 +3485,55 @@ async def _synthesize_slide_audio(
     if needs_video_transcription:
         async with config.db.driver.async_session() as session:
             openai_client = await get_openai_client_by_class_id(session, class_id)
+    narration_pages = [
+        (
+            page_id,
+            page_position,
+            narration_text,
+            narration_tts_text,
+        )
+        for (
+            page_id,
+            page_position,
+            content_kind,
+            narration_text,
+            narration_tts_text,
+            _,
+        ) in pages
+        if content_kind != schemas.LectureSlideContentKind.VIDEO
+    ]
+    if assistant is not None:
+        prepared_speech_texts = await _await_with_run_lease_heartbeat(
+            run_id,
+            lease_token,
+            speech_texts_for_elevenlabs(
+                assistant_id=assistant.id,
+                component="narration",
+                scope="lecture_slide_narration",
+                language_code=None,
+                items=[
+                    SpeechTextItem(
+                        item_id=page_id,
+                        display_text=narration_text,
+                        speech_text=narration_tts_text or narration_text,
+                        context=(f"Slide {page_position} narration:\n{narration_text}"),
+                    )
+                    for (
+                        page_id,
+                        page_position,
+                        narration_text,
+                        narration_tts_text,
+                    ) in narration_pages
+                ],
+            ),
+        )
+        if prepared_speech_texts is None:
+            return None
+    else:
+        prepared_speech_texts = {
+            page_id: narration_tts_text or narration_text
+            for page_id, _, narration_text, narration_tts_text in narration_pages
+        }
     artifacts: list[SlideAudioArtifact] = []
     for (
         page_id,
@@ -3460,11 +3561,24 @@ async def _synthesize_slide_audio(
         else:
             assert api_key is not None
             assert voice_id is not None
+            speech_text = prepared_speech_texts[page_id]
             synthesis_result = await _await_with_run_lease_heartbeat(
                 run_id,
                 lease_token,
                 synthesize_elevenlabs_speech_with_timings(
-                    api_key, voice_id, narration_tts_text or narration_text
+                    api_key,
+                    voice_id,
+                    speech_text,
+                    model_id=(
+                        narration_profile.model.value
+                        if narration_profile is not None
+                        else ELEVENLABS_TTS_MODEL
+                    ),
+                    voice_settings=(
+                        voice_settings_for_profile(narration_profile)
+                        if narration_profile is not None
+                        else None
+                    ),
                 ),
             )
             if synthesis_result is None:
@@ -5203,9 +5317,15 @@ async def _synthesize_knowledge_check_audio(
         )
         if deck is None:
             return
+        assistant = await models.Assistant.get_by_lecture_slide_deck_id(
+            session, deck.id
+        )
+        knowledge_profile = (
+            profile_for(assistant, "knowledge_check") if assistant else None
+        )
         voice_id = deck.voice_id
         class_id = deck.class_id
-        narration_items: list[tuple[int, str]] = []
+        narration_items: list[tuple[int, str, str, str]] = []
         for question in deck.questions:
             if (
                 question.intro_narration
@@ -5216,7 +5336,12 @@ async def _synthesize_knowledge_check_audio(
                 narration_items.append(
                     (
                         question.intro_narration.id,
+                        question.intro_text,
                         question.intro_narration.tts_text or question.intro_text,
+                        (
+                            f"Knowledge-check question: {question.question_text}\n"
+                            f"Spoken introduction: {question.intro_text}"
+                        ),
                     )
                 )
             for option in question.options:
@@ -5229,7 +5354,13 @@ async def _synthesize_knowledge_check_audio(
                     narration_items.append(
                         (
                             option.post_narration.id,
+                            option.post_answer_text,
                             option.post_narration.tts_text or option.post_answer_text,
+                            (
+                                f"Knowledge-check question: {question.question_text}\n"
+                                f"Answer option: {option.option_text}\n"
+                                f"Spoken feedback: {option.post_answer_text}"
+                            ),
                         )
                     )
     if not narration_items:
@@ -5237,11 +5368,52 @@ async def _synthesize_knowledge_check_audio(
     if not voice_id:
         raise RuntimeError("Lecture slide deck voice_id is required for narration.")
     api_key = await _get_elevenlabs_api_key(class_id)
-    for narration_id, text in narration_items:
+    if assistant is not None:
+        prepared_speech_texts = await _await_with_run_lease_heartbeat(
+            run_id,
+            lease_token,
+            speech_texts_for_elevenlabs(
+                assistant_id=assistant.id,
+                component="knowledge_check",
+                scope="lecture_slide_knowledge_check",
+                language_code=None,
+                items=[
+                    SpeechTextItem(
+                        item_id=narration_id,
+                        display_text=display_text,
+                        speech_text=text,
+                        context=context,
+                    )
+                    for narration_id, display_text, text, context in narration_items
+                ],
+            ),
+        )
+        if prepared_speech_texts is None:
+            return
+    else:
+        prepared_speech_texts = {
+            narration_id: text for narration_id, _, text, _ in narration_items
+        }
+    for narration_id, display_text, text, _ in narration_items:
+        synthesis_text = prepared_speech_texts[narration_id]
         synthesis_result = await _await_with_run_lease_heartbeat(
             run_id,
             lease_token,
-            synthesize_elevenlabs_speech(api_key, voice_id, text),
+            synthesize_elevenlabs_speech(
+                api_key,
+                voice_id,
+                synthesis_text,
+                model_id=(
+                    knowledge_profile.model.value
+                    if knowledge_profile is not None
+                    else ELEVENLABS_TTS_MODEL
+                ),
+                voice_settings=(
+                    voice_settings_for_profile(knowledge_profile)
+                    if knowledge_profile is not None
+                    else None
+                ),
+            ),
         )
         if synthesis_result is None:
             return

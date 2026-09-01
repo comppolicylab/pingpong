@@ -6108,6 +6108,9 @@ class Assistant(Base):
     elevenlabs_use_speaker_boost = Column(Boolean, nullable=True)
     elevenlabs_style = Column(Float, nullable=True)
     elevenlabs_speed = Column(Float, nullable=True)
+    elevenlabs_config: Mapped[dict[str, Any] | None] = mapped_column(
+        JSON, nullable=True
+    )
     assistant_should_message_first = Column(Boolean, server_default="false")
     allow_lesson_timeline_bypass = Column(
         Boolean, nullable=False, default=False, server_default="false"
@@ -6484,6 +6487,7 @@ class Assistant(Base):
                 "elevenlabs_speed",
             ):
                 params[field] = None
+            params["elevenlabs_config"] = None
         params["tools"] = json.dumps(params["tools"])
         params["class_id"] = int(class_id)
         params["creator_id"] = int(user_id)
