@@ -4439,6 +4439,7 @@
 				lectureVideoManifestChanged ||
 				lectureVideoIdChanged ||
 				lectureVideoVoiceChanged ||
+				knowledgeCheckProfileChanged ||
 				generationPromptChanged ||
 				videoDescriptionDurationChanged ||
 				overwriteManifestChanged ||
@@ -4559,6 +4560,8 @@
 				lectureSlideJsonAppliedChanges ||
 				lectureSlideAdditionalContextFilesChanged ||
 				lectureSlideVoiceChanged ||
+				narrationProfileChanged ||
+				knowledgeCheckProfileChanged ||
 				slideGenerationPromptChanged ||
 				slideNarrationPromptChanged ||
 				regenerateSlideNarrationRequested ||
