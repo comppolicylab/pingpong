@@ -247,7 +247,13 @@ class MockFgaAuthzServer:
 
     async def __aenter__(self):
         self.proc.start()
-        await self._block_until_ready()
+        try:
+            await self._block_until_ready()
+        except BaseException:
+            if self.proc.is_alive():
+                self.proc.kill()
+            self.proc.join()
+            raise
         return self
 
     async def __aexit__(self, exc_type, exc_value, traceback):
@@ -257,7 +263,12 @@ class MockFgaAuthzServer:
 
     async def _block_until_ready(self):
         t0 = time.monotonic()
-        while time.monotonic() - t0 < 5:
+        while time.monotonic() - t0 < 30:
+            if self.proc.exitcode is not None:
+                raise RuntimeError(
+                    f"Mock FGA server exited during startup with code "
+                    f"{self.proc.exitcode}."
+                )
             try:
                 async with aiohttp.ClientSession() as session:
                     async with session.get(
@@ -269,3 +280,4 @@ class MockFgaAuthzServer:
                 # Service may still be starting; retry until timeout.
                 pass
             await asyncio.sleep(0.1)
+        raise TimeoutError("Mock FGA server did not become ready within 30 seconds.")

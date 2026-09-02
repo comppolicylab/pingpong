@@ -1,11 +1,32 @@
 import os
 from datetime import datetime
+from pathlib import Path
 
 import pytest
 import pytz
 from fastapi.testclient import TestClient
 
 os.environ["CONFIG_PATH"] = "test_config.toml"
+
+
+def pytest_configure():
+    """Give each pytest-xdist worker its own stateful test resources."""
+    worker_id = os.environ.get("PYTEST_XDIST_WORKER")
+    if worker_id is None:
+        return
+
+    worker_number = int(worker_id.removeprefix("gw"))
+
+    from pingpong.config import config
+
+    db_path = Path(config.db.path)
+    config.db.path = str(
+        db_path.with_name(f"{db_path.stem}-{worker_id}{db_path.suffix}")
+    )
+    config.db.__dict__.pop("driver", None)
+
+    config.authz.port += worker_number
+    config.authz.__dict__.pop("driver", None)
 
 
 @pytest.fixture
@@ -19,8 +40,18 @@ def config():
 async def db(config):
     from pingpong.models import Base
 
-    await config.db.driver.init(Base, drop_first=True)
-    yield config.db.driver
+    # Break the intentional schema cycle only while resetting the SQLite test DB.
+    # SQLite still creates this foreign key inline; the hint only guides drop order.
+    avatar_file_fk = next(
+        iter(Base.metadata.tables["assistants"].c.avatar_file_id.foreign_keys)
+    ).constraint
+    original_use_alter = avatar_file_fk.use_alter
+    avatar_file_fk.use_alter = True
+    try:
+        await config.db.driver.init(Base, drop_first=True)
+        yield config.db.driver
+    finally:
+        avatar_file_fk.use_alter = original_use_alter
 
 
 @pytest.fixture
