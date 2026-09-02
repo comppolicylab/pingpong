@@ -1724,7 +1724,7 @@ async def test_generate_narration_text_appends_faithful_transcript_addendum(db):
     assert "file-transcript" in payload
 
 
-def test_generated_slide_question_separates_tts_pronunciation_metadata():
+async def test_generated_slide_question_separates_tts_pronunciation_metadata():
     tagged = '\ue200say\ue202{"speech":"leed","content":"lead"}\ue201'
     question = lecture_slide_processing.GeneratedSlideQuestion(
         slide_position=0,
@@ -3474,9 +3474,7 @@ async def test_synthesize_slide_audio_skips_pages_with_existing_narration(
     async def fake_get_elevenlabs_api_key(_class_id):
         return "elevenlabs-key"
 
-    async def fake_synthesize_speech_with_timings(
-        _api_key, _voice_id, text, **_kwargs
-    ):
+    async def fake_synthesize_speech_with_timings(_api_key, _voice_id, text, **_kwargs):
         requested_texts.append(text)
         return SimpleNamespace(audio=f"audio-{text}".encode("utf-8"), words=())
 
@@ -3541,9 +3539,7 @@ async def test_synthesize_slide_audio_renews_lease_after_each_persisted_page(
     async def fake_get_elevenlabs_api_key(_class_id):
         return "elevenlabs-key"
 
-    async def fake_synthesize_speech_with_timings(
-        _api_key, _voice_id, text, **_kwargs
-    ):
+    async def fake_synthesize_speech_with_timings(_api_key, _voice_id, text, **_kwargs):
         nonlocal lease_expiry_before_second_page
         if text == "Second narration.":
             async with db.async_session() as session:
