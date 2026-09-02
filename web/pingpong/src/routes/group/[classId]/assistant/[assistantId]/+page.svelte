@@ -803,9 +803,11 @@
 		knowledge_check: { text: '', audioSrc: '', error: '', profileKey: '' },
 		live_chat: { text: '', audioSrc: '', error: '', profileKey: '' }
 	};
-	const currentComponentVoiceSample = (component: ElevenLabsComponent) => {
-		const sample = componentVoiceSamples[component];
-		return sample.profileKey === JSON.stringify(profileForComponent(component))
+	const currentComponentVoiceSample = (
+		sample: (typeof componentVoiceSamples)[ElevenLabsComponent],
+		profile: api.ElevenLabsTTSProfile
+	) => {
+		return sample.profileKey === JSON.stringify(profile)
 			? sample
 			: { text: '', audioSrc: '', error: '', profileKey: '' };
 	};
@@ -7161,9 +7163,18 @@
 										disabled={preventEdits}
 										previewing={validatingVoiceComponent === 'narration'}
 										previewDisabled={validatingVoiceId || voiceId.trim().length === 0}
-										sampleText={currentComponentVoiceSample('narration').text}
-										sampleAudioSrc={currentComponentVoiceSample('narration').audioSrc}
-										previewError={currentComponentVoiceSample('narration').error}
+										sampleText={currentComponentVoiceSample(
+											componentVoiceSamples.narration,
+											narrationProfile
+										).text}
+										sampleAudioSrc={currentComponentVoiceSample(
+											componentVoiceSamples.narration,
+											narrationProfile
+										).audioSrc}
+										previewError={currentComponentVoiceSample(
+											componentVoiceSamples.narration,
+											narrationProfile
+										).error}
 										onPreview={() => validateLectureVideoVoice('narration')}
 									/>
 								{/if}
@@ -7175,9 +7186,18 @@
 									disabled={preventEdits}
 									previewing={validatingVoiceComponent === 'knowledge_check'}
 									previewDisabled={validatingVoiceId || voiceId.trim().length === 0}
-									sampleText={currentComponentVoiceSample('knowledge_check').text}
-									sampleAudioSrc={currentComponentVoiceSample('knowledge_check').audioSrc}
-									previewError={currentComponentVoiceSample('knowledge_check').error}
+									sampleText={currentComponentVoiceSample(
+										componentVoiceSamples.knowledge_check,
+										knowledgeCheckProfile
+									).text}
+									sampleAudioSrc={currentComponentVoiceSample(
+										componentVoiceSamples.knowledge_check,
+										knowledgeCheckProfile
+									).audioSrc}
+									previewError={currentComponentVoiceSample(
+										componentVoiceSamples.knowledge_check,
+										knowledgeCheckProfile
+									).error}
 									onPreview={() => validateLectureVideoVoice('knowledge_check')}
 								/>
 								<ElevenLabsProfileSettings
@@ -7188,9 +7208,18 @@
 									disabled={preventEdits}
 									previewing={validatingVoiceComponent === 'live_chat'}
 									previewDisabled={validatingVoiceId || voiceId.trim().length === 0}
-									sampleText={currentComponentVoiceSample('live_chat').text}
-									sampleAudioSrc={currentComponentVoiceSample('live_chat').audioSrc}
-									previewError={currentComponentVoiceSample('live_chat').error}
+									sampleText={currentComponentVoiceSample(
+										componentVoiceSamples.live_chat,
+										liveChatProfile
+									).text}
+									sampleAudioSrc={currentComponentVoiceSample(
+										componentVoiceSamples.live_chat,
+										liveChatProfile
+									).audioSrc}
+									previewError={currentComponentVoiceSample(
+										componentVoiceSamples.live_chat,
+										liveChatProfile
+									).error}
 									onPreview={() => validateLectureVideoVoice('live_chat')}
 								/>
 							</div>
