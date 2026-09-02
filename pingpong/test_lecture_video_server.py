@@ -8140,7 +8140,13 @@ async def test_validate_class_lecture_video_voice_returns_audio_sample(
         "elevenlabs-key-1234",
         "voice-123",
         model_id="eleven_v3",
-        voice_settings={"stability": 1.0},
+        voice_settings={
+            "stability": 1.0,
+            "similarity_boost": 0.4,
+            "use_speaker_boost": False,
+            "style": 0.2,
+            "speed": 1.1,
+        },
     )
 
 
@@ -9160,7 +9166,7 @@ async def test_update_assistant_uses_legacy_component_default_for_validation(
     synthesize_mock.assert_awaited_with(
         "shared-elevenlabs-key",
         DEFAULT_LECTURE_VIDEO_VOICE_ID,
-        model_id="eleven_flash_v2_5",
+        model_id="eleven_v3",
         voice_settings={
             "stability": 0.5,
             "similarity_boost": 0.8,

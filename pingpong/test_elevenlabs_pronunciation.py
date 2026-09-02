@@ -107,14 +107,36 @@ async def test_v3_pronunciation_conversion_is_cached_and_hint_changes_miss_cache
             )
         ],
     )
+    authored_ipa = await elevenlabs_pronunciation.speech_texts_for_elevenlabs(
+        assistant_id=1,
+        component="narration",
+        scope="lecture_slide_narration",
+        language_code="en",
+        items=[
+            elevenlabs_pronunciation.SpeechTextItem(
+                item_id=40,
+                display_text="The lead pipe.",
+                speech_text="The /lɛd/ pipe.",
+            ),
+            elevenlabs_pronunciation.SpeechTextItem(
+                item_id=41,
+                display_text="The lead pipe.",
+                speech_text='The "/lɛd/" pipe.',
+            ),
+        ],
+    )
 
     assert first == {
-        10: "Please /liːd/, the class.",
-        11: "We /liːd/ together.",
-        12: "The /beɪs/ sounded low.",
+        10: 'Please "/liːd/", the class.',
+        11: 'We "/liːd/" together.',
+        12: 'The "/beɪs/" sounded low.',
     }
-    assert cached == {20: "They /liːd/ today."}
-    assert changed == {30: "The /lɛd/ pipe."}
+    assert cached == {20: 'They "/liːd/" today.'}
+    assert changed == {30: 'The "/lɛd/" pipe.'}
+    assert authored_ipa == {
+        40: 'The "/lɛd/" pipe.',
+        41: 'The "/lɛd/" pipe.',
+    }
     assert len(requests) == 2
 
     first_request = requests[0]

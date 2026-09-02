@@ -141,7 +141,7 @@ def test_format_instructions_uses_v3_ipa_pronunciation_contract():
     )
 
     assert "ElevenLabs v3 Pronunciation Metadata" in instructions
-    assert '"speech":"/liːd/"' in instructions
+    assert r'"speech":"\"/liːd/\""' in instructions
     assert "simple phonetic alternative" not in instructions
 
 

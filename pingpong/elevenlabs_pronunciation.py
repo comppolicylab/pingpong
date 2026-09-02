@@ -51,6 +51,18 @@ class _IPAPronunciationBatch(BaseModel):
     pronunciations: list[_IPAPronunciation]
 
 
+def _quote_inline_ipa(text: str) -> str:
+    """Use ElevenLabs v3's documented inline IPA form: ``"/IPA/"``."""
+
+    def replace(match: re.Match[str]) -> str:
+        start, end = match.span()
+        if start > 0 and end < len(text) and text[start - 1] == text[end] == '"':
+            return match.group(0)
+        return f'"{match.group(0)}"'
+
+    return _IPA_PATTERN.sub(replace, text)
+
+
 def _pronunciation_occurrences(
     item: SpeechTextItem,
     *,
@@ -110,16 +122,18 @@ def _pronunciation_occurrences(
                 suffix=suffix,
             )
         )
-    return speech_parts, occurrences
+    return [_quote_inline_ipa(part) for part in speech_parts], occurrences
 
 
 def _normalize_ipa(value: str) -> str:
     ipa = value.strip()
+    if ipa.startswith('"') and ipa.endswith('"'):
+        ipa = ipa[1:-1].strip()
     if ipa.startswith("/") and ipa.endswith("/"):
         ipa = ipa[1:-1].strip()
     if not ipa:
         raise RuntimeError("IPA pronunciation conversion returned an empty value.")
-    if "/" in ipa or "\n" in ipa or "\r" in ipa:
+    if "/" in ipa or '"' in ipa or "\n" in ipa or "\r" in ipa:
         raise RuntimeError("IPA pronunciation contains invalid delimiters.")
     return ipa
 
@@ -235,7 +249,7 @@ async def speech_texts_for_elevenlabs(
                 if ipa is None:
                     raise RuntimeError("IPA pronunciation is missing from the cache.")
                 parts[occurrence.part_index] = (
-                    f"{occurrence.prefix}/{ipa}/{occurrence.suffix}"
+                    f'{occurrence.prefix}"/{ipa}/"{occurrence.suffix}'
                 )
             prepared[item.item_id] = "".join(parts)
         return prepared
