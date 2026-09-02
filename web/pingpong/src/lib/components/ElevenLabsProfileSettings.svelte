@@ -40,6 +40,16 @@
 		>
 	</div>
 
+	{#if previewError}
+		<div class="pb-3 text-sm text-red-700">{previewError}</div>
+	{/if}
+	{#if sampleAudioSrc}
+		<div class="pb-3">
+			<div class="mb-1 text-sm text-gray-700">Sample phrase: “{sampleText}”</div>
+			<audio controls preload="auto" src={sampleAudioSrc} class="w-full"></audio>
+		</div>
+	{/if}
+
 	<div
 		class="flex flex-col items-stretch gap-2 sm:flex-row sm:items-start sm:justify-between sm:gap-4"
 	>
@@ -140,14 +150,4 @@
 			>Speaker boost</Checkbox
 		>
 	</div>
-
-	{#if previewError}
-		<div class="pt-3 text-sm text-red-700">{previewError}</div>
-	{/if}
-	{#if sampleAudioSrc}
-		<div class="pt-3">
-			<div class="mb-1 text-sm text-gray-700">Sample phrase: “{sampleText}”</div>
-			<audio controls preload="auto" src={sampleAudioSrc} class="w-full"></audio>
-		</div>
-	{/if}
 </section>
