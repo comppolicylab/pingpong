@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { getLectureConversationStarters } from '$lib/constants/lectureConversationStarters';
 	import * as api from '$lib/api';
 	import { groupMessageContent, parseTextContent } from '$lib/content';
 	import { Button, Tooltip, Avatar } from 'flowbite-svelte';
@@ -32,6 +33,7 @@
 	import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 
 	let {
+		languageCode = null,
 		classId,
 		threadId,
 		messages,
@@ -68,6 +70,7 @@
 		onmutettstoggle,
 		oncontinuewatching
 	}: {
+		languageCode?: string | null;
 		classId: number;
 		threadId: number;
 		messages: Message[];
@@ -109,11 +112,7 @@
 	let chatInputRef: ChatInputHandle | null = $state(null);
 	const dismissedContinuePromptMessageIds = new SvelteSet<string>();
 	const continuePromptDecisionByMessageId = new SvelteMap<string, boolean>();
-	const starterQuestions = [
-		"What's the main idea of this lecture?",
-		'Give me a real-world example.',
-		"Quiz me on what's been covered so far."
-	];
+	const starterQuestions = $derived(getLectureConversationStarters(languageCode));
 
 	function isFileCitation(a: api.TextAnnotation): a is api.TextAnnotationFileCitation {
 		return a.type === 'file_citation' && a.text === 'responses_v3';

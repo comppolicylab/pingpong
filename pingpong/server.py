@@ -6263,12 +6263,35 @@ async def get_thread_lecture_slide_narration(
             status_code=404, detail="Lecture slide narration not found."
         )
 
+    audio = narration.stored_object
+    translation = lecture_slide_runtime.usable_lecture_slide_translation(thread)
+    if translation is not None:
+        audio = await request.state["db"].scalar(
+            select(models.LectureSlideNarrationStoredObject)
+            .join(
+                models.LectureSlideTranslationNarration,
+                models.LectureSlideTranslationNarration.stored_object_id
+                == models.LectureSlideNarrationStoredObject.id,
+            )
+            .where(
+                models.LectureSlideTranslationNarration.translation_id
+                == translation.id,
+                models.LectureSlideTranslationNarration.source_narration_id
+                == narration_id,
+            )
+        )
+        if audio is None:
+            raise HTTPException(
+                404,
+                "Translated lecture feedback is not available. Prepare this language again.",
+            )
+
     try:
         return await _stream_audio_file_response(
             store=config.lecture_video_audio_store.store,
-            key=narration.stored_object.key,
-            content_length=narration.stored_object.content_length,
-            content_type=narration.stored_object.content_type,
+            key=audio.key,
+            content_length=audio.content_length,
+            content_type=audio.content_type,
             range_header=request.headers.get("range"),
             store_error_log="AudioStoreError while streaming lecture slide narration; aborting stream.",
             unexpected_error_log="Unexpected error while streaming lecture slide narration",
@@ -8634,6 +8657,9 @@ async def create_lecture_thread(
             )
             if (
                 translation is None
+                or await lecture_slide_processing.translation_needs_feedback(
+                    request.state["db"], translation
+                )
                 or translation.status != schemas.LectureSlideTranslationStatus.READY
                 or translation.continuous_narration_stored_object_id is None
                 or translation.caption_stored_object_id is None
@@ -11687,6 +11713,9 @@ async def get_lecture_slide_translation_status(
     return lecture_slide_processing.lecture_slide_translation_status_response(
         translation,
         language_code=normalized_code,
+        needs_reprocessing=await lecture_slide_processing.translation_needs_feedback(
+            request.state["db"], translation
+        ),
     )
 
 
@@ -11752,6 +11781,9 @@ async def prepare_lecture_slide_translation(
     return lecture_slide_processing.lecture_slide_translation_status_response(
         translation,
         language_code=language.code,
+        needs_reprocessing=await lecture_slide_processing.translation_needs_feedback(
+            request.state["db"], translation
+        ),
     )
 
 

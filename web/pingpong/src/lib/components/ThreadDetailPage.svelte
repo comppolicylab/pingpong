@@ -1812,6 +1812,7 @@
 				{#snippet chat(lectureVideoAtEnd = false)}
 					{#if threadLectureChatAvailable}
 						<LectureVideoChatPanel
+							languageCode={expandedThreadData.data?.thread?.lecture_language_code}
 							{classId}
 							{threadId}
 							messages={$messages}
@@ -1991,6 +1992,7 @@
 				{#snippet chat(lectureSlideAtEnd = false)}
 					{#if threadLectureSlideChatAvailable}
 						<LectureVideoChatPanel
+							languageCode={expandedThreadData.data?.thread?.lecture_language_code}
 							{classId}
 							{threadId}
 							messages={$messages}

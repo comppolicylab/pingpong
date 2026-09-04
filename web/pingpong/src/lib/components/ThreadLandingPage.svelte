@@ -324,6 +324,14 @@
 		replaceState(`${url.pathname}${url.search}`, $page.state);
 		const generation = ++translationRequestGeneration;
 		await refreshLectureTranslationStatus(assistant.id, languageCode, generation);
+		if (
+			generation === translationRequestGeneration &&
+			canPrepareLectureTranslation &&
+			(lectureTranslationStatus as api.LectureSlideTranslationStatusResponse | null)?.status ===
+				'not_started'
+		) {
+			await prepareLectureTranslation();
+		}
 	};
 
 	const prepareLectureTranslation = async () => {
