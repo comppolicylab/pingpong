@@ -11,22 +11,21 @@ os.environ["CONFIG_PATH"] = "test_config.toml"
 
 def pytest_configure():
     """Give each pytest-xdist worker its own stateful test resources."""
+    from pingpong.config import config
+
+    config.authz.host = "127.0.0.1"
+    config.authz.port = 0
+    config.authz.__dict__.pop("driver", None)
+
     worker_id = os.environ.get("PYTEST_XDIST_WORKER")
     if worker_id is None:
         return
-
-    worker_number = int(worker_id.removeprefix("gw"))
-
-    from pingpong.config import config
 
     db_path = Path(config.db.path)
     config.db.path = str(
         db_path.with_name(f"{db_path.stem}-{worker_id}{db_path.suffix}")
     )
     config.db.__dict__.pop("driver", None)
-
-    config.authz.port += worker_number
-    config.authz.__dict__.pop("driver", None)
 
 
 @pytest.fixture
@@ -65,13 +64,21 @@ def now(request):
     return lambda: dt
 
 
-@pytest.fixture
-async def authz(request, config):
+@pytest.fixture(scope="session")
+async def mock_fga_server():
+    """Amortize process startup across tests while keeping one server per worker."""
     from pingpong.authz.mock import MockFgaAuthzServer
+    from pingpong.config import config
 
-    params = getattr(request, "param", None)
-    async with MockFgaAuthzServer(config.authz.driver, params) as server:
+    async with MockFgaAuthzServer(config.authz.driver) as server:
         yield server
+
+
+@pytest.fixture
+async def authz(request, config, mock_fga_server):
+    # Reset over HTTP so mutations happen on the server loop before the test.
+    await mock_fga_server.reset(getattr(request, "param", None))
+    yield mock_fga_server
 
 
 @pytest.fixture
