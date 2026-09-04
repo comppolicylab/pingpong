@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import multiprocessing
+import socket
 import time
 from datetime import datetime, timezone
 from typing import Tuple
@@ -26,9 +27,11 @@ class _MockFgaAuthzServer:
         params: dict | None = None,
         host: str = "localhost",
         port: int = 8080,
+        listener: socket.socket | None = None,
     ):
         server = cls(driver, params)
-        uvicorn.run(server.app, host=host, port=port)
+        config = uvicorn.Config(server.app, host=host, port=port, access_log=False)
+        uvicorn.Server(config).run(sockets=[listener] if listener is not None else None)
 
     def __init__(self, driver: OpenFgaAuthzDriver, params: dict | None = None):
         if driver.config.api_scheme != "http":
@@ -63,6 +66,13 @@ class _MockFgaAuthzServer:
         self.app.post(f"/stores/{self._test_store_id}/read")(self._api_read)
         self.app.post(f"/stores/{self._test_store_id}/write")(self._api_write)
         self.app.get("/inspect/calls")(self._api_inspect_calls)
+        self.app.post("/inspect/reset")(self._api_reset)
+
+    async def _api_reset(self, request: Request):
+        self.params = await request.json()
+        self._all_grants = {tuple(grant) for grant in self.params.get("grants", [])}
+        self._all_ops.clear()
+        return None
 
     def _api_stores(self):
         return {
@@ -232,10 +242,33 @@ class MockFgaAuthzServer:
 
     def __init__(self, driver: OpenFgaAuthzDriver, params: dict | None = None):
         host, port = driver.config.api_host.split(":")
-        self._base_url = f"{driver.config.api_scheme}://{host}:{port}"
-        self.proc = multiprocessing.Process(
-            target=_MockFgaAuthzServer.run, args=(driver, params, host, int(port))
-        )
+        # Keep the port reserved until the child owns it. Port 0 gives each
+        # worker an independent port. Never fork a threaded test worker.
+        self._listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            self._listener.bind((host, int(port)))
+            self._listener.listen()
+            port = str(self._listener.getsockname()[1])
+            driver.config.api_host = f"{host}:{port}"
+            self._base_url = f"{driver.config.api_scheme}://{host}:{port}"
+            self.proc = multiprocessing.get_context("spawn").Process(
+                target=_MockFgaAuthzServer.run,
+                args=(driver, params, host, int(port), self._listener),
+            )
+        except BaseException:
+            self._listener.close()
+            raise
+
+    async def reset(self, params: dict | None = None):
+        async with aiohttp.ClientSession(
+            timeout=aiohttp.ClientTimeout(total=5)
+        ) as session:
+            async with session.post(
+                f"{self._base_url}/inspect/reset",
+                json=params or {},
+                raise_for_status=True,
+            ) as resp:
+                await resp.read()
 
     async def get_all_calls(self):
         async with aiohttp.ClientSession() as session:
@@ -246,38 +279,46 @@ class MockFgaAuthzServer:
                 return [tuple(t) for t in data["operations"]]
 
     async def __aenter__(self):
-        self.proc.start()
         try:
+            self.proc.start()
             await self._block_until_ready()
         except BaseException:
-            if self.proc.is_alive():
-                self.proc.kill()
-            self.proc.join()
+            self._stop()
             raise
+        finally:
+            self._listener.close()
         return self
 
+    def _stop(self):
+        if self.proc.pid is not None:
+            if self.proc.is_alive():
+                self.proc.kill()
+            self.proc.join(timeout=5)
+            if self.proc.is_alive():
+                raise RuntimeError("Mock FGA server did not stop within 5 seconds.")
+            self.proc.close()
+
     async def __aexit__(self, exc_type, exc_value, traceback):
-        self.proc.kill()
-        self.proc.join()
-        self.proc = None
+        self._stop()
 
     async def _block_until_ready(self):
-        t0 = time.monotonic()
-        while time.monotonic() - t0 < 30:
-            if self.proc.exitcode is not None:
-                raise RuntimeError(
-                    f"Mock FGA server exited during startup with code "
-                    f"{self.proc.exitcode}."
-                )
-            try:
-                async with aiohttp.ClientSession() as session:
+        deadline = time.monotonic() + 30
+        async with aiohttp.ClientSession(
+            timeout=aiohttp.ClientTimeout(total=1)
+        ) as session:
+            while time.monotonic() < deadline:
+                if self.proc.exitcode is not None:
+                    raise RuntimeError(
+                        f"Mock FGA server exited during startup with code "
+                        f"{self.proc.exitcode}."
+                    )
+                try:
                     async with session.get(
                         f"{self._base_url}/stores", raise_for_status=True
                     ) as resp:
                         if resp.status == 200:
                             return
-            except aiohttp.ClientError:
-                # Service may still be starting; retry until timeout.
-                pass
-            await asyncio.sleep(0.1)
+                except (aiohttp.ClientError, asyncio.TimeoutError):
+                    pass
+                await asyncio.sleep(0.01)
         raise TimeoutError("Mock FGA server did not become ready within 30 seconds.")

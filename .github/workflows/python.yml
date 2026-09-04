@@ -3,10 +3,10 @@ name: Python
 on:
   push:
     branches: [main]
-    paths: [pingpong/**, conftest.py, uv.lock, pyproject.toml, .github/workflows/**]
+    paths: [pingpong/**, conftest.py, pytest.ini, test_config.toml, .pre-commit-config.yaml, uv.lock, pyproject.toml, .github/workflows/**]
   pull_request:
     branches: [main]
-    paths: [pingpong/**, conftest.py, uv.lock, pyproject.toml, .github/workflows/**]
+    paths: [pingpong/**, conftest.py, pytest.ini, test_config.toml, .pre-commit-config.yaml, uv.lock, pyproject.toml, .github/workflows/**]
 
 jobs:
   build:
@@ -43,6 +43,12 @@ jobs:
         working-directory: ${{env.wd}}
         run: |
           uv sync --locked --color never
+
+      - name: Cache pre-commit environments
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/pre-commit
+          key: pre-commit-${{ runner.os }}-${{ runner.arch }}-${{ steps.py.outputs.python-version }}-${{ hashFiles('.pre-commit-config.yaml') }}
 
       - name: Linting, formatting, and type checking
         working-directory: ${{env.wd}}
