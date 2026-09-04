@@ -1,6 +1,7 @@
 <script lang="ts">
 	let {
 		src,
+		onready = () => {},
 		offsetMs,
 		startOffsetMs,
 		endOffsetMs,
@@ -8,6 +9,7 @@
 		paused
 	}: {
 		src: string;
+		onready?: () => void;
 		offsetMs: number;
 		startOffsetMs: number;
 		endOffsetMs: number;
@@ -35,5 +37,13 @@
 	});
 </script>
 
-<video bind:this={video} {src} muted playsinline preload="auto" class="h-full w-full object-contain"
+<video
+	onloadeddata={onready}
+	onerror={onready}
+	bind:this={video}
+	{src}
+	muted
+	playsinline
+	preload="auto"
+	class="h-full w-full object-contain"
 ></video>
