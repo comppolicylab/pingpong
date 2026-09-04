@@ -89,6 +89,7 @@
 	} from '$lib/utils/lecture-video';
 	import { preloadLectureSlideGif } from '$lib/utils/lecture-slide-gif';
 	import LectureSlideTimedGif from '$lib/components/lecture-video/LectureSlideTimedGif.svelte';
+	import LectureSlideVisual from '$lib/components/lecture-video/LectureSlideVisual.svelte';
 	import LectureSlideTimedVideo from '$lib/components/lecture-video/LectureSlideTimedVideo.svelte';
 	import { LECTURE_CHAT_TTS_VOLUME_SCALE } from '$lib/components/lecture-video/audio-levels';
 	import LectureVideoChatPanel from '$lib/components/lecture-video/LectureVideoChatPanel.svelte';
@@ -261,14 +262,6 @@
 				? api.getLectureSlidePageImageUrl(classId, threadId, page.id)
 				: null)
 		);
-	}
-	function lectureSlideGifFallbackUrl(page: api.LectureSlidePage | null): string | null {
-		if (!page) return null;
-		if (page.content_kind === 'slide') return lectureSlidePageImageUrl(page);
-		if (page.content_kind === 'image' && page.media_url) {
-			return api.withMediaAuthQuery(page.media_url);
-		}
-		return null;
 	}
 	function lectureSlidePageIndex(page: api.LectureSlidePage): number {
 		return lectureSlidePages.findIndex((item: api.LectureSlidePage) => item.id === page.id);
@@ -1918,61 +1911,73 @@
 				)}
 					{@const visiblePage = lectureSlidePageAtOffset(offsetMs, questionBoundaryMs)}
 					{@const visiblePageIndex = visiblePage ? lectureSlidePageIndex(visiblePage) : -1}
-					{@const previousPage =
-						visiblePageIndex > 0 ? lectureSlidePages[visiblePageIndex - 1] : null}
 					{@const slideImageUrl = visiblePage ? lectureSlidePageImageUrl(visiblePage) : null}
 					{@const displayOffsetMs = visiblePage
 						? getLectureSlideDisplayOffsetMs(visiblePage, offsetMs, questionBoundaryMs)
 						: offsetMs}
 					<div class="flex h-full w-full items-center justify-center bg-black">
 						{#if visiblePage}
-							{#if visiblePage.content_kind === 'video' && visiblePage.media_url && visiblePage.start_offset_ms != null && visiblePage.end_offset_ms != null}
-								<LectureSlideTimedVideo
-									src={api.withMediaAuthQuery(visiblePage.media_url)}
-									offsetMs={displayOffsetMs}
-									startOffsetMs={visiblePage.start_offset_ms}
-									endOffsetMs={visiblePage.end_offset_ms}
-									{timelineMedia}
-									paused={playbackPaused}
-								/>
-							{:else if visiblePage.content_kind === 'gif' && visiblePage.media_url && visiblePage.start_offset_ms != null && visiblePage.end_offset_ms != null}
-								<LectureSlideTimedGif
-									src={api.withMediaAuthQuery(visiblePage.media_url)}
-									fallbackSrc={lectureSlideGifFallbackUrl(previousPage)}
-									offsetMs={displayOffsetMs}
-									startOffsetMs={visiblePage.start_offset_ms}
-									endOffsetMs={visiblePage.end_offset_ms}
-									{timelineMedia}
-									{timelineMediaBaseOffsetMs}
-									paused={playbackPaused}
-								/>
-							{:else if visiblePage.media_url}
-								<img
-									src={api.withMediaAuthQuery(visiblePage.media_url)}
-									alt={`${visiblePage.content_kind} ${visiblePageIndex + 1}`}
-									class="h-full w-full object-contain"
-								/>
-							{:else if slideImageUrl}
-								<img
-									src={slideImageUrl}
-									alt={`Slide ${visiblePageIndex + 1}`}
-									class="h-full w-full object-contain"
-									onload={(event) => handleLectureSlideImageLoad(event, slideImageUrl)}
-								/>
-							{:else}
-								<div
-									class="flex aspect-video w-full max-w-5xl items-center justify-center bg-slate-100 px-8 text-center text-slate-800"
-								>
-									<div>
-										<div class="text-xs font-semibold tracking-widest text-slate-500 uppercase">
-											Slide {visiblePageIndex + 1}
+							<LectureSlideVisual
+								contentKey={`${classId}:${threadId}:${visiblePage.id}:${visiblePage.media_url ?? slideImageUrl}`}
+							>
+								{#snippet children(onready)}
+									{#if visiblePage.content_kind === 'video' && visiblePage.media_url && visiblePage.start_offset_ms != null && visiblePage.end_offset_ms != null}
+										<LectureSlideTimedVideo
+											{onready}
+											src={api.withMediaAuthQuery(visiblePage.media_url)}
+											offsetMs={displayOffsetMs}
+											startOffsetMs={visiblePage.start_offset_ms}
+											endOffsetMs={visiblePage.end_offset_ms}
+											{timelineMedia}
+											paused={playbackPaused}
+										/>
+									{:else if visiblePage.content_kind === 'gif' && visiblePage.media_url && visiblePage.start_offset_ms != null && visiblePage.end_offset_ms != null}
+										<LectureSlideTimedGif
+											{onready}
+											src={api.withMediaAuthQuery(visiblePage.media_url)}
+											offsetMs={displayOffsetMs}
+											startOffsetMs={visiblePage.start_offset_ms}
+											endOffsetMs={visiblePage.end_offset_ms}
+											{timelineMedia}
+											{timelineMediaBaseOffsetMs}
+											paused={playbackPaused}
+										/>
+									{:else if visiblePage.media_url}
+										<img
+											src={api.withMediaAuthQuery(visiblePage.media_url)}
+											onload={onready}
+											onerror={onready}
+											alt={`${visiblePage.content_kind} ${visiblePageIndex + 1}`}
+											class="h-full w-full object-contain"
+										/>
+									{:else if slideImageUrl}
+										<img
+											src={slideImageUrl}
+											alt={`Slide ${visiblePageIndex + 1}`}
+											class="h-full w-full object-contain"
+											onload={(event) => {
+												handleLectureSlideImageLoad(event, slideImageUrl);
+												onready();
+											}}
+											onerror={onready}
+										/>
+									{:else}
+										<div
+											{@attach () => onready()}
+											class="flex aspect-video w-full max-w-5xl items-center justify-center bg-slate-100 px-8 text-center text-slate-800"
+										>
+											<div>
+												<div class="text-xs font-semibold tracking-widest text-slate-500 uppercase">
+													Slide {visiblePageIndex + 1}
+												</div>
+												<div class="mt-3 text-2xl font-semibold">
+													{lectureSlideDeck?.display_name || 'Lecture Slides'}
+												</div>
+											</div>
 										</div>
-										<div class="mt-3 text-2xl font-semibold">
-											{lectureSlideDeck?.display_name || 'Lecture Slides'}
-										</div>
-									</div>
-								</div>
-							{/if}
+									{/if}
+								{/snippet}
+							</LectureSlideVisual>
 						{:else}
 							<div class="flex flex-col items-center gap-2 px-6 text-center text-slate-300">
 								<div class="text-sm font-semibold text-white">Slide content unavailable</div>

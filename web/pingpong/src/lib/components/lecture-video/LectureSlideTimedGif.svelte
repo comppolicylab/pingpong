@@ -10,6 +10,7 @@
 	let {
 		src,
 		fallbackSrc = null,
+		onready = () => {},
 		offsetMs,
 		startOffsetMs,
 		endOffsetMs,
@@ -19,6 +20,7 @@
 	}: {
 		src: string;
 		fallbackSrc?: string | null;
+		onready?: () => void;
 		offsetMs: number;
 		startOffsetMs: number;
 		endOffsetMs: number;
@@ -127,6 +129,7 @@
 		context.clearRect(0, 0, canvas.width, canvas.height);
 		context.drawImage(compositionCanvas, 0, 0);
 		hasRenderedFrame = true;
+		onready();
 	}
 
 	$effect(() => {
@@ -152,6 +155,7 @@
 				if (!cancelled) {
 					console.error('Could not decode lecture slide GIF', error);
 					loadFailed = true;
+					onready();
 				}
 			}
 		})();
