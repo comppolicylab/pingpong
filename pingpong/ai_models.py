@@ -7,6 +7,30 @@ logger = logging.getLogger(__name__)
 KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
     # ----------------- Latest Models ----------------
     #
+    # ---------------   GPT-6 Family   ---------------
+    #
+    "gpt-6-astra": {
+        "name": "GPT-6 Astra",
+        "sort_order": 0.0,
+        "type": "chat",
+        "is_new": True,
+        "highlight": False,
+        "is_latest": True,
+        "supports_vision": True,
+        "supports_file_search": True,
+        "supports_code_interpreter": True,
+        "supports_temperature": False,
+        "supports_reasoning": True,
+        "supports_classic_assistants": False,
+        "supports_next_gen_assistants": True,
+        "supports_minimal_reasoning_effort": False,
+        "supports_none_reasoning_effort": False,
+        "supports_verbosity": True,
+        "supports_web_search": True,
+        "supports_mcp_server": True,
+        "description": "Most capable model for complex reasoning and demanding work.",
+    },
+    #
     # ---------------   GPT-5 Family   ---------------
     #
     "gpt-5.6-sol": {
@@ -29,7 +53,7 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
         "supports_verbosity": True,
         "supports_web_search": True,
         "supports_mcp_server": True,
-        "description": "Frontier model for the most complex work.",
+        "description": "GPT-5.6 flagship model for complex work. Choose GPT-6 Astra for the most demanding tasks.",
     },
     "gpt-5.6-terra": {
         "name": "GPT-5.6 Terra",
@@ -95,7 +119,7 @@ KNOWN_MODELS: dict[str, schemas.AssistantModelDict] = {
         "supports_verbosity": False,
         "supports_web_search": True,
         "supports_mcp_server": True,
-        "description": "The latest Instant model used in ChatGPT. GPT-5.6 is recommended for most use cases.",
+        "description": "The latest Instant model used in ChatGPT. Choose GPT-6 Astra for complex tasks or GPT-5.6 Terra to balance intelligence and cost.",
     },
     "gpt-5.5": {
         "name": "GPT-5.5",
