@@ -534,7 +534,7 @@
 	$effect(() => {
 		if (!browser) return;
 
-		const mediaQuery = window.matchMedia('(min-width: 1280px)');
+		const mediaQuery = window.matchMedia('(min-width: 900px)');
 		const updateLayout = () => {
 			isDesktopLayout = mediaQuery.matches;
 		};
@@ -2293,11 +2293,11 @@
 		class="lecture-fullscreen-root h-full w-full overflow-hidden"
 	>
 		<div
-			class={`lecture-layout mx-auto flex h-full w-full max-w-screen-2xl flex-col gap-6 px-4 py-4 lg:px-6 xl:grid xl:grid-cols-5 xl:items-stretch xl:justify-center xl:gap-8 xl:py-6 ${groupArchived || lessonUpdated ? 'xl:grid-rows-[auto_minmax(0,1fr)]' : ''}`}
+			class={`lecture-layout mx-auto flex h-full w-full max-w-screen-2xl flex-col gap-6 px-4 py-4 min-[900px]:grid min-[900px]:grid-cols-5 min-[900px]:items-stretch min-[900px]:justify-center min-[900px]:gap-8 min-[900px]:py-6 lg:px-6 ${groupArchived || lessonUpdated ? 'min-[900px]:grid-rows-[auto_minmax(0,1fr)]' : ''}`}
 		>
 			{#if groupArchived || lessonUpdated}
 				<div
-					class="lecture-status-banner flex shrink-0 flex-row items-center justify-between rounded-2xl border border-slate-200 bg-slate-50 p-4 text-slate-800 xl:col-span-5"
+					class="lecture-status-banner flex shrink-0 flex-row items-center justify-between rounded-2xl border border-slate-200 bg-slate-50 p-4 text-slate-800 min-[900px]:col-span-5"
 				>
 					<div class="flex gap-3">
 						<div
@@ -2331,7 +2331,7 @@
 				</div>
 			{/if}
 			<div
-				class="lecture-media-col col-span-3 flex max-h-[40%] min-h-0 min-w-0 shrink-0 flex-col gap-4 xl:[container-type:size] xl:h-full xl:max-h-none xl:shrink"
+				class="lecture-media-col col-span-3 flex max-h-[40%] min-h-0 min-w-0 shrink-0 flex-col gap-4 min-[900px]:[container-type:size] min-[900px]:h-full min-[900px]:max-h-none min-[900px]:shrink"
 			>
 				{#if !canParticipate && showParticipantNotice}
 					<div
@@ -2350,7 +2350,7 @@
 				{:else if !isCompleted || canParticipate}
 					{#if lessonUpdated}
 						<div
-							class="mx-auto flex min-h-0 w-full max-w-[calc((40dvh_-_4rem)_*_var(--lecture-media-aspect-ratio)_+_var(--lecture-player-frame-chrome))] shrink-0 items-center justify-center overflow-hidden rounded-3xl border border-slate-200 bg-slate-50 p-6 text-center shadow-sm xl:max-w-[calc((50cqh_-_var(--lecture-player-frame-chrome))_*_var(--lecture-media-aspect-ratio)_+_var(--lecture-player-frame-chrome))]"
+							class="mx-auto flex min-h-0 w-full max-w-[calc((40dvh_-_4rem)_*_var(--lecture-media-aspect-ratio)_+_var(--lecture-player-frame-chrome))] shrink-0 items-center justify-center overflow-hidden rounded-3xl border border-slate-200 bg-slate-50 p-6 text-center shadow-sm min-[900px]:max-w-[calc((50cqh_-_var(--lecture-player-frame-chrome))_*_var(--lecture-media-aspect-ratio)_+_var(--lecture-player-frame-chrome))]"
 							style={playerFrameStyle}
 						>
 							<div class="text-sm leading-6 text-slate-600">
@@ -2360,7 +2360,7 @@
 						</div>
 					{:else}
 						<div
-							class="mx-auto min-h-0 w-full max-w-[calc((40dvh_-_4rem)_*_var(--lecture-media-aspect-ratio)_+_var(--lecture-player-frame-chrome))] shrink-0 overflow-hidden rounded-3xl border border-slate-200 bg-white p-3 shadow-xl xl:max-w-[calc((50cqh_-_var(--lecture-player-frame-chrome))_*_var(--lecture-media-aspect-ratio)_+_var(--lecture-player-frame-chrome))]"
+							class="mx-auto min-h-0 w-full max-w-[calc((40dvh_-_4rem)_*_var(--lecture-media-aspect-ratio)_+_var(--lecture-player-frame-chrome))] shrink-0 overflow-hidden rounded-3xl border border-slate-200 bg-white p-3 shadow-xl min-[900px]:max-w-[calc((50cqh_-_var(--lecture-player-frame-chrome))_*_var(--lecture-media-aspect-ratio)_+_var(--lecture-player-frame-chrome))]"
 							style={playerFrameStyle}
 						>
 							<LectureVideoPlayer
