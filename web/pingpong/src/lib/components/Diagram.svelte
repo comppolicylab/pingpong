@@ -132,6 +132,7 @@
 	let openButton: HTMLButtonElement;
 	let closeButton: HTMLButtonElement;
 	let modalOpen = false;
+	let codeOpen = false;
 	let loading = false;
 	let modalLoading = false;
 	let canPreview = false;
@@ -820,7 +821,7 @@
 			{#if state === 'streaming'}
 				<div class="flex flex-row items-center gap-1.5">
 					<Spinner color="custom" customColor="fill-gray-500" class="h-3 w-3" />
-					<div class="text-xs font-medium text-gray-500">Generating code...</div>
+					<div class="text-xs font-medium text-gray-500">Generating diagram...</div>
 				</div>
 			{/if}
 			{#if canPreview}
@@ -833,18 +834,37 @@
 					<ExpandOutline class="h-4 w-4" />
 				</button>
 			{/if}
-			<button
-				class={actionButtonClass}
-				aria-label={`Copy ${label} code`}
-				onclick={() => {}}
-				use:copy={{ text: source, onCopy: handleCopy }}
-			>
-				<FileCopyOutline class="h-4 w-4" />
-			</button>
+			{#if state === 'streaming'}
+				<button
+					class={actionButtonClass}
+					aria-label={`${codeOpen ? 'Hide' : 'Show'} ${label} code`}
+					aria-expanded={codeOpen}
+					aria-controls={`${diagramId}-code`}
+					onclick={() => (codeOpen = !codeOpen)}
+				>
+					{#if codeOpen}
+						<ChevronUpOutline class="h-4 w-4" />
+					{:else}
+						<ChevronDownOutline class="h-4 w-4" />
+					{/if}
+				</button>
+			{:else}
+				<button
+					class={actionButtonClass}
+					aria-label={`Copy ${label} code`}
+					onclick={() => {}}
+					use:copy={{ text: source, onCopy: handleCopy }}
+				>
+					<FileCopyOutline class="h-4 w-4" />
+				</button>
+			{/if}
 		</div>
 	</div>
 
-	<div class="relative max-w-full min-w-0 overflow-hidden bg-white px-3 py-4">
+	<div
+		class="relative max-w-full min-w-0 overflow-hidden bg-white px-3 py-4"
+		class:hidden={state === 'streaming' && !codeOpen}
+	>
 		<div
 			bind:this={previewViewport}
 			class="relative overflow-hidden rounded-lg border border-gray-100 bg-gray-50/40"
@@ -914,9 +934,17 @@
 					{error}
 				</div>
 			{/if}
-			<pre class={codeBlockClass}><code class={`language-${codeLanguage}`}
-					><Sanitize html={highlightedCode} /></code
-				></pre>
+			<details bind:open={codeOpen}>
+				<summary
+					class="cursor-pointer text-sm font-medium text-gray-600"
+					class:hidden={state === 'streaming'}>Show code</summary
+				>
+				<div id={`${diagramId}-code`} class:mt-3={state !== 'streaming'}>
+					<pre class={codeBlockClass}><code class={`language-${codeLanguage}`}
+							><Sanitize html={highlightedCode} /></code
+						></pre>
+				</div>
+			</details>
 		{/if}
 	</div>
 </div>
