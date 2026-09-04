@@ -3924,6 +3924,28 @@ class LectureSlideTranslationPage(Base):
     )
 
 
+class LectureSlideTranslationNarration(Base):
+    """Translated speech only; the source question and choices remain unchanged."""
+
+    __tablename__ = "lecture_slide_translation_narrations"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    translation_id: Mapped[int] = mapped_column(
+        ForeignKey("lecture_slide_translations.id", ondelete="CASCADE"), index=True
+    )
+    source_narration_id: Mapped[int] = mapped_column(
+        ForeignKey("lecture_slide_narrations.id", ondelete="CASCADE")
+    )
+    text: Mapped[str] = mapped_column(Text)
+    tts_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    stored_object_id: Mapped[int | None] = mapped_column(
+        ForeignKey("lecture_slide_narration_stored_objects.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    __table_args__ = (UniqueConstraint("translation_id", "source_narration_id"),)
+
+
 class LectureSlideTranslationRun(Base):
     __tablename__ = "lecture_slide_translation_runs"
 

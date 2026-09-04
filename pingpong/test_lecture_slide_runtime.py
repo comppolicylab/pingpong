@@ -1673,13 +1673,17 @@ async def test_lecture_slide_continuous_narration_endpoint_streams_audio_range(
     assert b"".join(chunks) == audio[2:6]
 
 
+@pytest.mark.parametrize("translated", [False, True])
+@pytest.mark.parametrize("feedback", [False, True])
 @with_institution(11, "Test Institution")
 async def test_lecture_slide_question_narration_endpoint_streams_allowed_audio(
-    db, institution, monkeypatch
+    db, institution, monkeypatch, translated, feedback
 ):
     class FakeAudioStore:
         async def stream_file_range(self, *, key, start=None, end=None):
-            assert key == "slides/question.ogg"
+            assert key == (
+                "slides/es-question.ogg" if translated else "slides/question.ogg"
+            )
             assert start is None
             assert end is None
             yield b"question-audio"
@@ -1710,10 +1714,18 @@ async def test_lecture_slide_question_narration_endpoint_streams_allowed_audio(
             stored_object=stored_object,
             status=schemas.LectureSlideNarrationStatus.READY,
         )
-        questions[0].intro_narration = narration
+        if feedback:
+            questions[0].options[0].post_narration = narration
+        else:
+            questions[0].intro_narration = narration
         state = models.LectureSlideThreadState(
             thread=thread,
-            state=schemas.InteractiveLessonSessionState.AWAITING_ANSWER,
+            state=(
+                schemas.InteractiveLessonSessionState.AWAITING_POST_ANSWER_RESUME
+                if feedback
+                else schemas.InteractiveLessonSessionState.AWAITING_ANSWER
+            ),
+            active_option=questions[0].options[0] if feedback else None,
             current_question=questions[0],
             last_known_offset_ms=questions[0].stop_offset_ms,
             furthest_offset_ms=questions[0].stop_offset_ms,
@@ -1721,6 +1733,52 @@ async def test_lecture_slide_question_narration_endpoint_streams_allowed_audio(
         )
         session.add_all([stored_object, narration, state])
         await session.flush()
+
+        if translated:
+            translated_audio = models.LectureSlideNarrationStoredObject(
+                key="slides/es-question.ogg",
+                content_type="audio/ogg",
+                content_length=14,
+                duration_ms=1000,
+            )
+            caption = models.LectureSlideCaptionStoredObject(
+                key="slides/es.vtt",
+                content_type="text/vtt",
+                content_length=1,
+            )
+            page = models.LectureSlidePage(
+                lecture_slide_deck=_deck,
+                position=questions[0].slide_position,
+            )
+            translation = models.LectureSlideTranslation(
+                lecture_slide_deck=_deck,
+                language_code="es",
+                language_name="Spanish",
+                openai_model="gpt-4.1-mini",
+                status=schemas.LectureSlideTranslationStatus.READY,
+                continuous_narration_stored_object=translated_audio,
+                caption_stored_object=caption,
+                total_duration_ms=1000,
+                pages=[
+                    models.LectureSlideTranslationPage(
+                        position=questions[0].slide_position,
+                        start_offset_ms=0,
+                        end_offset_ms=1000,
+                    )
+                ],
+            )
+            thread.lecture_slide_translation = translation
+            session.add_all([translated_audio, caption, page, translation])
+            await session.flush()
+            session.add(
+                models.LectureSlideTranslationNarration(
+                    translation_id=translation.id,
+                    source_narration_id=narration.id,
+                    text="Elige una respuesta.",
+                    stored_object_id=translated_audio.id,
+                )
+            )
+            await session.flush()
 
         response = await server_module.get_thread_lecture_slide_narration(
             str(class_.id),

@@ -1949,6 +1949,16 @@ async def _delete_lecture_slide_narration_stored_objects_if_unused(
         ).all()
     )
 
+    referenced_stored_object_ids.update(
+        await session.scalars(
+            select(models.LectureSlideTranslationNarration.stored_object_id).where(
+                models.LectureSlideTranslationNarration.stored_object_id.in_(
+                    stored_object_ids
+                )
+            )
+        )
+    )
+
     unused_stored_object_ids = [
         id_ for id_ in stored_object_ids if id_ not in referenced_stored_object_ids
     ]
@@ -2314,6 +2324,33 @@ async def delete_lecture_slide_deck_if_unused(
                 models.LectureSlideTranslationRun.translation_id.in_(translation_ids)
             )
             .values(translation_id=None)
+        )
+        translation_audio_rows.extend(
+            (
+                await session.execute(
+                    select(
+                        models.LectureSlideTranslationNarration.stored_object_id,
+                        models.LectureSlideNarrationStoredObject.key,
+                    )
+                    .join(
+                        models.LectureSlideNarrationStoredObject,
+                        models.LectureSlideTranslationNarration.stored_object_id
+                        == models.LectureSlideNarrationStoredObject.id,
+                    )
+                    .where(
+                        models.LectureSlideTranslationNarration.translation_id.in_(
+                            translation_ids
+                        )
+                    )
+                )
+            ).all()
+        )
+        await session.execute(
+            delete(models.LectureSlideTranslationNarration).where(
+                models.LectureSlideTranslationNarration.translation_id.in_(
+                    translation_ids
+                )
+            )
         )
         await session.execute(
             delete(models.LectureSlideTranslationPage).where(

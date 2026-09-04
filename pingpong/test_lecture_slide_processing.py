@@ -4965,3 +4965,190 @@ async def test_persist_slide_manifest_defers_untimed_manual_question_rows(db):
         # ...and remains untimed (NULL offsets) for the re-timer to fill.
         assert deck.questions[0].slide_offset_ms is None
         assert deck.questions[0].stop_offset_ms is None
+
+
+async def test_translation_prepares_feedback_and_reuses_audio(db, monkeypatch):
+    async with db.async_session() as session:
+        class_ = models.Class(id=1, name="Slide Class", api_key="sk-test")
+        deck = _deck(status=schemas.LectureSlideDeckStatus.READY)
+        deck.class_ = class_
+        question = models.LectureSlideQuestion(
+            lecture_slide_deck=deck,
+            position=0,
+            slide_position=0,
+            question_type=schemas.LectureSlideQuestionType.SINGLE_SELECT,
+            question_text="Original question",
+            intro_text="Choose an answer.",
+            intro_narration=models.LectureSlideNarration(
+                status=schemas.LectureSlideNarrationStatus.READY
+            ),
+        )
+        option = models.LectureSlideQuestionOption(
+            question=question,
+            position=0,
+            option_text="Original choice",
+            post_answer_text="Correct, well done.",
+            post_narration=models.LectureSlideNarration(
+                status=schemas.LectureSlideNarrationStatus.READY
+            ),
+        )
+        translation = models.LectureSlideTranslation(
+            lecture_slide_deck=deck,
+            language_code="es",
+            language_name="Spanish",
+            openai_model="gpt-4.1-mini",
+            status=schemas.LectureSlideTranslationStatus.PROCESSING,
+        )
+        run = models.LectureSlideTranslationRun(
+            translation=translation,
+            translation_id_snapshot=0,
+            attempt_number=1,
+            stage=schemas.LectureSlideTranslationStage.NARRATION_AUDIO,
+            status=schemas.LectureSlideTranslationRunStatus.RUNNING,
+            lease_token="token",
+            total_parts=1,
+        )
+        session.add_all([class_, deck, question, option, translation, run])
+        await session.flush()
+        run.translation_id_snapshot = translation.id
+        await session.commit()
+        translation_id, run_id, question_id, option_id = (
+            translation.id,
+            run.id,
+            question.id,
+            option.id,
+        )
+
+    parse_calls, speech_calls = [], []
+
+    async def parse(_client, **kwargs):
+        message = kwargs["input_messages"][0]["content"][0]["text"]
+        items = json.loads(message[message.index("[{") :])
+        parse_calls.append(items)
+        assert {item["narration_text"] for item in items} == {
+            "Choose an answer.",
+            "Correct, well done.",
+        }
+        return kwargs["response_model"].model_validate(
+            {
+                "slides": [
+                    {
+                        "slide_position": item["slide_position"],
+                        "narration_text": f"Español {item['narration_text']}",
+                    }
+                    for item in items
+                ]
+            }
+        )
+
+    async def heartbeat(_run_id, _token, awaitable):
+        return await awaitable
+
+    async def client(*args):
+        return object()
+
+    async def api_key(*args):
+        return "key"
+
+    async def synthesize(_key, _voice, text, **kwargs):
+        assert kwargs["language_code"] == "es"
+        speech_calls.append(text)
+        return SimpleNamespace(audio=b"audio", content_type="audio/webm")
+
+    async def store(key, content_type, audio):
+        return key, len(audio)
+
+    monkeypatch.setattr(lecture_slide_processing, "_parse_responses_output", parse)
+    monkeypatch.setattr(
+        lecture_slide_processing, "_await_with_translation_lease_heartbeat", heartbeat
+    )
+    monkeypatch.setattr(
+        lecture_slide_processing, "get_openai_client_by_class_id", client
+    )
+    monkeypatch.setattr(lecture_slide_processing, "_get_elevenlabs_api_key", api_key)
+    monkeypatch.setattr(
+        lecture_slide_processing,
+        "synthesize_elevenlabs_speech_with_timings",
+        synthesize,
+    )
+    monkeypatch.setattr(lecture_slide_processing, "_store_audio", store)
+    monkeypatch.setattr(
+        lecture_slide_processing, "audio_duration_ms", lambda *args: 100
+    )
+
+    for _ in range(2):
+        assert await lecture_slide_processing._prepare_translation_feedback(
+            run_id, "token", translation_id
+        )
+    assert len(parse_calls) == 1
+    assert speech_calls == ["Español Choose an answer.", "Español Correct, well done."]
+    async with db.async_session() as session:
+        translation = await session.get(models.LectureSlideTranslation, translation_id)
+        assert not await lecture_slide_processing.translation_needs_feedback(
+            session, translation
+        )
+        question = await session.get(models.LectureSlideQuestion, question_id)
+        option = await session.get(models.LectureSlideQuestionOption, option_id)
+        assert question.question_text == "Original question"
+        assert option.option_text == "Original choice"
+        assert option.post_answer_text == "Correct, well done."
+        rows = list(
+            await session.scalars(select(models.LectureSlideTranslationNarration))
+        )
+        assert len(rows) == 2
+        assert all(row.stored_object_id is not None for row in rows)
+
+
+@pytest.mark.parametrize("has_feedback", [False, True])
+async def test_ready_legacy_translation_is_queued_once_for_upgrade(db, has_feedback):
+    async with db.async_session() as session:
+        deck = _deck(status=schemas.LectureSlideDeckStatus.READY)
+        translation = models.LectureSlideTranslation(
+            lecture_slide_deck=deck,
+            language_code="es",
+            language_name="Spanish",
+            openai_model="gpt-4.1-mini",
+            status=schemas.LectureSlideTranslationStatus.READY,
+        )
+        if has_feedback:
+            session.add(
+                models.LectureSlideQuestion(
+                    lecture_slide_deck=deck,
+                    position=0,
+                    slide_position=0,
+                    question_type=schemas.LectureSlideQuestionType.SINGLE_SELECT,
+                    question_text="Original question",
+                    intro_text="Choose one.",
+                    intro_narration=models.LectureSlideNarration(
+                        status=schemas.LectureSlideNarrationStatus.READY
+                    ),
+                )
+            )
+        translation.runs = []
+        translation.pages = []
+        deck.pages = []
+        session.add_all([deck, translation])
+        await session.flush()
+        status = lecture_slide_processing.lecture_slide_translation_status_response(
+            translation,
+            language_code="es",
+            needs_reprocessing=await lecture_slide_processing.translation_needs_feedback(
+                session, translation
+            ),
+        )
+        assert status.status == ("not_started" if has_feedback else "ready")
+        for _ in range(2):
+            await lecture_slide_processing.queue_lecture_slide_translation(
+                session,
+                deck,
+                language_code="es",
+                language_name="Spanish",
+                openai_model="gpt-4.1-mini",
+            )
+        runs = list(await session.scalars(select(models.LectureSlideTranslationRun)))
+        assert len(runs) == (1 if has_feedback else 0)
+        assert translation.status == (
+            schemas.LectureSlideTranslationStatus.QUEUED
+            if has_feedback
+            else schemas.LectureSlideTranslationStatus.READY
+        )
