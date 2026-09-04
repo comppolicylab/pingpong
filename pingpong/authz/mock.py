@@ -319,6 +319,8 @@ class MockFgaAuthzServer:
                         if resp.status == 200:
                             return
                 except (aiohttp.ClientError, asyncio.TimeoutError):
+                    # Requests can fail while the child starts; retry until the
+                    # startup deadline, checking for child exit on each attempt.
                     pass
                 await asyncio.sleep(0.01)
         raise TimeoutError("Mock FGA server did not become ready within 30 seconds.")
