@@ -142,6 +142,63 @@ $$
 		expectLatexAnnotations(rendered, ['V = IR']);
 	});
 
+	it('should parse a standalone equals sign inside display math before Markdown headings', async () => {
+		const rendered = await markdown(
+			String.raw`## Example calculation
+
+$$ \text{Average speed}
+=
+\frac{\text{distance}}{\text{elapsed time}} $$
+
+Use consistent units.`,
+			{ latex: true }
+		);
+
+		expect(rendered).toContain('<h2>Example calculation</h2>');
+		expect(rendered).not.toContain('<h1>');
+		expect(rendered).toContain('<span class="katex-display">');
+		expectLatexAnnotations(rendered, [
+			String.raw`\text{Average speed} = \frac{\text{distance}}{\text{elapsed time}}`
+		]);
+		expect(rendered).toContain('<p>Use consistent units.</p>');
+	});
+
+	it.each([
+		['$$', '$$'],
+		[String.raw`\[`, String.raw`\]`],
+		[String.raw`\begin{equation}`, String.raw`\end{equation}`]
+	])('should keep multiline display math intact with %s delimiters', async (left, right) => {
+		const equation = 'a\n=\nb\n\n+ c';
+		const rendered = await markdown(`${left}\n${equation}\n${right}\n\nAfter.`, { latex: true });
+
+		expect(rendered).toContain('<span class="katex-display">');
+		expect(rendered).not.toContain('<h1>');
+		expectLatexAnnotations(rendered, [
+			left.startsWith('\\begin') ? `${left}\n${equation}\n${right}` : equation
+		]);
+		expect(rendered).toContain('<p>After.</p>');
+	});
+
+	it('should preserve prose following display math on the same line', async () => {
+		const rendered = await markdown('$$a = b$$ and then $c$.', { latex: true });
+
+		expect(rendered).toContain('<p><span class="katex-display">');
+		expect(rendered).toContain(' and then ');
+		expectLatexAnnotations(rendered, ['a = b', 'c']);
+	});
+
+	it('should leave math inside code and unclosed display delimiters unrendered', async () => {
+		const rendered = await markdown('`$$a = b$$`\n\n```text\n$$a\n=\nb$$\n```\n\n$$unfinished', {
+			latex: true,
+			syntax: false
+		});
+
+		expect(rendered).not.toContain('class="katex');
+		expect(rendered).toContain('<code>$$a = b$$</code>');
+		expect(rendered).toContain('$$a\n=\nb$$');
+		expect(rendered).toContain('<p>$$unfinished</p>');
+	});
+
 	it('should render block LaTeX in this test case that failed somehow', async () => {
 		const rendered = await markdown(
 			`
