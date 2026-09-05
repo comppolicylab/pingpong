@@ -76,7 +76,8 @@ const escapeHtml = (str: string) => {
  */
 const markedKatexExtension = (
 	delimiters: MarkedKatexOptions['delimiters'],
-	options: KatexOptions
+	options: KatexOptions,
+	level: 'block' | 'inline' = 'inline'
 ) => {
 	const delims = delimiters.map((delimiter) => {
 		const { left, right, display, preserve } = delimiter;
@@ -86,19 +87,19 @@ const markedKatexExtension = (
 	});
 	return {
 		name: 'katex',
-		// HACK(jnu): the level is *always* `inline` even when we're going to render in block
-		// mode in order to force Marked to render "display mode" KaTeX inside of inline elements,
-		// such as list items. It doesn't always look great, but it's better than not rendering
-		// the KaTeX at all in these cases.
-		level: 'inline' as const,
+		// Parse standalone display math before Markdown can split its contents into
+		// headings or other blocks. Keep inline support for math embedded in prose.
+		level,
 		start(src: string) {
 			// Find the first occurrence of any possible delimiter in the string.
 			// The string might contain multiple delimiters, or none.
 			let earliestMatch = Infinity;
 			for (const { startDelim } of delims) {
-				const match = src.match(startDelim);
+				const match = src.match(
+					level === 'block' ? new RegExp(`\n(?=${startDelim.source})`) : startDelim
+				);
 				if (match && match.index !== undefined) {
-					earliestMatch = Math.min(earliestMatch, match.index);
+					earliestMatch = Math.min(earliestMatch, match.index + (level === 'block' ? 1 : 0));
 				}
 			}
 
@@ -149,7 +150,10 @@ const markedKatexExtension = (
 					const raw = src.substring(0, i + endMatch[0].length);
 					// Descend into the rest of the string to parse any additional LaTeX.
 					const restOfString = src.substring(raw.length);
-					if (restOfString.trim().length > 0) {
+					if (level === 'block' && !/^[\t ]*(?:\n|$)/.test(restOfString)) {
+						return undefined;
+					}
+					if (level === 'inline' && restOfString.trim().length > 0) {
 						// @ts-expect-error: The `lexer` is added by Marked.
 						this.lexer.inline(restOfString, []);
 					}
@@ -189,6 +193,13 @@ const markedKatexExtension = (
 export const markedKatex = (options: Partial<MarkedKatexOptions> = {}) => {
 	const opts = { ...DEFAULT_OPTIONS, ...options };
 	return {
-		extensions: [markedKatexExtension(opts.delimiters, opts)]
+		extensions: [
+			markedKatexExtension(opts.delimiters, opts),
+			markedKatexExtension(
+				opts.delimiters.filter((delimiter) => delimiter.display),
+				opts,
+				'block'
+			)
+		]
 	};
 };
