@@ -228,16 +228,16 @@ wheels = [
 
 [[package]]
 name = "alembic"
-version = "1.19.1"
+version = "1.19.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "mako" },
     { name = "sqlalchemy" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/16/2b/e4153978368de59918115c9e01d3ebf58a558a7285efa7e960c383c4b59a/alembic-1.19.1.tar.gz", hash = "sha256:e0fca0518118c78acc493e31bcb5402f190057aaf6df8b5b95ce94c4789cf648", size = 2070816, upload-time = "2026-08-08T16:32:01.565Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/34/10/181eecdd552217d0342492bd6f3b8a96e973083379aace3d3402830ddc03/alembic-1.19.2.tar.gz", hash = "sha256:297950a8a91f6770eb82bfbce9bea55c728b90a5386c6e81430191a319d138b0", size = 2082643, upload-time = "2026-09-04T17:10:11.212Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/20/89/e62cc37b69ad357cc8ecd6e7367f5245f523d3cbb338a66197212bdf6749/alembic-1.19.1-py3-none-any.whl", hash = "sha256:b39018cb3d9413a19cbd54cf3c02ad33998641f0538eb77413a488a21c3e14be", size = 265946, upload-time = "2026-08-08T16:32:03.153Z" },
+    { url = "https://files.pythonhosted.org/packages/9c/cb/9014784dcb0585977ae23b6f43331d0a33c51ac0d692506d12b4f5ee9f3b/alembic-1.19.2-py3-none-any.whl", hash = "sha256:32d553dcd577e6fe5c3c63e91468526d35e4dcecafe865d7db4e9b328fa93cb2", size = 267399, upload-time = "2026-09-04T17:10:12.796Z" },
 ]
 
 [[package]]
@@ -833,7 +833,7 @@ wheels = [
 
 [[package]]
 name = "elevenlabs"
-version = "2.65.0"
+version = "2.66.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "httpx" },
@@ -843,9 +843,9 @@ dependencies = [
     { name = "typing-extensions" },
     { name = "websockets" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/87/3d/377b384f02a773ce49be063e1200b696fae0348842d5abb42fe247af993f/elevenlabs-2.65.0.tar.gz", hash = "sha256:3c35174df6c1962b8344b6d57f939bd4d79ac83d202ad31c768b6a387d1f5d0c", size = 794837, upload-time = "2026-08-25T19:07:17.752Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/cf/e2/191439b42753b350cd41be78e2ee32015793215546fd8c1f4c3ad6642805/elevenlabs-2.66.0.tar.gz", hash = "sha256:6372efd76710e82013a388585a6b8a1aada2f8c91046ee0105afe67565cea291", size = 805355, upload-time = "2026-09-02T13:21:25.711Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/68/c1/77d6e1320bfe96d71e49d238395e52d8e39920d86ecb2d6fdd1d9b70364a/elevenlabs-2.65.0-py3-none-any.whl", hash = "sha256:23589c7e674f6e0f818cb3e9c8df31a4ab1029917f9843154cd4ef38ba55c389", size = 2103478, upload-time = "2026-08-25T19:07:15.985Z" },
+    { url = "https://files.pythonhosted.org/packages/92/a0/2f063e96602914ec3e4acaa680a51d08a57a96546da6caf4b1dc83d5b63d/elevenlabs-2.66.0-py3-none-any.whl", hash = "sha256:c7bcc1b616887d2e2482e07a2c91640897fc9b7e24d930940abe7336485ba706", size = 2126871, upload-time = "2026-09-02T13:21:23.718Z" },
 ]
 
 [[package]]
@@ -1433,8 +1433,8 @@ name = "httpcore2"
 version = "2.12.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "h11", marker = "python_full_version != '3.12.*' or sys_platform != 'emscripten'" },
-    { name = "truststore", marker = "python_full_version != '3.12.*' or sys_platform != 'emscripten'" },
+    { name = "h11" },
+    { name = "truststore" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/be/ad/f4f0e57345f1870f3e8cb624e058d7eca6e5a27d33bcc3311d9b618734cd/httpcore2-2.12.0.tar.gz", hash = "sha256:9293522bba0aa7c4c8e9e3f040c16575bd8868e155a77fa30c7a9085a5eae648", size = 67548, upload-time = "2026-08-18T13:22:08.211Z" }
 wheels = [
@@ -2470,7 +2470,7 @@ requires-dist = [
     { name = "aiohttp", specifier = "~=3.14.3" },
     { name = "aiosmtplib", specifier = "~=5.1.2" },
     { name = "aiosqlite", specifier = "~=0.22.1" },
-    { name = "alembic", specifier = "~=1.19.1" },
+    { name = "alembic", specifier = "~=1.19.2" },
     { name = "arrow", specifier = "~=1.4.0" },
     { name = "asyncpg", specifier = "~=0.31.0" },
     { name = "audioop-lts", marker = "python_full_version >= '3.13'", specifier = "~=0.2.2" },
@@ -2479,7 +2479,7 @@ requires-dist = [
     { name = "beautifulsoup4", specifier = "~=4.15.0" },
     { name = "cryptography", specifier = "~=50.0.1" },
     { name = "discord-py", specifier = "~=2.7.1" },
-    { name = "elevenlabs", specifier = "~=2.65.0" },
+    { name = "elevenlabs", specifier = "~=2.66.0" },
     { name = "email-validator", specifier = "~=2.3.0" },
     { name = "fastapi", extras = ["standard"], specifier = "~=0.141.1" },
     { name = "google-genai", extras = ["aiohttp"], specifier = "~=1.67.0" },
