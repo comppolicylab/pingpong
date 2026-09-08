@@ -362,6 +362,14 @@ async def synthesize_elevenlabs_voice_sample(
     )
 
 
+def _temporary_unquote_v3_ipa(text: str, model_id: str) -> str:
+    # TEMP #2141: quoted IPA can make v3 say "quote". Apply only at the
+    # synthesis boundary; retain the authored text, IPA conversion, and cache.
+    if model_id != "eleven_v3":
+        return text
+    return re.sub(r'"(/[^/"\r\n]+/)"', r"\1", text)
+
+
 async def synthesize_elevenlabs_speech(
     api_key: str,
     voice_id: str,
@@ -382,7 +390,7 @@ async def synthesize_elevenlabs_speech(
         audio = await _collect_audio_chunks(
             client.text_to_speech.convert(
                 voice_id=voice_id,
-                text=text,
+                text=_temporary_unquote_v3_ipa(text, model_id),
                 model_id=model_id,
                 output_format=ELEVENLABS_VOICE_VALIDATION_OUTPUT_FORMAT,
                 voice_settings=VoiceSettings(
@@ -436,7 +444,7 @@ async def synthesize_elevenlabs_speech_with_timings(
         )
         response = await client.text_to_speech.convert_with_timestamps(
             voice_id=voice_id,
-            text=text,
+            text=_temporary_unquote_v3_ipa(text, model_id),
             model_id=model_id,
             output_format=ELEVENLABS_VOICE_VALIDATION_OUTPUT_FORMAT,
             voice_settings=VoiceSettings(
