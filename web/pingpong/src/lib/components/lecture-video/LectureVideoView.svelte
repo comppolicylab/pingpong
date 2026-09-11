@@ -174,7 +174,6 @@
 
 	// --- UI state ---
 	let scrollToQuestionId: number | null = $state(null);
-	let showQuestionGallery = $state(false);
 	let mediaColumnElement: HTMLDivElement | null = $state(null);
 	let layoutElement: HTMLDivElement | null = $state(null);
 	let questionPanelPercent = $state(40);
@@ -328,6 +327,7 @@
 	let usesAudioSegmentBoundaries = $derived(mediaKind === 'audio' && audioSegments.length > 0);
 	let playbackInteractionAllowed = $derived(allowsPlaybackInteraction(sessionState));
 	let hasQuestionPrompt = $derived(hasVisibleQuestionPrompt(sessionState));
+	let showQuestionGallery = $derived(!introNarrationPending && hasQuestionPrompt);
 	let isCompleted = $derived(isCompletedSession(sessionState));
 	let completedPlaybackReachedEnd = $derived(
 		durationMsOverride == null ||
@@ -555,10 +555,6 @@
 		return () => {
 			mediaQuery.removeEventListener('change', updateLayout);
 		};
-	});
-
-	$effect(() => {
-		showQuestionGallery = !introNarrationPending && hasQuestionPrompt;
 	});
 
 	$effect(() => {
