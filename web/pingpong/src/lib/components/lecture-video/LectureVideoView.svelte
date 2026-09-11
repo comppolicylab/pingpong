@@ -2025,6 +2025,26 @@
 		}
 	}
 
+	async function handleSkipQuestion() {
+		if (
+			!canParticipate ||
+			!controllerSessionId ||
+			!timelineBypassEnabled ||
+			!currentQuestion ||
+			sessionState !== 'awaiting_answer' ||
+			introNarrationPending ||
+			answerSubmissionInFlight ||
+			seekInteractionsInFlight > 0
+		) {
+			return;
+		}
+
+		await handleSeek(currentQuestion.stop_offset_ms + 1, currentTimeMs);
+		if (controllerSessionId && playbackInteractionAllowed && !playbackLocked) {
+			await tryPlayVideo({ queueRetryOnFailure: true });
+		}
+	}
+
 	async function handleSelectOption(optionId: number) {
 		if (
 			!controllerSessionId ||
@@ -2422,7 +2442,10 @@
 								{currentContinuation}
 								{sessionState}
 								{answeredQuestions}
-								answeringDisabled={!canParticipate || introNarrationPending}
+								answeringDisabled={!canParticipate ||
+									introNarrationPending ||
+									seekInteractionsInFlight > 0}
+								onskip={timelineBypassEnabled ? handleSkipQuestion : undefined}
 								{scrollToQuestionId}
 								onselectOption={handleSelectOption}
 								{...continuePromptProps}
@@ -2478,7 +2501,10 @@
 									{currentContinuation}
 									{sessionState}
 									{answeredQuestions}
-									answeringDisabled={!canParticipate || introNarrationPending}
+									answeringDisabled={!canParticipate ||
+										introNarrationPending ||
+										seekInteractionsInFlight > 0}
+									onskip={timelineBypassEnabled ? handleSkipQuestion : undefined}
 									{scrollToQuestionId}
 									onselectOption={handleSelectOption}
 									{...continuePromptProps}

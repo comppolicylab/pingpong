@@ -30,6 +30,7 @@
 		scrollToQuestionId = null,
 		onselectOption,
 		oncontinue,
+		onskip,
 		onscrollcomplete
 	}: {
 		allQuestions: GalleryQuestion[];
@@ -60,6 +61,7 @@
 		scrollToQuestionId: number | null;
 		onselectOption: (optionId: number) => void | Promise<void>;
 		oncontinue?: () => void;
+		onskip?: () => void | Promise<void>;
 		onscrollcomplete: () => void;
 	} = $props();
 
@@ -238,6 +240,7 @@
 								{answeringDisabled}
 								submittingOptionId={activeSubmittingOptionId}
 								onselectOption={selectOption}
+								{onskip}
 								headerTrailing={dots}
 							/>
 						{:else if isCurrentFeedback && currentQuestion && currentContinuation}
