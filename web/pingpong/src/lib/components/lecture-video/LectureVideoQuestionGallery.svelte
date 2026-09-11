@@ -278,9 +278,9 @@
 				>
 					<QuestionCircleOutline class="size-6" />
 				</div>
-				<h2 class="text-sm font-semibold text-slate-900">No comprehension checks yet</h2>
+				<h2 class="text-sm font-semibold text-slate-900">No learning checks yet</h2>
 				<p class="mt-1 max-w-72 text-sm text-slate-500">
-					Comprehension checks will appear here as you reach them in the lecture.
+					Learning checks will appear here as you reach them in the lecture.
 				</p>
 			</div>
 		</div>

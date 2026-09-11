@@ -2018,7 +2018,7 @@
 													class="flex items-center rounded-lg px-1.5 py-1 transition-colors duration-150 ease-out disabled:cursor-default {clusterInteractive
 														? 'cursor-pointer hover:bg-white/10 focus-visible:bg-white/10'
 														: ''}"
-													aria-label={`Show ${cluster.markers.length} comprehension checks`}
+													aria-label={`Show ${cluster.markers.length} learning checks`}
 													aria-expanded={clusterInteractive ? isActive : undefined}
 													disabled={!clusterInteractive}
 													onclick={(e) => {

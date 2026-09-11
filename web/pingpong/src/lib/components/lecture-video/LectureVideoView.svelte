@@ -320,7 +320,7 @@
 				return {
 					id,
 					offsetMs,
-					label: 'Comprehension Check',
+					label: 'Learning Check',
 					state
 				};
 			});
@@ -2452,7 +2452,7 @@
 									{visual}
 									bind:mediaAspectRatio={playerMediaAspectRatio}
 									displayTitle={sessionState === 'awaiting_answer'
-										? 'Answer the comprehension check to continue'
+										? 'Answer the learning check to continue'
 										: title}
 									startOffsetMs={initialStartOffsetMs}
 									{questionMarkers}
@@ -2583,7 +2583,7 @@
 									aria-selected={activeMobilePanel === 'checks'}
 									onclick={() => (activeMobilePanel = 'checks')}
 								>
-									Comprehension Checks
+									Learning Checks
 								</button>
 								<button
 									type="button"

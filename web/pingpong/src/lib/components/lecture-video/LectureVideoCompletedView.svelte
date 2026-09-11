@@ -164,9 +164,9 @@
 					>
 						<ClipboardListOutline class="size-6" />
 					</div>
-					<h2 class="text-sm font-semibold text-slate-900">No comprehension checks</h2>
+					<h2 class="text-sm font-semibold text-slate-900">No learning checks</h2>
 					<p class="mt-1 max-w-72 text-sm text-slate-500">
-						There are no completed comprehension checks to review for this lecture.
+						There are no completed learning checks to review for this lecture.
 					</p>
 				</div>
 			</div>
