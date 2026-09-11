@@ -2014,7 +2014,7 @@ async def test_generate_slide_manifest_rejects_multiple_correct_options(
             id="w1", word="token", start_offset_ms=0, end_offset_ms=1000
         )
     ]
-    with pytest.raises(ValueError, match="exactly one correct"):
+    with pytest.raises(ValueError, match="at most one correct"):
         await lecture_slide_processing._generate_slide_manifest(
             run_id,
             "lease",

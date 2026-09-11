@@ -42,7 +42,7 @@
 		return Math.min(Math.max(value, min), max);
 	}
 
-	type QuestionMarkerState = 'upcoming' | 'correct' | 'incorrect';
+	type QuestionMarkerState = 'upcoming' | 'answered' | 'correct' | 'incorrect';
 	type KeyboardActionIndicator =
 		'play' | 'pause' | 'mute' | 'unmute' | 'skipForward' | 'skipBackward';
 
@@ -84,6 +84,8 @@
 				return 'bg-emerald-400/90';
 			case 'incorrect':
 				return 'bg-rose-400/90';
+			case 'answered':
+				return 'bg-slate-300/90';
 			default:
 				return 'bg-amber-300/90';
 		}
@@ -101,6 +103,8 @@
 				return 'answered correctly';
 			case 'incorrect':
 				return 'answered incorrectly';
+			case 'answered':
+				return 'answered';
 			default:
 				return 'upcoming';
 		}
@@ -1990,6 +1994,11 @@
 									class="absolute inset-0 rotate-45 rounded-sm border border-rose-700 bg-rose-500"
 								></div>
 								<CloseOutline class="relative z-10 size-2 text-white" />
+							{:else if state === 'answered'}
+								<div
+									class="absolute inset-0 rotate-45 rounded-sm border border-slate-500 bg-slate-300"
+								></div>
+								<CheckOutline class="relative z-10 size-2 text-slate-700" />
 							{:else}
 								<div
 									class="absolute inset-0 rotate-45 rounded-sm border border-amber-600 bg-amber-400"

@@ -915,7 +915,7 @@ class LectureVideoManifestQuestionV1(BaseModel):
     intro_text: str
     intro_tts_text: str | None = Field(None, exclude=True)
     stop_offset_ms: int = Field(..., ge=0)
-    options: list[LectureVideoManifestOptionV1] = Field(..., min_length=2)
+    options: list[LectureVideoManifestOptionV1] = Field(..., min_length=1)
 
     @field_validator("intro_text")
     @classmethod
@@ -925,10 +925,12 @@ class LectureVideoManifestQuestionV1(BaseModel):
 
     @model_validator(mode="after")
     def validate_options(self):
+        if len(self.options) == 1:
+            self.options[0].correct = False
         correct_count = sum(1 for option in self.options if option.correct)
-        if correct_count != 1:
+        if correct_count > 1:
             raise ValueError(
-                "Single-select questions must have exactly one correct option."
+                "Single-select questions must have at most one correct option."
             )
         return self
 
@@ -1464,16 +1466,18 @@ class LectureSlideQuestionInput(BaseModel):
             return self
         if not self.question_text.strip():
             raise ValueError("Complete lecture slide questions need question text.")
-        if len(self.options) < 2:
+        if len(self.options) < 1:
             raise ValueError(
-                "Complete lecture slide questions need at least two answer options."
+                "Complete lecture slide questions need at least one answer option."
             )
         if any(not option.option_text.strip() for option in self.options):
             raise ValueError("Complete lecture slide question options need text.")
+        if len(self.options) == 1:
+            self.options[0].correct = False
         correct_count = sum(1 for option in self.options if option.correct)
-        if correct_count != 1:
+        if correct_count > 1:
             raise ValueError(
-                "Single-select lecture slide questions must have exactly one correct option."
+                "Single-select lecture slide questions must have at most one correct option."
             )
         return self
 

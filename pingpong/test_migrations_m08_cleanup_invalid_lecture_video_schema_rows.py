@@ -377,15 +377,6 @@ async def test_invalid_manifest_and_blank_voice_remove_assistants_and_threads(
         )
         session.add(question)
         await session.flush()
-        session.add(
-            models.LectureVideoQuestionOption(
-                question_id=question.id,
-                position=0,
-                option_text="Only option",
-                post_answer_text="Nope",
-                continue_offset_ms=1500,
-            )
-        )
         invalid_manifest_assistant = models.Assistant(
             id=221,
             name="Invalid Manifest Assistant",

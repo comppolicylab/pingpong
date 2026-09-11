@@ -147,9 +147,9 @@ def _is_valid_lecture_video(
             return False
         if question.stop_offset_ms < 0:
             return False
-        if len(question.options) < 2:
+        if len(question.options) < 1:
             return False
-        if correct_option_counts.get(question.id, 0) != 1:
+        if correct_option_counts.get(question.id, 0) > 1:
             return False
         for option in question.options:
             if option.continue_offset_ms < 0:

@@ -301,10 +301,6 @@ def lecture_video_manifest_from_model(
         correct_option_id = (
             question.correct_option.id if question.correct_option else None
         )
-        if correct_option_id is None:
-            raise ValueError(
-                "Lecture video question must have a correct option before serialization."
-            )
         options = [
             schemas.LectureVideoManifestOptionV1(
                 option_text=option.option_text,

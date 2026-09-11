@@ -345,7 +345,7 @@ class GeneratedSlideQuestion(BaseModel):
     slide_position: int = Field(..., ge=0)
     question_text: str = Field(..., min_length=1)
     intro_text: str = ""
-    options: list[GeneratedSlideChoice] = Field(..., min_length=2)
+    options: list[GeneratedSlideChoice] = Field(..., min_length=1)
 
 
 class GeneratedSlideManifest(BaseModel):
@@ -4577,10 +4577,12 @@ def _validate_generated_slide_manifest(
             and pause_offsets["stop_offset_ms"] > total_duration_ms
         ):
             raise ValueError("Generated slide question pause point exceeds duration.")
+        if len(question.options) == 1:
+            question.options[0].correct = False
         correct_count = sum(1 for option in question.options if option.correct)
-        if correct_count != 1:
+        if correct_count > 1:
             raise ValueError(
-                "Generated slide question must have exactly one correct option."
+                "Generated slide question must have at most one correct option."
             )
         valid_questions.append(question)
     return manifest.model_copy(update={"questions": valid_questions})
