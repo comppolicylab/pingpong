@@ -42,6 +42,7 @@
 	import { loading, isFirefox } from '$lib/stores/general';
 	import ModeratorsTable from '$lib/components/ModeratorsTable.svelte';
 	import StatusErrors from './StatusErrors.svelte';
+	import LectureGenerationPoller from '$lib/components/LectureGenerationPoller.svelte';
 	import AssistantAvatar from '$lib/components/AssistantAvatar.svelte';
 
 	/**
@@ -144,7 +145,9 @@
 	$: isPrivate = data.class.private || false;
 	$: groupArchived = !!data.class.archived;
 	// Currently selected assistant.
-	$: assistants = ((data?.assistants || []) as Assistant[]).filter(
+	let groupAssistants: Assistant[] = [];
+	$: groupAssistants = (data?.assistants || []) as Assistant[];
+	$: assistants = groupAssistants.filter(
 		(asst: Assistant) =>
 			lectureVideoEnabled ||
 			(asst.interaction_mode !== 'lecture_video' && asst.interaction_mode !== 'lecture_slides')
@@ -858,6 +861,16 @@
 		showModerators = true;
 	};
 </script>
+
+{#if data?.class?.id && !data.isSharedAssistantPage && !data.isSharedThreadPage}
+	<LectureGenerationPoller
+		classId={data.class.id}
+		{assistants}
+		on:refresh={({ detail }) => {
+			groupAssistants = detail.assistants;
+		}}
+	/>
+{/if}
 
 <svelte:window ondragend={handleWindowDragEnd} ondrop={handleWindowDrop} />
 

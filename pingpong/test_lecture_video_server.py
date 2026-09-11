@@ -6457,8 +6457,8 @@ async def test_process_claimed_narration_run_marks_failed_on_provider_error(
     assert refreshed_run.status == schemas.LectureVideoProcessingRunStatus.FAILED
     assert refreshed_run.error_message == "ElevenLabs is temporarily unavailable."
     assert narrations[0].status == schemas.LectureVideoNarrationStatus.FAILED
-    assert narrations[1].status == schemas.LectureVideoNarrationStatus.PENDING
-    assert narrations[2].status == schemas.LectureVideoNarrationStatus.PENDING
+    assert narrations[1].status == schemas.LectureVideoNarrationStatus.PROCESSING
+    assert narrations[2].status == schemas.LectureVideoNarrationStatus.PROCESSING
 
 
 async def test_process_claimed_narration_run_raises_type_error_for_unexpected_work_item(

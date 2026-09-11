@@ -4248,6 +4248,11 @@ async def run_response(
                     input=input_items,
                     instructions=run.instructions,
                     model=run.model,
+                    service_tier=(
+                        "priority"
+                        if not isinstance(cli, openai.AsyncAzureOpenAI)
+                        else openai.omit
+                    ),
                     moderation={"model": "omni-moderation-latest"},
                     parallel_tool_calls=True,
                     reasoning=reasoning_settings,

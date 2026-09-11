@@ -1623,6 +1623,7 @@ async def test_generate_narration_text_requires_exact_slide_count(
 
     assert narration_set is not None
     assert len(narration_set.slides) == 2
+    assert captured["service_tier"] == "priority"
     assert str(captured["instructions"]).startswith("Narration prompt")
     assert "---ElevenLabs Pronunciation Metadata---" in str(captured["instructions"])
     response_model = captured["text_format"]
@@ -3501,7 +3502,7 @@ async def test_synthesize_slide_audio_skips_pages_with_existing_narration(
     assert [artifact.page_id for artifact in artifacts] == [changed_page_id]
 
 
-async def test_synthesize_slide_audio_renews_lease_after_each_persisted_page(
+async def test_synthesize_slide_audio_renews_lease_after_persisting_pages(
     db, monkeypatch
 ):
     await _create_class_and_deck(db, slide_count=2)
@@ -3534,18 +3535,10 @@ async def test_synthesize_slide_audio_renews_lease_after_each_persisted_page(
         await session.commit()
         run_id = run.id
 
-    lease_expiry_before_second_page = None
-
     async def fake_get_elevenlabs_api_key(_class_id):
         return "elevenlabs-key"
 
     async def fake_synthesize_speech_with_timings(_api_key, _voice_id, text, **_kwargs):
-        nonlocal lease_expiry_before_second_page
-        if text == "Second narration.":
-            async with db.async_session() as session:
-                run = await session.get(models.LectureSlideProcessingRun, run_id)
-                assert run is not None
-                lease_expiry_before_second_page = run.lease_expires_at
         return SimpleNamespace(audio=f"audio-{text}".encode(), words=())
 
     async def fake_store_audio(store_key, _content_type, audio):
@@ -3569,12 +3562,12 @@ async def test_synthesize_slide_audio_renews_lease_after_each_persisted_page(
 
     assert artifacts is not None
     assert len(artifacts) == 2
-    assert lease_expiry_before_second_page is not None
-    assert lease_expiry_before_second_page != initial_lease_expiry
     async with db.async_session() as session:
         run = await session.get(models.LectureSlideProcessingRun, run_id)
         assert run is not None
-        assert run.lease_expires_at == lease_expiry_before_second_page
+        assert run.lease_expires_at == (
+            now + lecture_slide_processing.RUN_LEASE_DURATION
+        ).replace(tzinfo=None)
 
 
 async def test_synthesize_slide_audio_deletes_uploaded_audio_when_db_lookup_raises(
@@ -5152,3 +5145,178 @@ async def test_ready_legacy_translation_is_queued_once_for_upgrade(db, has_feedb
             if has_feedback
             else schemas.LectureSlideTranslationStatus.READY
         )
+
+
+async def test_tts_job_runs_four_requests_and_preserves_input_order():
+    active = 0
+    peak = 0
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def synthesize(item):
+        nonlocal active, peak
+        active += 1
+        peak = max(peak, active)
+        if active == 4:
+            started.set()
+        await release.wait()
+        await asyncio.sleep((8 - item) * 0.001)
+        active -= 1
+        return item
+
+    job = asyncio.create_task(
+        lecture_slide_processing._map_tts_job(list(range(8)), synthesize)
+    )
+    await asyncio.wait_for(started.wait(), timeout=1)
+    assert active == 4
+    release.set()
+    assert await job == list(range(8))
+    assert peak == 4
+
+
+async def test_tts_job_drains_other_requests_on_failure():
+    all_started = asyncio.Event()
+    active = 0
+
+    async def synthesize(item):
+        nonlocal active
+        active += 1
+        if active == 4:
+            all_started.set()
+        try:
+            await all_started.wait()
+            if item == 0:
+                raise RuntimeError("synthesis failed")
+            await asyncio.Event().wait()
+        finally:
+            active -= 1
+
+    with pytest.raises(RuntimeError, match="synthesis failed"):
+        await lecture_slide_processing._map_tts_job(list(range(4)), synthesize)
+    assert active == 0
+
+
+async def test_tts_job_drains_provider_tasks_on_cancellation(monkeypatch):
+    started = asyncio.Event()
+    stopped = asyncio.Event()
+
+    async def provider():
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            stopped.set()
+
+    async def synthesize(_):
+        return await lecture_slide_processing._await_with_run_lease_heartbeat(
+            1, "lease", provider()
+        )
+
+    job = asyncio.create_task(lecture_slide_processing._map_tts_job([1], synthesize))
+    await started.wait()
+    job.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await job
+    assert stopped.is_set()
+
+
+@pytest.mark.parametrize("fast_mode", [False, True])
+async def test_narration_fast_mode_request_tier(fast_mode):
+    captured = {}
+
+    class Responses:
+        async def parse(self, **kwargs):
+            captured.update(kwargs)
+            return SimpleNamespace(
+                output_parsed=lecture_slide_processing.GeneratedSlideNarrationSet(
+                    slides=[
+                        lecture_slide_processing.GeneratedSlideNarration(
+                            slide_position=0, narration_text="Narration."
+                        )
+                    ]
+                )
+            )
+
+    await lecture_slide_processing._parse_responses_output(
+        SimpleNamespace(responses=Responses()),
+        model="gpt-5.6-sol",
+        instructions="Narrate",
+        input_messages=[],
+        response_model=lecture_slide_processing.GeneratedSlideNarrationSet,
+        fast_mode=fast_mode,
+    )
+    assert captured["service_tier"] == ("priority" if fast_mode else openai.omit)
+
+
+async def test_slide_audio_job_synthesizes_four_pages_at_once(db, monkeypatch):
+    await _create_class_and_deck(db, slide_count=8)
+    async with db.async_session() as session:
+        pages = [
+            models.LectureSlidePage(
+                lecture_slide_deck_id=1, position=index, narration_text=str(index)
+            )
+            for index in range(8)
+        ]
+        run = models.LectureSlideProcessingRun(
+            lecture_slide_deck_id=1,
+            lecture_slide_deck_id_snapshot=1,
+            class_id=1,
+            stage=schemas.LectureSlideProcessingStage.NARRATION_AUDIO,
+            attempt_number=1,
+            status=schemas.LectureSlideProcessingRunStatus.RUNNING,
+            lease_token="lease",
+        )
+        session.add_all([*pages, run])
+        await session.commit()
+        run_id = run.id
+
+    active = 0
+    peak = 0
+    first_four = asyncio.Event()
+    release = asyncio.Event()
+
+    async def key(_):
+        return "test-key"
+
+    async def synthesize(_key, _voice, text, **kwargs):
+        nonlocal active, peak
+        active += 1
+        peak = max(peak, active)
+        if active == 4:
+            first_four.set()
+        try:
+            await release.wait()
+            await asyncio.sleep((8 - int(text)) * 0.001)
+            return SimpleNamespace(audio=text.encode(), words=())
+        finally:
+            active -= 1
+
+    async def store(key, content_type, audio):
+        return key, len(audio)
+
+    monkeypatch.setattr(lecture_slide_processing, "_get_elevenlabs_api_key", key)
+    monkeypatch.setattr(
+        lecture_slide_processing,
+        "synthesize_elevenlabs_speech_with_timings",
+        synthesize,
+    )
+    monkeypatch.setattr(lecture_slide_processing, "_store_audio", store)
+    monkeypatch.setattr(lecture_slide_processing, "audio_duration_ms", lambda *_: 100)
+    task = asyncio.create_task(
+        lecture_slide_processing._synthesize_slide_audio(run_id, "lease", 1)
+    )
+    try:
+        await asyncio.wait_for(first_four.wait(), timeout=2)
+        assert active == 4
+    finally:
+        release.set()
+    artifacts = await task
+    assert artifacts is not None
+    assert [artifact.page_position for artifact in artifacts] == list(range(8))
+    assert [artifact.audio for artifact in artifacts] == [
+        str(i).encode() for i in range(8)
+    ]
+    assert peak == 4
+    async with db.async_session() as session:
+        persisted = list(await session.scalars(select(models.LectureSlidePage)))
+        assert all(page.narration_id is not None for page in persisted)

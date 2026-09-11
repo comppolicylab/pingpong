@@ -2,6 +2,7 @@
 	import { resolve } from '$app/paths';
 	import * as api from '$lib/api';
 	import type { Assistant } from '$lib/api';
+	import LectureGenerationPoller from '$lib/components/LectureGenerationPoller.svelte';
 	import ViewAssistant from '$lib/components/ViewAssistant.svelte';
 	import AssistantAvatar from '$lib/components/AssistantAvatar.svelte';
 	import {
@@ -248,6 +249,15 @@
 		);
 	}
 </script>
+
+<LectureGenerationPoller
+	classId={data.class.id}
+	{assistants}
+	on:refresh={({ detail }) => {
+		assistants = sortAssistantsByName(detail.assistants);
+		creators = detail.creators;
+	}}
+/>
 
 <div class="w-full p-12 pt-6">
 	{#if !hasApiKey}
