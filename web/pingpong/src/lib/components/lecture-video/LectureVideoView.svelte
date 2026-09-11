@@ -2129,6 +2129,12 @@
 
 		// Save values before applySession clears them
 		const resumeOffsetMs = currentContinuation.resume_offset_ms;
+		const lessonDurationMs = durationMsOverride ?? (videoElement?.duration ?? 0) * 1000;
+		const completesLesson =
+			currentContinuation.next_question == null &&
+			Number.isFinite(lessonDurationMs) &&
+			lessonDurationMs > 0 &&
+			resumeOffsetMs >= lessonDurationMs;
 		const previousOffsetMs = currentTimeMs;
 		const previousQuestionPlaybackLocked = questionPlaybackLocked;
 		let optimisticPlayPromise: Promise<boolean> | null = null;
@@ -2140,10 +2146,12 @@
 			if (canSeekNow) {
 				setVideoPosition(resumeOffsetMs);
 			}
-			optimisticPlayPromise = tryPlayVideo({
-				suppressInteractionPost: true,
-				queueRetryOnFailure: true
-			});
+			if (!completesLesson) {
+				optimisticPlayPromise = tryPlayVideo({
+					suppressInteractionPost: true,
+					queueRetryOnFailure: true
+				});
+			}
 		}
 
 		// Ensure answered question is recorded (may already be set from handleSelectOption)
@@ -2201,6 +2209,13 @@
 			}
 			questionPresentedForId = null;
 			subtitleText = null;
+
+			if (completesLesson) {
+				clearPendingVideoRetry();
+				currentTimeMs = resumeOffsetMs;
+				await handleVideoEnded();
+				return isCompletedSession(sessionState);
+			}
 
 			// Resume video at the continue offset
 			if (videoElement && !optimisticPlayStarted) {
