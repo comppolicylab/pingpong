@@ -3813,6 +3813,97 @@ async def test_persist_slide_audio_timings_reuses_unchanged_slide_words(db):
         assert [page.end_offset_ms for page in deck.pages] == [1500, 2500]
 
 
+@pytest.mark.parametrize("existing_duplicates", [False, True])
+async def test_reusing_slide_audio_does_not_multiply_boundary_caption_words(
+    db, existing_duplicates
+):
+    await _create_class_and_deck(db, slide_count=2)
+    expected = [
+        schemas.LectureVideoManifestWordV3(
+            id="slide-0-word-0", word="Before.", start_offset_ms=800, end_offset_ms=1000
+        ),
+        schemas.LectureVideoManifestWordV3(
+            id="slide-1-word-0", word="The", start_offset_ms=1000, end_offset_ms=1200
+        ),
+        schemas.LectureVideoManifestWordV3(
+            id="slide-1-word-1",
+            word="remaining",
+            start_offset_ms=1200,
+            end_offset_ms=1500,
+        ),
+    ]
+    async with db.async_session() as session:
+        deck = await session.get(models.LectureSlideDeck, 1)
+        assert deck is not None
+        old_words = expected * 4 if existing_duplicates else expected
+        deck.continuous_narration_fingerprint = "cached-audio"
+        deck.transcript_data = lecture_slide_processing.transcript_data_from_words(
+            old_words
+        )
+        for position in range(2):
+            session.add(
+                models.LectureSlidePage(
+                    lecture_slide_deck_id=1,
+                    position=position,
+                    start_offset_ms=position * 1000,
+                    end_offset_ms=(position + 1) * 1000,
+                    narration=models.LectureSlideNarration(
+                        stored_object=models.LectureSlideNarrationStoredObject(
+                            key=f"slides/page-{position}.ogg",
+                            content_type="audio/ogg",
+                            content_length=5,
+                            duration_ms=1000,
+                        ),
+                        status=schemas.LectureSlideNarrationStatus.READY,
+                    ),
+                )
+            )
+        run = models.LectureSlideProcessingRun(
+            lecture_slide_deck_id=1,
+            lecture_slide_deck_id_snapshot=1,
+            class_id=1,
+            stage=schemas.LectureSlideProcessingStage.NARRATION_TRANSCRIPTION,
+            attempt_number=1,
+            status=schemas.LectureSlideProcessingRunStatus.RUNNING,
+            lease_token="lease",
+        )
+        session.add(run)
+        await session.commit()
+        run_id = run.id
+
+    for _ in range(3):
+        words = await lecture_slide_processing._persist_slide_audio_timings(
+            run_id, "lease", 1, []
+        )
+        assert words == expected
+        captions = lecture_slide_processing.lecture_video_words_to_webvtt(words)
+        assert captions.count("The") == 1
+        assert captions.count("Before.") == 1
+        async with db.async_session() as session:
+            deck = await session.get(models.LectureSlideDeck, 1)
+            assert deck is not None
+            assert deck.continuous_narration_fingerprint == (
+                None if existing_duplicates else "cached-audio"
+            )
+
+
+async def test_slide_audio_window_preserves_real_repetition_and_zero_duration_words():
+    words = [
+        schemas.LectureVideoManifestWordV3(
+            id=f"word-{index}", word="very", start_offset_ms=start, end_offset_ms=end
+        )
+        for index, (start, end) in enumerate(
+            [(0, 100), (100, 100), (100, 200), (200, 300)]
+        )
+    ]
+    assert (
+        lecture_slide_processing._transcript_for_slide_audio_window(
+            words, start_offset_ms=100, end_offset_ms=200
+        )
+        == words[1:3]
+    )
+
+
 async def test_persist_slide_audio_timings_uses_elevenlabs_timings_without_whisper(
     db,
 ):

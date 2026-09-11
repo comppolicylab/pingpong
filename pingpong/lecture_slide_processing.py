@@ -1951,7 +1951,7 @@ async def _persist_translation_page_rows(
                             "start_ms": word.start_offset_ms - page.start_offset_ms,
                             "end_ms": word.end_offset_ms - page.start_offset_ms,
                         }
-                        for word in _transcript_for_slide_window(
+                        for word in _transcript_for_slide_audio_window(
                             source_transcript,
                             start_offset_ms=page.start_offset_ms,
                             end_offset_ms=page.end_offset_ms,
@@ -4085,7 +4085,7 @@ async def _persist_slide_audio_timings(
                 and start_offset_ms is not None
             ):
                 offset_delta_ms = start_offset_ms - old_start_offset_ms
-                for word in _transcript_for_slide_window(
+                for word in _transcript_for_slide_audio_window(
                     old_transcript,
                     start_offset_ms=old_start_offset_ms,
                     end_offset_ms=old_end_offset_ms,
@@ -4106,7 +4106,11 @@ async def _persist_slide_audio_timings(
             current_offset_ms += duration_ms
 
         deck.total_duration_ms = current_offset_ms
-        deck.transcript_data = transcript_data_from_words(words)
+        transcript_data = transcript_data_from_words(words)
+        if deck.transcript_data != transcript_data:
+            # Captions must be rebuilt even when the underlying audio is reused.
+            deck.continuous_narration_fingerprint = None
+        deck.transcript_data = transcript_data
         session.add(deck)
         await models.LectureSlideQuestion.retime_for_deck(session, deck)
         await session.commit()
@@ -4129,6 +4133,29 @@ def _slide_manifest_total_duration_ms(
         if value is not None
     ]
     return max(candidates) if candidates else None
+
+
+def _transcript_for_slide_audio_window(
+    transcript: list[schemas.LectureVideoManifestWordV3],
+    *,
+    start_offset_ms: int,
+    end_offset_ms: int,
+) -> list[schemas.LectureVideoManifestWordV3]:
+    # Audio reuse needs one owner per word, unlike overlapping context windows
+    # for manifest generation. Including both boundaries copies adjacent words
+    # into both slides on every processing run.
+    words: list[schemas.LectureVideoManifestWordV3] = []
+    seen: set[tuple[str, str, int, int]] = set()
+    for word in transcript:
+        if not start_offset_ms <= word.start_offset_ms < end_offset_ms:
+            continue
+        # Collapse copies left by earlier runs without removing spoken repeats.
+        key = (word.id, word.word, word.start_offset_ms, word.end_offset_ms)
+        if key in seen:
+            continue
+        seen.add(key)
+        words.append(word)
+    return words
 
 
 def _transcript_for_slide_window(
