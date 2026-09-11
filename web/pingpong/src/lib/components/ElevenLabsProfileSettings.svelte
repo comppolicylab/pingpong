@@ -14,6 +14,29 @@
 	export let previewError = '';
 	export let onPreview: () => void;
 
+	const models: { value: ElevenLabsTTSModel; name: string; description: string }[] = [
+		{
+			value: 'eleven_multilingual_v2',
+			name: 'Multilingual v2',
+			description: 'Consistent speech for long-form narration. 29 languages.'
+		},
+		{
+			value: 'eleven_flash_v2_5',
+			name: 'Flash v2.5',
+			description: 'Fast speech optimized for real time. 32 languages.'
+		},
+		{
+			value: 'eleven_v3',
+			name: 'Eleven v3',
+			description: 'Rich, expressive speech with contextual delivery. 74 languages.'
+		},
+		{
+			value: 'eleven_v3_conversational',
+			name: 'v3 Conversational',
+			description: 'Expressive speech optimized for real time. 74 languages.'
+		}
+	];
+
 	const selectModel = (model: ElevenLabsTTSModel) => {
 		profile = { ...profile, model };
 	};
@@ -56,33 +79,25 @@
 		<div class="min-w-0">
 			<Label for={`${id}-model`}>Model</Label>
 			<Helper class="pt-1">
-				{profile.model === 'eleven_v3'
-					? 'Rich, expressive speech with contextual delivery.'
-					: 'Natural, consistent speech optimized for real time.'}
+				{models.find((model) => model.value === profile.model)?.description}
 			</Helper>
 		</div>
 		<div
 			id={`${id}-model`}
 			role="radiogroup"
 			aria-label={`${title} model`}
-			class="grid w-52 shrink-0 grid-cols-2 self-end rounded-lg border border-gray-300 bg-gray-100 p-1"
+			class="grid w-full shrink-0 grid-cols-2 self-end rounded-lg border border-gray-300 bg-gray-100 p-1 sm:w-64"
 		>
-			<button
-				type="button"
-				role="radio"
-				aria-checked={profile.model === 'eleven_flash_v2_5'}
-				class={`rounded-md px-2 py-1.5 text-xs font-medium ${profile.model === 'eleven_flash_v2_5' ? 'bg-white text-blue-700 shadow-sm' : 'text-gray-600'}`}
-				{disabled}
-				onclick={() => selectModel('eleven_flash_v2_5')}>Flash v2.5</button
-			>
-			<button
-				type="button"
-				role="radio"
-				aria-checked={profile.model === 'eleven_v3'}
-				class={`rounded-md px-2 py-1.5 text-xs font-medium ${profile.model === 'eleven_v3' ? 'bg-white text-blue-700 shadow-sm' : 'text-gray-600'}`}
-				{disabled}
-				onclick={() => selectModel('eleven_v3')}>Eleven v3</button
-			>
+			{#each models as model (model.value)}
+				<button
+					type="button"
+					role="radio"
+					aria-checked={profile.model === model.value}
+					class={`rounded-md px-2 py-1.5 text-xs font-medium ${profile.model === model.value ? 'bg-white text-blue-700 shadow-sm' : 'text-gray-600'}`}
+					{disabled}
+					onclick={() => selectModel(model.value)}>{model.name}</button
+				>
+			{/each}
 		</div>
 	</div>
 

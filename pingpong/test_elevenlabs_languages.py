@@ -1,3 +1,5 @@
+import pytest
+
 import pingpong.elevenlabs as elevenlabs
 from pingpong import schemas
 from pingpong.server import _lecture_slide_languages
@@ -40,3 +42,31 @@ def test_translation_language_response_follows_narration_model():
     assert len(v3.languages) == 75  # original + 74 v3 languages
     assert "cy" not in {language.code for language in flash.languages}
     assert "cy" in {language.code for language in v3.languages}
+
+
+@pytest.mark.parametrize(
+    ("model", "count", "has_vietnamese", "has_welsh"),
+    [
+        (schemas.ElevenLabsTTSModel.MULTILINGUAL_V2, 29, False, False),
+        (schemas.ElevenLabsTTSModel.FLASH_V2_5, 32, True, False),
+        (schemas.ElevenLabsTTSModel.V3, 74, True, True),
+        (schemas.ElevenLabsTTSModel.V3_CONVERSATIONAL, 74, True, True),
+    ],
+)
+def test_all_model_language_choices(model, count, has_vietnamese, has_welsh):
+    response = _lecture_slide_languages(can_prepare=False, model=model)
+    codes = {language.code for language in response.languages}
+    assert len(codes) == len(response.languages) == count + 1
+    assert response.languages[0].code == "original"
+    assert ("vi" in codes) == has_vietnamese
+    assert ("cy" in codes) == has_welsh
+    assert response.can_prepare is False
+
+
+def test_multilingual_languages_exclude_flash_additions():
+    assert set(elevenlabs.ELEVENLABS_MODEL_LANGUAGES) == set(schemas.ElevenLabsTTSModel)
+    assert {
+        language.code
+        for language in set(elevenlabs.ELEVENLABS_FLASH_V2_5_LANGUAGES)
+        - set(elevenlabs.ELEVENLABS_MULTILINGUAL_V2_LANGUAGES)
+    } == {"hu", "no", "vi"}

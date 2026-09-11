@@ -82,8 +82,7 @@ from pingpong.class_credentials import (
     validate_class_credential,
 )
 from pingpong.elevenlabs import (
-    ELEVENLABS_FLASH_V2_5_LANGUAGES,
-    ELEVENLABS_V3_LANGUAGES,
+    ELEVENLABS_MODEL_LANGUAGES,
     ELEVENLABS_VOICE_SAMPLE_TEXT_HEADER,
     synthesize_elevenlabs_voice_sample,
 )
@@ -11629,11 +11628,7 @@ def _lecture_slide_languages(
     can_prepare: bool,
     model: schemas.ElevenLabsTTSModel = schemas.ElevenLabsTTSModel.FLASH_V2_5,
 ) -> schemas.LectureSlideLanguagesResponse:
-    supported_languages = (
-        ELEVENLABS_V3_LANGUAGES
-        if model == schemas.ElevenLabsTTSModel.V3
-        else ELEVENLABS_FLASH_V2_5_LANGUAGES
-    )
+    supported_languages = ELEVENLABS_MODEL_LANGUAGES[model]
     return schemas.LectureSlideLanguagesResponse(
         can_prepare=can_prepare,
         languages=[
@@ -11695,11 +11690,7 @@ async def get_lecture_slide_translation_status(
             status="ready",
         )
     narration_model = profile_for(assistant, "narration").model
-    supported_languages = (
-        ELEVENLABS_V3_LANGUAGES
-        if narration_model == schemas.ElevenLabsTTSModel.V3
-        else ELEVENLABS_FLASH_V2_5_LANGUAGES
-    )
+    supported_languages = ELEVENLABS_MODEL_LANGUAGES[narration_model]
     if not any(language.code == normalized_code for language in supported_languages):
         raise HTTPException(
             422,
@@ -11753,11 +11744,7 @@ async def prepare_lecture_slide_translation(
     if normalized_code == "original":
         raise HTTPException(400, "The original lesson does not require preparation.")
     narration_model = profile_for(assistant, "narration").model
-    supported_languages = (
-        ELEVENLABS_V3_LANGUAGES
-        if narration_model == schemas.ElevenLabsTTSModel.V3
-        else ELEVENLABS_FLASH_V2_5_LANGUAGES
-    )
+    supported_languages = ELEVENLABS_MODEL_LANGUAGES[narration_model]
     language = next(
         (item for item in supported_languages if item.code == normalized_code),
         None,

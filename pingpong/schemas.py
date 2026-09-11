@@ -53,6 +53,8 @@ MESSAGE_METADATA_LECTURE_SLIDE_NUMBER_V1 = "lecture_slide_number_v1"
 class ElevenLabsTTSModel(StrEnum):
     FLASH_V2_5 = "eleven_flash_v2_5"
     V3 = "eleven_v3"
+    MULTILINGUAL_V2 = "eleven_multilingual_v2"
+    V3_CONVERSATIONAL = "eleven_v3_conversational"
 
 
 class ElevenLabsTTSProfile(BaseModel):

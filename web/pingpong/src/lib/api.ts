@@ -1901,7 +1901,8 @@ export type ValidateLectureVideoVoiceRequest = {
 	elevenlabs_speed?: number;
 };
 
-export type ElevenLabsTTSModel = 'eleven_flash_v2_5' | 'eleven_v3';
+export type ElevenLabsTTSModel =
+	'eleven_flash_v2_5' | 'eleven_v3' | 'eleven_multilingual_v2' | 'eleven_v3_conversational';
 
 export type ElevenLabsTTSProfile = {
 	model: ElevenLabsTTSModel;

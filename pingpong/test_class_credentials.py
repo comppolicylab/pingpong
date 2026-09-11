@@ -1,5 +1,6 @@
 import base64
 import importlib
+import json
 from types import SimpleNamespace
 from typing import cast
 from unittest.mock import AsyncMock
@@ -1756,7 +1757,10 @@ def test_streaming_tts_chunker_matches_elevenlabs_text_chunker():
         assert emitted == list(text_chunker(iter(chunks)))
 
 
-async def test_elevenlabs_streaming_tts_sends_realtime_generation_payloads(monkeypatch):
+@pytest.mark.parametrize("model_id", ["eleven_flash_v2_5", "eleven_multilingual_v2"])
+async def test_elevenlabs_streaming_tts_sends_realtime_generation_payloads(
+    monkeypatch, model_id
+):
     sessions = []
 
     class FakeWebSocket:
@@ -1793,6 +1797,7 @@ async def test_elevenlabs_streaming_tts_sends_realtime_generation_payloads(monke
     tts = elevenlabs_module.ElevenLabsStreamingTTS(
         "elevenlabs-key",
         "voice-id",
+        model_id=model_id,
     )
 
     await tts.connect()
@@ -1801,7 +1806,8 @@ async def test_elevenlabs_streaming_tts_sends_realtime_generation_payloads(monke
 
     session = sessions[0]
     assert session.headers == {"xi-api-key": "elevenlabs-key"}
-    assert "model_id=eleven_flash_v2_5" in session.url
+    assert f"model_id={model_id}" in session.url
+    assert "/v1/text-to-speech/voice-id/stream-input" in session.url
     assert "output_format=pcm_24000" in session.url
     assert session.websocket.sent_json == [
         {
@@ -1875,7 +1881,10 @@ async def test_elevenlabs_streaming_tts_sends_custom_voice_settings(monkeypatch)
     }
 
 
-async def test_elevenlabs_v3_streaming_uses_text_to_dialogue_protocol(monkeypatch):
+@pytest.mark.parametrize("model_id", ["eleven_v3", "eleven_v3_conversational"])
+async def test_elevenlabs_v3_streaming_uses_text_to_dialogue_protocol(
+    monkeypatch, model_id
+):
     sessions = []
 
     class FakeWebSocket:
@@ -1903,7 +1912,7 @@ async def test_elevenlabs_v3_streaming_uses_text_to_dialogue_protocol(monkeypatc
     tts = elevenlabs_module.ElevenLabsStreamingTTS(
         "elevenlabs-key",
         "voice-id",
-        model_id="eleven_v3",
+        model_id=model_id,
         voice_settings={"stability": 0.5},
     )
     await tts.connect()
@@ -1912,6 +1921,7 @@ async def test_elevenlabs_v3_streaming_uses_text_to_dialogue_protocol(monkeypatc
     await tts.close_input()
 
     assert "/v1/text-to-dialogue/stream-input" in sessions[0].url
+    assert f"model_id={model_id}" in sessions[0].url
     assert sessions[0].websocket.sent_json == [
         {"voices": ["voice-id"], "voice_settings": {"stability": 0.5}},
         {"inputs": [{"text": "Hello there ", "voice_id": "voice-id"}]},
@@ -1957,3 +1967,58 @@ def test_get_elevenlabs_client_creates_new_client_for_each_call(monkeypatch):
     assert first is not second
     assert first is not third
     assert created == ["elevenlabs-key", "elevenlabs-key", "other-elevenlabs-key"]
+
+
+@pytest.mark.parametrize(
+    "model_id", [model.value for model in schemas.ElevenLabsTTSModel]
+)
+@pytest.mark.parametrize("with_timings", [False, True])
+async def test_elevenlabs_model_synthesis_payload(monkeypatch, model_id, with_timings):
+    requests = []
+
+    async def handle(request):
+        requests.append(json.loads(request.content))
+        if with_timings:
+            return httpx.Response(
+                200,
+                json={
+                    "audio_base64": base64.b64encode(b"audio").decode(),
+                    "alignment": {
+                        "characters": list(requests[-1]["text"]),
+                        "character_start_times_seconds": [
+                            i * 0.1 for i in range(len(requests[-1]["text"]))
+                        ],
+                        "character_end_times_seconds": [
+                            (i + 1) * 0.1 for i in range(len(requests[-1]["text"]))
+                        ],
+                    },
+                    "normalized_alignment": None,
+                },
+            )
+        return httpx.Response(200, content=b"audio")
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as http_client:
+        client = elevenlabs_module.AsyncElevenLabs(
+            api_key="test", httpx_client=http_client
+        )
+        monkeypatch.setattr(
+            elevenlabs_module, "get_elevenlabs_client", lambda _: client
+        )
+        text = "The /lɛd/ pipe." if model_id == "eleven_v3" else "The led pipe."
+        kwargs = {"model_id": model_id}
+        if with_timings:
+            await elevenlabs_module.synthesize_elevenlabs_speech_with_timings(
+                "test", "voice", text, language_code="en", **kwargs
+            )
+        else:
+            await elevenlabs_module.synthesize_elevenlabs_speech(
+                "test", "voice", text, **kwargs
+            )
+
+    assert len(requests) == 1
+    assert requests[0]["model_id"] == model_id
+    assert requests[0]["text"] == text
+    if with_timings and model_id != "eleven_multilingual_v2":
+        assert requests[0]["language_code"] == "en"
+    else:
+        assert "language_code" not in requests[0]

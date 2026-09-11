@@ -700,3 +700,17 @@ def test_pua_transformer_recovers_after_followup_buffer_overflow():
     assert transformer.add(f'["leaked"]}}{SAY_MARKER_END} after') == " after"
     assert transformer.flush() == ""
     assert transformer.consume_followup_suggestions() == []
+
+
+@pytest.mark.parametrize(
+    "model_id", ["eleven_multilingual_v2", "eleven_v3_conversational"]
+)
+def test_new_models_use_phonetic_spellings_in_live_speech(model_id):
+    instructions = format_instructions(
+        "Teach clearly.",
+        use_latex=True,
+        interaction_mode=schemas.InteractionMode.LECTURE_SLIDES,
+        tts_model_id=model_id,
+    )
+    assert TTS_PRONUNCIATION_INSTRUCTIONS in instructions
+    assert "ElevenLabs v3 Pronunciation Metadata" not in instructions
