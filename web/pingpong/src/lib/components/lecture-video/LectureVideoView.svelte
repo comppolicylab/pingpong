@@ -28,6 +28,7 @@
 		LessonInteractionHistoryItem
 	} from '$lib/api';
 	import { hasVisiblePostAnswerFeedback } from '$lib/lectureVideoFeedback';
+	import { createLessonInteractionQueue } from '$lib/lessonInteractionQueue';
 	import { mergeQuestionOptions } from '$lib/utils/lecture-video';
 	import { ArchiveOutline, InfoCircleOutline } from 'flowbite-svelte-icons';
 	import { LECTURE_NARRATION_VOLUME_SCALE } from './audio-levels';
@@ -847,20 +848,26 @@
 		return session;
 	}
 
-	async function postLessonInteraction(payload: LessonInteractionPayload) {
-		return lessonMode === 'lecture_slides'
-			? api.expandResponse(
-					await api.postLectureSlideInteraction(
-						fetch,
-						classId,
-						threadId,
-						lectureSlideInteractionPayload(payload)
+	const postLessonInteraction = createLessonInteractionQueue({
+		getControllerSessionId: () => controllerSessionId,
+		getStateVersion: () => stateVersion,
+		setStateVersion: (version) => (stateVersion = version),
+		getResponseVersion: (expanded) =>
+			expanded.error ? null : (responseSession(expanded)?.state_version ?? null),
+		send: async (payload: LessonInteractionPayload) =>
+			lessonMode === 'lecture_slides'
+				? api.expandResponse(
+						await api.postLectureSlideInteraction(
+							fetch,
+							classId,
+							threadId,
+							lectureSlideInteractionPayload(payload)
+						)
 					)
-				)
-			: api.expandResponse(
-					await api.postLectureVideoInteraction(fetch, classId, threadId, payload)
-				);
-	}
+				: api.expandResponse(
+						await api.postLectureVideoInteraction(fetch, classId, threadId, payload)
+					)
+	});
 
 	async function acquireLessonControl() {
 		return lessonMode === 'lecture_slides'
@@ -1802,7 +1809,9 @@
 					playerDisabled = false;
 					introNarrationPending = false;
 					postAnswerNarrationPending = false;
-					setVideoPosition(toOffsetMs);
+					if (seekInteractionsInFlight === 1) {
+						setVideoPosition(toOffsetMs);
+					}
 				}
 				return;
 			}
@@ -1822,7 +1831,9 @@
 			setVideoPosition(fromOffsetMs);
 			failClosedControl(error instanceof Error ? error.message : String(error));
 		} finally {
-			seekInteractionsInFlight = Math.max(0, seekInteractionsInFlight - 1);
+			if (controllerSessionId === seekControllerSessionId) {
+				seekInteractionsInFlight = Math.max(0, seekInteractionsInFlight - 1);
+			}
 		}
 	}
 
