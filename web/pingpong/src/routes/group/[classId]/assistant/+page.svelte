@@ -2,6 +2,7 @@
 	import { resolve } from '$app/paths';
 	import * as api from '$lib/api';
 	import type { Assistant } from '$lib/api';
+	import LectureGenerationPoller from '$lib/components/LectureGenerationPoller.svelte';
 	import ViewAssistant from '$lib/components/ViewAssistant.svelte';
 	import AssistantAvatar from '$lib/components/AssistantAvatar.svelte';
 	import {
@@ -68,6 +69,8 @@
 	let copyPermissionLoading: Record<number, boolean> = {};
 	let copyPermissionError: Record<number, string> = {};
 	let assistants: Assistant[] = [];
+	let lecturePollingInFlight = false;
+	let lectureRefreshSeconds: number | null = null;
 	let lectureMediaRefreshingIds = new Set<number>();
 	const baseUrl = typeof window !== 'undefined' ? window.location.origin : '';
 	const classOptions = (data.classes || []).map((c) => ({
@@ -249,6 +252,18 @@
 	}
 </script>
 
+<LectureGenerationPoller
+	bind:inFlight={lecturePollingInFlight}
+	bind:secondsUntilRefresh={lectureRefreshSeconds}
+	showStatus={false}
+	classId={data.class.id}
+	{assistants}
+	on:refresh={({ detail }) => {
+		assistants = sortAssistantsByName(detail.assistants);
+		creators = detail.creators;
+	}}
+/>
+
 <div class="w-full p-12 pt-6">
 	{#if !hasApiKey}
 		<Heading tag="h2" class="text-dark-blue-40 mb-4 font-serif text-3xl font-medium"
@@ -285,7 +300,9 @@
 					creator={creators[assistant.creator_id]}
 					editable={data.editableAssistants.has(assistant.id)}
 					currentClassId={data.class.id}
-					lectureMediaRefreshing={lectureMediaRefreshingIds.has(assistant.id)}
+					lectureMediaRefreshing={lectureMediaRefreshingIds.has(assistant.id) ||
+						lecturePollingInFlight}
+					lectureMediaRefreshIn={lectureRefreshSeconds}
 					onRefreshLectureMedia={() => void refreshLectureMediaAssistant(assistant.id)}
 					{classOptions}
 				/>
@@ -305,7 +322,9 @@
 					editable={data.editableAssistants.has(assistant.id)}
 					shareable={data.grants.canShareAssistants && !!assistant.published}
 					currentClassId={data.class.id}
-					lectureMediaRefreshing={lectureMediaRefreshingIds.has(assistant.id)}
+					lectureMediaRefreshing={lectureMediaRefreshingIds.has(assistant.id) ||
+						lecturePollingInFlight}
+					lectureMediaRefreshIn={lectureRefreshSeconds}
 					onRefreshLectureMedia={() => void refreshLectureMediaAssistant(assistant.id)}
 					{classOptions}
 				/>

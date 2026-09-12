@@ -42,6 +42,7 @@
 	import { loading, isFirefox } from '$lib/stores/general';
 	import ModeratorsTable from '$lib/components/ModeratorsTable.svelte';
 	import StatusErrors from './StatusErrors.svelte';
+	import LectureGenerationPoller from '$lib/components/LectureGenerationPoller.svelte';
 	import AssistantAvatar from '$lib/components/AssistantAvatar.svelte';
 
 	/**
@@ -120,12 +121,11 @@
 	});
 
 	// Get info about assistant provenance
-	const getAssistantMetadata = (assistant: Partial<Assistant>) => {
+	const getAssistantMetadata = (assistant: Partial<Assistant>, creators: api.AssistantCreators) => {
 		const isCourseAssistant = assistant.endorsed;
 		const isMyAssistant = data.me.user && assistant.creator_id === data.me.user.id;
 		const creator =
-			(assistant.creator_id ? data.assistantCreators[assistant.creator_id]?.name : null) ||
-			'Unknown creator';
+			(assistant.creator_id ? creators[assistant.creator_id]?.name : null) || 'Unknown creator';
 		const willDisplayUserInfo = data.class.private
 			? false
 			: (assistant.should_record_user_information ?? false);
@@ -144,7 +144,11 @@
 	$: isPrivate = data.class.private || false;
 	$: groupArchived = !!data.class.archived;
 	// Currently selected assistant.
-	$: assistants = ((data?.assistants || []) as Assistant[]).filter(
+	let assistantCreators: api.AssistantCreators = {};
+	$: assistantCreators = data?.assistantCreators || {};
+	let groupAssistants: Assistant[] = [];
+	$: groupAssistants = (data?.assistants || []) as Assistant[];
+	$: assistants = groupAssistants.filter(
 		(asst: Assistant) =>
 			lectureVideoEnabled ||
 			(asst.interaction_mode !== 'lecture_video' && asst.interaction_mode !== 'lecture_slides')
@@ -186,7 +190,7 @@
 			)
 		: otherAssistants;
 	let assistant = {} as Assistant;
-	$: assistantMeta = getAssistantMetadata(assistant);
+	$: assistantMeta = getAssistantMetadata(assistant, assistantCreators);
 	let lessonThumbnailFailed = false;
 	let lessonThumbnailLoaded = false;
 	let lessonThumbnailAspectRatio = '';
@@ -858,6 +862,17 @@
 		showModerators = true;
 	};
 </script>
+
+{#if data?.class?.id && !data.isSharedAssistantPage && !data.isSharedThreadPage}
+	<LectureGenerationPoller
+		classId={data.class.id}
+		{assistants}
+		on:refresh={({ detail }) => {
+			groupAssistants = detail.assistants;
+			assistantCreators = detail.creators;
+		}}
+	/>
+{/if}
 
 <svelte:window ondragend={handleWindowDragEnd} ondrop={handleWindowDrop} />
 

@@ -43,6 +43,7 @@ from pingpong.elevenlabs import (
     synthesize_elevenlabs_speech,
 )
 from pingpong.now import utcnow
+from pingpong.tts_jobs import TTS_REQUESTS_PER_JOB, map_tts_job
 from pingpong.worker_pool import (
     DEFAULT_WORKER_POLL_INTERVAL_SECONDS,
     DEFAULT_WORKER_SHUTDOWN_GRACE_SECONDS,
@@ -220,7 +221,7 @@ def _worker_process_main(
                             assignment.lease_token,
                         )
                     )
-                except Exception as exc:
+                except (Exception, asyncio.CancelledError) as exc:
                     with sentry_sdk.new_scope() as scope:
                         scope.set_tag("source", "lecture-video-worker-child")
                         scope.set_tag("worker_slot", worker_slot)
@@ -240,7 +241,11 @@ def _worker_process_main(
                             run_id=assignment.run_id,
                             lease_token=assignment.lease_token,
                             error_message=str(exc)
-                            or UNEXPECTED_WORKER_EXIT_ERROR_MESSAGE,
+                            or (
+                                "Lecture video processing was cancelled."
+                                if isinstance(exc, asyncio.CancelledError)
+                                else UNEXPECTED_WORKER_EXIT_ERROR_MESSAGE
+                            ),
                         )
                     )
                 else:
@@ -589,7 +594,7 @@ async def _await_with_run_lease_heartbeat(
                     # CancelledError from awaiting it so the outer logic can proceed.
                     pass
                 return None
-    except Exception:
+    except BaseException:
         if not task.done():
             task.cancel()
             try:
@@ -1093,192 +1098,250 @@ async def _process_claimed_run(run_id: int, lease_token: str) -> None:
 
 async def _process_claimed_narration_run(run_id: int, lease_token: str) -> None:
     logger.info("Lecture video narration run starting. run_id=%s", run_id)
+    persistence_lock = asyncio.Lock()
     while True:
-        logger.debug(
-            "Lecture video narration run preparing next item. run_id=%s", run_id
-        )
-        state, payload = await _prepare_next_work_item(run_id, lease_token)
-        logger.debug(
-            "Lecture video narration run prepared next item. run_id=%s state=%s",
-            run_id,
-            state,
-        )
-        if state in {"cancelled", "missing"}:
-            logger.info(
-                "Lecture video narration run stopping. run_id=%s state=%s",
+        items: list[NarrationWorkItem] = []
+        selected: set[int] = set()
+        for _ in range(TTS_REQUESTS_PER_JOB):
+            logger.debug(
+                "Lecture video narration run preparing next item. run_id=%s", run_id
+            )
+            state, payload = await _prepare_next_work_item(
+                run_id, lease_token, exclude_narration_ids=selected
+            )
+            logger.debug(
+                "Lecture video narration run prepared next item. run_id=%s state=%s",
                 run_id,
                 state,
             )
-            return
-        if state == "completed":
+            if state in {"cancelled", "missing"}:
+                logger.info(
+                    "Lecture video narration run stopping. run_id=%s state=%s",
+                    run_id,
+                    state,
+                )
+                return
+            if state == "failed":
+                assert isinstance(payload, tuple)
+                narration_id, error_message = payload
+                logger.info(
+                    "Lecture video narration run marking failed. run_id=%s narration_id=%s error=%s",
+                    run_id,
+                    narration_id,
+                    error_message,
+                )
+                await _mark_run_failed(run_id, lease_token, narration_id, error_message)
+                return
+            if state == "completed":
+                break
+            if not isinstance(payload, NarrationWorkItem):
+                raise TypeError(
+                    f"Expected NarrationWorkItem, got {type(payload).__name__}"
+                )
+            items.append(payload)
+            selected.add(payload.narration_id)
+        if not items:
             logger.info(
-                "Lecture video narration run marking completed. run_id=%s",
-                run_id,
+                "Lecture video narration run marking completed. run_id=%s", run_id
             )
             await _mark_run_completed(run_id, lease_token)
             logger.info("Lecture video narration run completed. run_id=%s", run_id)
             return
-        if state == "failed":
-            assert isinstance(payload, tuple)
-            narration_id, error_message = payload
-            logger.info(
-                "Lecture video narration run marking failed. run_id=%s narration_id=%s error=%s",
-                run_id,
-                narration_id,
-                error_message,
-            )
-            await _mark_run_failed(run_id, lease_token, narration_id, error_message)
-            return
-
-        work_item = payload
-        if not isinstance(work_item, NarrationWorkItem):
-            raise TypeError(
-                f"Expected NarrationWorkItem, got {type(work_item).__name__}"
-            )
 
         try:
-            pronunciation_items = work_item.pronunciation_items or (
-                SpeechTextItem(
-                    item_id=work_item.narration_id,
-                    display_text=work_item.display_text,
-                    speech_text=work_item.speech_text,
-                ),
-            )
-            prepared_speech_texts = await speech_texts_for_elevenlabs(
-                assistant_id=work_item.assistant_id,
-                component="knowledge_check",
-                scope="lecture_video_knowledge_check",
-                language_code=None,
-                items=pronunciation_items,
-            )
-            synthesis_text = prepared_speech_texts[work_item.narration_id]
-            logger.debug(
-                "Lecture video narration synthesizing. run_id=%s "
-                "lecture_video_id=%s narration_id=%s text_length=%s",
-                run_id,
-                work_item.lecture_video_id,
-                work_item.narration_id,
-                len(synthesis_text),
-            )
-            synthesis_result = await _await_with_run_lease_heartbeat(
+            prepared_speech_texts = await _await_with_run_lease_heartbeat(
                 run_id,
                 lease_token,
-                synthesize_elevenlabs_speech(
-                    await _get_elevenlabs_api_key(work_item.class_id),
-                    work_item.voice_id,
-                    synthesis_text,
-                    model_id=work_item.model_id,
-                    voice_settings=work_item.voice_settings,
+                speech_texts_for_elevenlabs(
+                    assistant_id=items[0].assistant_id,
+                    component="knowledge_check",
+                    scope="lecture_video_knowledge_check",
+                    language_code=None,
+                    items=items[0].pronunciation_items
+                    or tuple(
+                        SpeechTextItem(
+                            item_id=item.narration_id,
+                            display_text=item.display_text,
+                            speech_text=item.speech_text,
+                        )
+                        for item in items
+                    ),
                 ),
             )
         except Exception as exc:
             logger.info(
-                "Lecture video narration synthesis failed. "
+                "Lecture video narration pronunciation preparation failed. "
                 "run_id=%s lecture_video_id=%s narration_id=%s",
                 run_id,
-                work_item.lecture_video_id,
-                work_item.narration_id,
+                items[0].lecture_video_id,
+                items[0].narration_id,
             )
             await _mark_run_failed(
                 run_id,
                 lease_token,
-                work_item.narration_id,
+                items[0].narration_id,
                 _user_safe_processing_error_message(exc),
             )
             return
+        if prepared_speech_texts is None:
+            return
 
-        if synthesis_result is None:
-            logger.info(
-                "Lecture video narration stopped during synthesis. "
-                "run_id=%s lecture_video_id=%s narration_id=%s",
-                run_id,
-                work_item.lecture_video_id,
-                work_item.narration_id,
+        async def process(work_item: NarrationWorkItem) -> bool | None:
+            return await _process_narration_work_item(
+                run_id, lease_token, work_item, persistence_lock, prepared_speech_texts
+            )
+
+        try:
+            results = await map_tts_job(items, process)
+        except Exception as exc:
+            logger.exception("Lecture video narration batch failed. run_id=%s", run_id)
+            await _mark_run_failed(
+                run_id, lease_token, None, _user_safe_processing_error_message(exc)
             )
             return
-        content_type, audio = synthesis_result
+        if any(result is None for result in results):
+            return
+
+
+async def _process_narration_work_item(
+    run_id: int,
+    lease_token: str,
+    work_item: NarrationWorkItem,
+    persistence_lock: asyncio.Lock,
+    prepared_speech_texts: dict[int, str],
+) -> bool | None:
+    try:
+        synthesis_text = prepared_speech_texts[work_item.narration_id]
         logger.debug(
-            "Lecture video narration synthesized. run_id=%s "
-            "lecture_video_id=%s narration_id=%s content_type=%s bytes=%s",
+            "Lecture video narration synthesizing. run_id=%s "
+            "lecture_video_id=%s narration_id=%s text_length=%s",
             run_id,
             work_item.lecture_video_id,
             work_item.narration_id,
-            content_type,
-            len(audio),
+            len(synthesis_text),
         )
-
-        if not await _ensure_run_can_continue(run_id, lease_token):
-            logger.info(
-                "Lecture video narration stopped after synthesis. "
-                "run_id=%s lecture_video_id=%s narration_id=%s",
-                run_id,
-                work_item.lecture_video_id,
-                work_item.narration_id,
-            )
-            return
-
-        try:
-            logger.debug(
-                "Lecture video narration storing audio. "
-                "run_id=%s lecture_video_id=%s narration_id=%s bytes=%s",
-                run_id,
-                work_item.lecture_video_id,
-                work_item.narration_id,
-                len(audio),
-            )
-            store_result = await _await_with_run_lease_heartbeat(
-                run_id,
-                lease_token,
-                _store_narration_audio(
-                    content_type,
-                    audio,
-                ),
-            )
-        except Exception as exc:
-            logger.info(
-                "Lecture video narration storage failed. "
-                "run_id=%s lecture_video_id=%s narration_id=%s",
-                run_id,
-                work_item.lecture_video_id,
-                work_item.narration_id,
-            )
+        synthesis_result = await _await_with_run_lease_heartbeat(
+            run_id,
+            lease_token,
+            synthesize_elevenlabs_speech(
+                await _get_elevenlabs_api_key(work_item.class_id),
+                work_item.voice_id,
+                synthesis_text,
+                model_id=work_item.model_id,
+                voice_settings=work_item.voice_settings,
+            ),
+        )
+    except Exception as exc:
+        logger.info(
+            "Lecture video narration synthesis failed. "
+            "run_id=%s lecture_video_id=%s narration_id=%s",
+            run_id,
+            work_item.lecture_video_id,
+            work_item.narration_id,
+        )
+        async with persistence_lock:
             await _mark_run_failed(
                 run_id,
                 lease_token,
                 work_item.narration_id,
                 _user_safe_processing_error_message(exc),
             )
-            return
+        return None
 
-        if store_result is None:
-            logger.info(
-                "Lecture video narration stopped during storage. "
-                "run_id=%s lecture_video_id=%s narration_id=%s",
-                run_id,
-                work_item.lecture_video_id,
-                work_item.narration_id,
-            )
-            return
-        store_key, content_length = store_result
+    if synthesis_result is None:
+        logger.info(
+            "Lecture video narration stopped during synthesis. "
+            "run_id=%s lecture_video_id=%s narration_id=%s",
+            run_id,
+            work_item.lecture_video_id,
+            work_item.narration_id,
+        )
+        return None
+    content_type, audio = synthesis_result
+    logger.debug(
+        "Lecture video narration synthesized. run_id=%s "
+        "lecture_video_id=%s narration_id=%s content_type=%s bytes=%s",
+        run_id,
+        work_item.lecture_video_id,
+        work_item.narration_id,
+        content_type,
+        len(audio),
+    )
+
+    if not await _ensure_run_can_continue(run_id, lease_token):
+        logger.info(
+            "Lecture video narration stopped after synthesis. "
+            "run_id=%s lecture_video_id=%s narration_id=%s",
+            run_id,
+            work_item.lecture_video_id,
+            work_item.narration_id,
+        )
+        return None
+
+    try:
         logger.debug(
-            "Lecture video narration stored audio. run_id=%s "
-            "lecture_video_id=%s narration_id=%s store_key=%s bytes=%s",
+            "Lecture video narration storing audio. "
+            "run_id=%s lecture_video_id=%s narration_id=%s bytes=%s",
+            run_id,
+            work_item.lecture_video_id,
+            work_item.narration_id,
+            len(audio),
+        )
+        store_result = await _await_with_run_lease_heartbeat(
+            run_id,
+            lease_token,
+            _store_narration_audio(
+                content_type,
+                audio,
+            ),
+        )
+    except Exception as exc:
+        logger.info(
+            "Lecture video narration storage failed. "
+            "run_id=%s lecture_video_id=%s narration_id=%s",
+            run_id,
+            work_item.lecture_video_id,
+            work_item.narration_id,
+        )
+        async with persistence_lock:
+            await _mark_run_failed(
+                run_id,
+                lease_token,
+                work_item.narration_id,
+                _user_safe_processing_error_message(exc),
+            )
+        return None
+
+    if store_result is None:
+        logger.info(
+            "Lecture video narration stopped during storage. "
+            "run_id=%s lecture_video_id=%s narration_id=%s",
+            run_id,
+            work_item.lecture_video_id,
+            work_item.narration_id,
+        )
+        return None
+    store_key, content_length = store_result
+    logger.debug(
+        "Lecture video narration stored audio. run_id=%s "
+        "lecture_video_id=%s narration_id=%s store_key=%s bytes=%s",
+        run_id,
+        work_item.lecture_video_id,
+        work_item.narration_id,
+        store_key,
+        content_length,
+    )
+
+    try:
+        logger.debug(
+            "Lecture video narration attaching audio. "
+            "run_id=%s lecture_video_id=%s narration_id=%s store_key=%s",
             run_id,
             work_item.lecture_video_id,
             work_item.narration_id,
             store_key,
-            content_length,
         )
-
-        try:
-            logger.debug(
-                "Lecture video narration attaching audio. "
-                "run_id=%s lecture_video_id=%s narration_id=%s store_key=%s",
-                run_id,
-                work_item.lecture_video_id,
-                work_item.narration_id,
-                store_key,
-            )
+        async with persistence_lock:
             attached = await _attach_stored_audio_to_narration(
                 run_id,
                 lease_token,
@@ -1287,29 +1350,31 @@ async def _process_claimed_narration_run(run_id: int, lease_token: str) -> None:
                 content_length,
                 store_key,
             )
-        except Exception:
-            await _delete_audio_key_quietly(store_key)
-            raise
+    except BaseException:
+        await _delete_audio_key_quietly(store_key)
+        raise
 
-        if not attached:
-            logger.info(
-                "Lecture video narration attach skipped; cleaning up. "
-                "run_id=%s lecture_video_id=%s narration_id=%s store_key=%s",
-                run_id,
-                work_item.lecture_video_id,
-                work_item.narration_id,
-                store_key,
-            )
-            await _delete_audio_key_quietly(store_key)
-            return
-        logger.debug(
-            "Lecture video narration attached audio. "
+    if not attached:
+        logger.info(
+            "Lecture video narration attach skipped; cleaning up. "
             "run_id=%s lecture_video_id=%s narration_id=%s store_key=%s",
             run_id,
             work_item.lecture_video_id,
             work_item.narration_id,
             store_key,
         )
+        await _delete_audio_key_quietly(store_key)
+        return None
+    logger.debug(
+        "Lecture video narration attached audio. "
+        "run_id=%s lecture_video_id=%s narration_id=%s store_key=%s",
+        run_id,
+        work_item.lecture_video_id,
+        work_item.narration_id,
+        store_key,
+    )
+
+    return True
 
 
 async def _get_elevenlabs_api_key(class_id: int) -> str:
@@ -1540,6 +1605,8 @@ async def recover_failed_processing_run(
 async def _prepare_next_work_item(
     run_id: int,
     lease_token: str,
+    *,
+    exclude_narration_ids: set[int] | None = None,
 ) -> tuple[
     str,
     NarrationWorkItem | tuple[int | None, str] | None,
@@ -1598,6 +1665,7 @@ async def _prepare_next_work_item(
         knowledge_profile = profile_for(attached_assistant, "knowledge_check")
         work_item = _first_pending_narration_work(
             lecture_video,
+            exclude_narration_ids=exclude_narration_ids,
             assistant_id=attached_assistant.id,
             model_id=knowledge_profile.model.value,
             voice_settings=voice_settings_for_profile(knowledge_profile),
@@ -1629,6 +1697,7 @@ async def _prepare_next_work_item(
 def _first_pending_narration_work(
     lecture_video: models.LectureVideo,
     *,
+    exclude_narration_ids: set[int] | None = None,
     assistant_id: int = 0,
     model_id: str = "eleven_flash_v2_5",
     voice_settings: dict[str, Any] | None = None,
@@ -1678,6 +1747,8 @@ def _first_pending_narration_work(
                         ),
                     ),
                 )
+    if exclude_narration_ids:
+        pending = [item for item in pending if item[0] not in exclude_narration_ids]
     if not pending:
         return None
 

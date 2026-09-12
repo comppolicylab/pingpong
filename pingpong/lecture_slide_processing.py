@@ -80,6 +80,7 @@ from pingpong.say_transform import (
     split_tts_pronunciation_text,
     tts_word_spans,
 )
+from pingpong.tts_jobs import map_tts_job as _map_tts_job
 from pingpong.worker_pool import (
     DEFAULT_WORKER_POLL_INTERVAL_SECONDS,
     DEFAULT_WORKER_SHUTDOWN_GRACE_SECONDS,
@@ -2817,7 +2818,7 @@ async def _await_with_run_lease_heartbeat(
                     # CancelledError from awaiting it so the outer logic can proceed.
                     pass
                 return None
-    except Exception:
+    except BaseException:
         if not task.done():
             task.cancel()
             try:
@@ -3358,6 +3359,7 @@ async def _generate_narration_text(
         _parse_responses_output(
             openai_client,
             model=responses_model,
+            fast_mode=True,
             instructions=prompt,
             response_model=response_model,
             input_messages=_append_additional_context_message(
@@ -3796,15 +3798,26 @@ async def _synthesize_slide_audio(
             page_id: narration_tts_text or narration_text
             for page_id, _, narration_text, narration_tts_text in narration_pages
         }
-    artifacts: list[SlideAudioArtifact] = []
-    for (
-        page_id,
-        page_position,
-        content_kind,
-        narration_text,
-        narration_tts_text,
-        media,
-    ) in pages:
+    persistence_lock = asyncio.Lock()
+
+    async def synthesize_page(
+        item: tuple[
+            int,
+            int,
+            schemas.LectureSlideContentKind,
+            str,
+            str | None,
+            models.LectureSlideMediaStoredObject | None,
+        ],
+    ) -> SlideAudioArtifact | None:
+        (
+            page_id,
+            page_position,
+            content_kind,
+            narration_text,
+            narration_tts_text,
+            media,
+        ) = item
         if content_kind == schemas.LectureSlideContentKind.VIDEO:
             if media is None:
                 raise RuntimeError(
@@ -3861,7 +3874,7 @@ async def _synthesize_slide_audio(
             audio,
         )
         try:
-            async with config.db.driver.async_session() as session:
+            async with persistence_lock, config.db.driver.async_session() as session:
                 run = await models.LectureSlideProcessingRun.get_by_id(session, run_id)
                 page = await session.get(models.LectureSlidePage, page_id)
                 if (
@@ -3894,22 +3907,24 @@ async def _synthesize_slide_audio(
                 run.lease_expires_at = utcnow() + RUN_LEASE_DURATION
                 session.add(run)
                 await session.commit()
-        except Exception:
+        except BaseException:
             await _delete_audio_key_quietly(store_key)
             raise
-        artifacts.append(
-            SlideAudioArtifact(
-                page_id=page_id,
-                page_position=page_position,
-                content_type=content_type,
-                audio=audio,
-                duration_ms=duration_ms,
-                store_key=store_key,
-                stored_object_id=stored_object.id,
-                word_timings=word_timings,
-            )
+        return SlideAudioArtifact(
+            page_id=page_id,
+            page_position=page_position,
+            content_type=content_type,
+            audio=audio,
+            duration_ms=duration_ms,
+            store_key=store_key,
+            stored_object_id=stored_object.id,
+            word_timings=word_timings,
         )
-    return artifacts
+
+    artifacts = await _map_tts_job(pages, synthesize_page)
+    if any(artifact is None for artifact in artifacts):
+        return None
+    return [artifact for artifact in artifacts if artifact is not None]
 
 
 async def _prepare_inserted_video_audio(
@@ -5163,6 +5178,7 @@ async def _generate_slide_context_v5_for_window(
     context = await _parse_responses_output(
         openai_client,
         model=model,
+        fast_mode=True,
         instructions=_build_slide_context_generation_instructions(
             generation_prompt,
             total_duration_ms=total_duration_ms,
@@ -5274,6 +5290,7 @@ async def _generate_slide_manifest_for_window(
     manifest = await _parse_responses_output(
         openai_client,
         model=model,
+        fast_mode=True,
         instructions=_build_slide_manifest_generation_instructions(
             generation_prompt,
             total_duration_ms=total_duration_ms,
@@ -5685,7 +5702,10 @@ async def _synthesize_knowledge_check_audio(
         prepared_speech_texts = {
             narration_id: text for narration_id, _, text, _ in narration_items
         }
-    for narration_id, display_text, text, _ in narration_items:
+    persistence_lock = asyncio.Lock()
+
+    async def synthesize_narration(item: tuple[int, str, str, str]) -> bool | None:
+        narration_id, display_text, text, _ = item
         synthesis_text = prepared_speech_texts[narration_id]
         synthesis_result = await _await_with_run_lease_heartbeat(
             run_id,
@@ -5707,7 +5727,7 @@ async def _synthesize_knowledge_check_audio(
             ),
         )
         if synthesis_result is None:
-            return
+            return None
         _, audio = synthesis_result
         content_type = LECTURE_SLIDE_AUDIO_CONTENT_TYPE
         store_key, content_length = await _store_audio(
@@ -5717,7 +5737,7 @@ async def _synthesize_knowledge_check_audio(
         )
         duration_ms = audio_duration_ms(audio, content_type)
         try:
-            async with config.db.driver.async_session() as session:
+            async with persistence_lock, config.db.driver.async_session() as session:
                 run = await models.LectureSlideProcessingRun.get_by_id(session, run_id)
                 narration = await models.LectureSlideNarration.get_by_id(
                     session, narration_id
@@ -5729,7 +5749,7 @@ async def _synthesize_knowledge_check_audio(
                     or run.lease_token != lease_token
                 ):
                     await _delete_audio_key_quietly(store_key)
-                    return
+                    return None
                 stored_object = models.LectureSlideNarrationStoredObject(
                     key=store_key,
                     content_type=content_type,
@@ -5743,9 +5763,13 @@ async def _synthesize_knowledge_check_audio(
                 narration.error_message = None
                 session.add(narration)
                 await session.commit()
-        except Exception:
+        except BaseException:
             await _delete_audio_key_quietly(store_key)
             raise
+
+        return True
+
+    await _map_tts_job(narration_items, synthesize_narration)
 
 
 async def _persist_composite_artifacts(
@@ -6052,11 +6076,18 @@ async def _parse_responses_output(
     instructions: str,
     response_model: type[_ResponseModelT],
     input_messages: ResponseInputParam,
+    fast_mode: bool = False,
 ) -> _ResponseModelT:
     for attempt in range(1, OPENAI_GENERATION_MAX_ATTEMPTS + 1):
         try:
             response = await openai_client.responses.parse(
                 model=model,
+                service_tier=(
+                    "priority"
+                    if fast_mode
+                    and not isinstance(openai_client, openai.AsyncAzureOpenAI)
+                    else openai.omit
+                ),
                 instructions=instructions,
                 input=input_messages,
                 text_format=response_model,
