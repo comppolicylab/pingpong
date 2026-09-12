@@ -31,6 +31,7 @@
 		showContinue?: boolean;
 		continueDisabled?: boolean;
 		oncontinue?: () => void;
+		onskip?: () => void | Promise<void>;
 		headerTrailing?: Snippet;
 	};
 	type Props =
@@ -59,6 +60,7 @@
 		onselectOption,
 		submittingOptionId,
 		oncontinue,
+		onskip,
 		headerTrailing
 	}: Props = $props();
 
@@ -210,6 +212,16 @@
 					</div>
 				{/each}
 			</div>
+			{#if onskip}
+				<button
+					type="button"
+					class="{actionButtonClass} text-slate-600 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+					disabled={answerOptionsDisabled}
+					onclick={onskip}
+				>
+					Skip
+				</button>
+			{/if}
 		</div>
 	{:else}
 		<div class={cardClass}>
