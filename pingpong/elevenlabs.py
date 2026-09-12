@@ -196,6 +196,24 @@ ELEVENLABS_V3_LANGUAGES: Final[tuple[ElevenLabsLanguage, ...]] = (
 )
 
 
+ELEVENLABS_MULTILINGUAL_V2_LANGUAGES: Final[tuple[ElevenLabsLanguage, ...]] = tuple(
+    language
+    for language in ELEVENLABS_FLASH_V2_5_LANGUAGES
+    if language.code not in {"hu", "no", "vi"}
+)
+
+ELEVENLABS_MODEL_LANGUAGES: Final[
+    Mapping[schemas.ElevenLabsTTSModel, tuple[ElevenLabsLanguage, ...]]
+] = MappingProxyType(
+    {
+        schemas.ElevenLabsTTSModel.MULTILINGUAL_V2: ELEVENLABS_MULTILINGUAL_V2_LANGUAGES,
+        schemas.ElevenLabsTTSModel.FLASH_V2_5: ELEVENLABS_FLASH_V2_5_LANGUAGES,
+        schemas.ElevenLabsTTSModel.V3: ELEVENLABS_V3_LANGUAGES,
+        schemas.ElevenLabsTTSModel.V3_CONVERSATIONAL: ELEVENLABS_V3_LANGUAGES,
+    }
+)
+
+
 def get_elevenlabs_client(api_key: str) -> AsyncElevenLabs:
     if not api_key:
         raise ValueError("API key is required")
@@ -440,7 +458,10 @@ async def synthesize_elevenlabs_speech_with_timings(
             else None
         )
         language_options = (
-            {"language_code": language_code} if language_code is not None else {}
+            {"language_code": language_code}
+            if language_code is not None
+            and model_id != schemas.ElevenLabsTTSModel.MULTILINGUAL_V2
+            else {}
         )
         response = await client.text_to_speech.convert_with_timestamps(
             voice_id=voice_id,
@@ -919,7 +940,10 @@ class ElevenLabsStreamingTTS:
         self._voice_settings = dict(
             ELEVENLABS_TTS_VOICE_SETTINGS if voice_settings is None else voice_settings
         )
-        self._uses_dialogue_websocket = model_id.startswith("eleven_v3")
+        self._uses_dialogue_websocket = model_id in {
+            schemas.ElevenLabsTTSModel.V3,
+            schemas.ElevenLabsTTSModel.V3_CONVERSATIONAL,
+        }
         self._session: aiohttp.ClientSession | None = None
         self._ws: aiohttp.ClientWebSocketResponse | None = None
 

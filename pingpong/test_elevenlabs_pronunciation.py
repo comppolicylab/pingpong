@@ -1,6 +1,8 @@
 import json
 from types import SimpleNamespace
 
+import pytest
+
 import pingpong.models as models
 from pingpong import schemas
 from pingpong import elevenlabs_pronunciation
@@ -163,3 +165,47 @@ async def test_v3_pronunciation_conversion_is_cached_and_hint_changes_miss_cache
             "beɪs",
             "lɛd",
         }
+
+
+@pytest.mark.parametrize(
+    "model", ["eleven_multilingual_v2", "eleven_v3_conversational"]
+)
+async def test_new_models_preserve_authored_aliases_without_ipa_conversion(
+    db, monkeypatch, model
+):
+    async with db.async_session() as session:
+        session.add(models.Class(id=1, name="Pronunciation Class", api_key="sk-test"))
+        session.add(
+            models.Assistant(
+                id=1,
+                name="Lecture assistant",
+                class_id=1,
+                creator_id=1,
+                model="gpt-4o-mini",
+                tools="[]",
+                version=3,
+                elevenlabs_config=schemas.ElevenLabsConfig(
+                    narration=schemas.ElevenLabsTTSProfile(model=model)
+                ).model_dump(mode="json"),
+            )
+        )
+        await session.commit()
+
+    async def unexpected_conversion(*args):
+        pytest.fail("Alias models must not convert phonetic spellings to IPA")
+
+    monkeypatch.setattr(
+        elevenlabs_pronunciation, "get_openai_client_by_class_id", unexpected_conversion
+    )
+    result = await elevenlabs_pronunciation.speech_texts_for_elevenlabs(
+        assistant_id=1,
+        component="narration",
+        scope="lecture_slide_narration",
+        language_code="en",
+        items=[
+            elevenlabs_pronunciation.SpeechTextItem(
+                item_id=1, display_text="The lead pipe.", speech_text="The led pipe."
+            )
+        ],
+    )
+    assert result == {1: "The led pipe."}
