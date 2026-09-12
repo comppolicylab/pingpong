@@ -179,6 +179,7 @@
 	let questionPanelPercent = $state(40);
 	let resizingQuestions = $state(false);
 	let subtitleHeight = $state(0);
+	let subtitlesExpanded = $state(false);
 	let resizeStartY = 0;
 	let resizeStartPercent = 40;
 	let isDesktopLayout: boolean = $state(false);
@@ -569,6 +570,17 @@
 			return;
 		}
 		activeMobilePanel = hasMobileChecksPanel ? 'checks' : hasMobileChatPanel ? 'chat' : null;
+	});
+
+	$effect(() => {
+		if (
+			sessionState === 'awaiting_post_answer_resume' &&
+			currentContinuation?.post_answer_text?.trim() &&
+			!postAnswerNarrationPending &&
+			subtitlesExpanded
+		) {
+			showQuestionGallery = false;
+		}
 	});
 
 	function resizeQuestions(event: PointerEvent) {
@@ -2456,7 +2468,10 @@
 										: title}
 									startOffsetMs={initialStartOffsetMs}
 									{questionMarkers}
-									{subtitleText}
+									subtitleText={sessionState === 'awaiting_post_answer_resume'
+										? currentContinuation?.post_answer_text || null
+										: subtitleText}
+									bind:subtitlesExpanded
 									bind:subtitleHeight
 									subtitlesCollapsed={hasQuestionPrompt && !introNarrationPending}
 									disabled={playerInteractionDisabled}
@@ -2494,6 +2509,16 @@
 						{/if}
 					</div>
 					<div class="flex shrink-0 items-center gap-3 py-2">
+						{#if !showQuestionGallery && continuePromptProps.showContinue}
+							<button
+								type="button"
+								class="rounded-lg bg-blue-600 px-6 py-2.5 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+								disabled={continuePromptProps.continueDisabled}
+								onclick={requestContinue}
+							>
+								Continue
+							</button>
+						{/if}
 						{#if showQuestionGallery && (isDesktopLayout || activeMobilePanel === 'checks')}
 							<div
 								role="slider"
