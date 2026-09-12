@@ -4943,10 +4943,10 @@
 				</p>
 			</div>
 		</slot>
-		<div class="flex max-h-[80vh] min-h-[560px] flex-col overflow-hidden">
-			<div
-				class="grid min-h-0 flex-1 border-y border-gray-200 lg:grid-cols-[minmax(0,1.2fr)_minmax(360px,0.8fr)]"
-			>
+		<div
+			class="flex max-h-[80vh] min-h-[560px] flex-col overflow-hidden lg:grid lg:grid-cols-[minmax(0,1.2fr)_minmax(360px,0.8fr)] lg:grid-rows-[minmax(0,1fr)_auto] lg:border-y lg:border-gray-200"
+		>
+			<div class="grid min-h-0 flex-1 border-y border-gray-200 lg:contents">
 				<div class="flex min-h-[420px] overflow-hidden bg-gray-50 lg:border-r lg:border-gray-200">
 					{#if selectedLectureSlidePage?.content_kind === 'slide' && lectureSlideSourceUrl}
 						<PdfPageViewer
@@ -4995,7 +4995,9 @@
 						</div>
 					{/if}
 				</div>
-				<div class="flex min-h-0 flex-col overflow-hidden bg-white">
+				<div
+					class="flex min-h-0 flex-col overflow-hidden bg-white lg:col-start-2 lg:row-span-2 lg:row-start-1"
+				>
 					<div class="flex items-center justify-between gap-3 border-b border-gray-200 px-5 py-4">
 						<div class="flex min-w-0 items-center gap-2.5">
 							<span
@@ -5345,9 +5347,9 @@
 								</Label>
 								<Textarea
 									id="slide_author_notes"
-									rows={6}
+									rows={2}
 									placeholder="Instructor notes used when generating narration for this slide."
-									class="resize-none rounded-lg border-gray-300 text-sm focus:border-gray-900 focus:ring-gray-900"
+									class="field-sizing-content max-h-32 min-h-16 resize-none overflow-y-auto rounded-lg border-gray-300 text-sm focus:border-gray-900 focus:ring-gray-900"
 									value={selectedLectureSlidePage.user_notes || ''}
 									disabled={preventEdits}
 									oninput={(event) =>
@@ -5382,9 +5384,9 @@
 								{#if selectedLectureSlidePage.content_kind !== 'video'}
 									<Textarea
 										id="slide_narration_text"
-										rows={9}
+										rows={3}
 										placeholder="The spoken narration for this slide."
-										class="resize-none rounded-lg border-gray-300 text-sm focus:border-gray-900 focus:ring-gray-900"
+										class="field-sizing-content max-h-40 min-h-20 resize-none overflow-y-auto rounded-lg border-gray-300 text-sm focus:border-gray-900 focus:ring-gray-900"
 										value={selectedLectureSlidePage.narration_text || ''}
 										disabled={preventEdits || !selectedLectureSlideHasNarration}
 										oninput={(event) =>
@@ -5499,7 +5501,9 @@
 				</div>
 			</div>
 			{#if lectureSlidePages.length > 0}
-				<div class="border-b border-gray-200 bg-white px-4 pt-3 pb-2">
+				<div
+					class="min-w-0 border-b border-gray-200 bg-white px-4 pt-3 pb-2 lg:col-start-1 lg:border-t lg:border-r lg:border-b-0"
+				>
 					<div class="flex items-center justify-between px-1 pb-1.5">
 						<span class="text-xs font-semibold text-gray-500 uppercase">Slides</span>
 						<span class="text-xs text-gray-400">
