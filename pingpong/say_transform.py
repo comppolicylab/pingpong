@@ -2,6 +2,7 @@ import json
 import logging
 import re
 from dataclasses import dataclass
+from difflib import SequenceMatcher
 from typing import Literal
 
 
@@ -22,14 +23,27 @@ SnippetTransformTarget = PuaStreamTarget
 logger = logging.getLogger(__name__)
 
 
+TTS_DELIVERY_INSTRUCTIONS = f"""---Spoken Delivery---
+Use natural conversational phrasing and contractions where appropriate to the language
+and instructor's voice. Preserve contractions from supplied transcripts. Honor the
+instructor's requirements to preserve transcript wording and pacing.
+For an occasional pause that helps students absorb a key point or transition, use a
+`say` block with an ellipsis attached to the spoken word and ordinary display punctuation:
+{SAY_MARKER_START}say{SAY_MARKER_SEPARATOR}{{"speech":"Now...","content":"Now,"}}{SAY_MARKER_END}
+Keep the words unchanged; put pause punctuation only in `speech`, never in `content`.
+Do not add standalone punctuation tokens, SSML breaks, or bracketed audio tags.
+Use pauses sparingly, not in every sentence, and only when transcript instructions permit.
+Apply this only to fields described as spoken narration, a spoken response, an intro,
+or spoken feedback."""
+
 TTS_PRONUNCIATION_INSTRUCTIONS = f"""---ElevenLabs Pronunciation Metadata---
 Some generated fields are sent to ElevenLabs text-to-speech. Use context to identify
-words whose pronunciation is genuinely ambiguous. Only for those words, preserve the
-correctly spelled word for display while supplying a simple phonetic alternative
+words or phrases whose pronunciation is genuinely ambiguous. Only for those, preserve the
+correctly spelled text for display while supplying a simple phonetic alternative
 spelling for speech with this exact inline form:
 {SAY_MARKER_START}say{SAY_MARKER_SEPARATOR}{{"speech":"leed","content":"lead"}}{SAY_MARKER_END}
-In each pronunciation block, both `speech` and `content` must contain exactly one
-word with no whitespace.
+In each pronunciation block, both `speech` and `content` must be nonempty words or
+phrases. They may have different word counts.
 For example: "The pipes
 {SAY_MARKER_START}say{SAY_MARKER_SEPARATOR}{{"speech":"leed","content":"lead"}}{SAY_MARKER_END}
 water away, and old pipes were made of
@@ -37,22 +51,28 @@ water away, and old pipes were made of
 Use ordinary spelling everywhere else. Do not use IPA, SSML, markdown, or this block
 in fields that are not described as spoken narration, a spoken response, an intro,
 or spoken feedback.
-Do not mention this metadata to the learner."""
+Do not mention this metadata to the learner.
+
+{TTS_DELIVERY_INSTRUCTIONS}"""
 
 TTS_PRONUNCIATION_INSTRUCTIONS_V3 = f"""---ElevenLabs v3 Pronunciation Metadata---
 Some generated fields are sent to ElevenLabs v3 text-to-speech. Use context to
-identify words whose pronunciation is genuinely ambiguous. Only for those words,
-preserve the correctly spelled word for display while supplying its IPA pronunciation,
+identify words or phrases whose pronunciation is genuinely ambiguous. Only for those,
+preserve the correctly spelled text for display while supplying its IPA pronunciation,
 wrapped in forward slashes and double quotes, with this exact inline form:
 {SAY_MARKER_START}say{SAY_MARKER_SEPARATOR}{{"speech":"\\\"/liːd/\\\"","content":"lead"}}{SAY_MARKER_END}
-In each pronunciation block, `content` must contain exactly one word and `speech`
-must contain one IPA transcription with no whitespace. Use ordinary spelling
+In each pronunciation block, `content` must contain a nonempty word or phrase and `speech`
+must contain its IPA transcription, including spaces between words. Use ordinary spelling
 everywhere else. Do not use SSML, alternative spellings, markdown, or this block in
 fields that are not described as spoken narration, a spoken response, an intro, or
-spoken feedback. Do not mention this metadata to the learner."""
+spoken feedback. Do not mention this metadata to the learner.
+
+{TTS_DELIVERY_INSTRUCTIONS}"""
 
 MANUAL_TTS_PRONUNCIATION_EXAMPLE = "[[lead=>leed]]"
-_MANUAL_TTS_PRONUNCIATION_PATTERN = re.compile(r"\[\[([^\s\[\]]+)=>([^\s\[\]]+)\]\]")
+_MANUAL_TTS_PRONUNCIATION_PATTERN = re.compile(
+    r"\[\[([^\[\]\r\n]+)=>([^\[\]\r\n]+)\]\]"
+)
 
 
 class ManualTTSPronunciationError(ValueError):
@@ -678,16 +698,6 @@ def split_tts_pronunciation_text(text: str) -> TTSPronunciationText:
         return TTSPronunciationText(display=text, speech=text)
     display = transform_say_text(text, "display")
     speech = transform_say_text(text, "speech")
-    display_word_count = len(display.split())
-    speech_word_count = len(speech.split())
-    if display_word_count != speech_word_count:
-        logger.warning(
-            "Ignoring generated pronunciation override with mismatched word count. "
-            "display_words=%s speech_words=%s",
-            display_word_count,
-            speech_word_count,
-        )
-        speech = display
     return TTSPronunciationText(display=display, speech=speech)
 
 
@@ -709,7 +719,11 @@ def split_manual_tts_pronunciation_text(text: str) -> TTSPronunciationText:
             raise ManualTTSPronunciationError(
                 "Malformed pronunciation annotation. Use [[written=>spoken]]."
             )
-        content, speech = match.groups()
+        content, speech = (part.strip() for part in match.groups())
+        if not content or not speech:
+            raise ManualTTSPronunciationError(
+                "Pronunciation annotations require text on both sides of =>."
+            )
         if "=>" in content or "=>" in speech:
             raise ManualTTSPronunciationError(
                 "Pronunciation annotations must contain exactly one => separator."
@@ -739,6 +753,37 @@ def split_manual_tts_pronunciation_text(text: str) -> TTSPronunciationText:
     return split_tts_pronunciation_text("".join(converted))
 
 
+def tts_word_spans(
+    display_words: list[str], speech_words: list[str]
+) -> list[tuple[int, int, int, int]]:
+    if not display_words or not speech_words:
+        raise ValueError("Display and speech text must both contain words.")
+    spans: list[tuple[int, int, int, int]] = []
+    for _, i, end_i, j, end_j in SequenceMatcher(
+        a=display_words, b=speech_words, autojunk=False
+    ).get_opcodes():
+        if end_i - i == end_j - j:
+            spans.extend((i + n, i + n + 1, j + n, j + n + 1) for n in range(end_i - i))
+        else:
+            spans.append((i, end_i, j, end_j))
+    index = 0
+    while index < len(spans):
+        i, end_i, j, end_j = spans[index]
+        if i == end_i or j == end_j:
+            if index:
+                previous = spans[index - 1]
+                spans[index - 1 : index + 1] = [
+                    (previous[0], end_i, previous[2], end_j)
+                ]
+                index -= 1
+            else:
+                following = spans[index + 1]
+                spans[index : index + 2] = [(i, following[1], j, following[3])]
+        else:
+            index += 1
+    return spans
+
+
 def combine_manual_tts_pronunciation_text(
     display_text: str,
     speech_override: str | None,
@@ -747,22 +792,26 @@ def combine_manual_tts_pronunciation_text(
     if not speech_override or speech_override == display_text:
         return display_text
 
-    display_parts = re.findall(r"\s+|\S+", display_text)
-    speech_words = re.findall(r"\S+", speech_override)
-    display_word_count = sum(not part.isspace() for part in display_parts)
-    if display_word_count != len(speech_words):
+    display_matches = list(re.finditer(r"\S+", display_text))
+    speech_matches = list(re.finditer(r"\S+", speech_override))
+    if not display_matches or not speech_matches:
         raise ManualTTSPronunciationError(
-            "Stored pronunciation text cannot be represented as word annotations."
+            "Stored pronunciation text must contain display and speech words."
         )
 
     combined: list[str] = []
-    speech_index = 0
-    for part in display_parts:
-        if part.isspace():
-            combined.append(part)
-            continue
-        speech_word = speech_words[speech_index]
-        speech_index += 1
+    cursor = 0
+    for i, end_i, j, end_j in tts_word_spans(
+        [match.group() for match in display_matches],
+        [match.group() for match in speech_matches],
+    ):
+        start, end = display_matches[i].start(), display_matches[end_i - 1].end()
+        combined.append(display_text[cursor:start])
+        cursor = end
+        part = display_text[start:end]
+        speech_word = speech_override[
+            speech_matches[j].start() : speech_matches[end_j - 1].end()
+        ]
         if part == speech_word:
             combined.append(part)
             continue
@@ -793,6 +842,7 @@ def combine_manual_tts_pronunciation_text(
                 "Stored pronunciation word conflicts with editor annotation syntax."
             )
         combined.append(f"{prefix}[[{display_word}=>{spoken_word}]]{suffix}")
+    combined.append(display_text[cursor:])
     return "".join(combined)
 
 

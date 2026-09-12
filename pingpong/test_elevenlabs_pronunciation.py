@@ -38,6 +38,7 @@ async def test_v3_pronunciation_conversion_is_cached_and_hint_changes_miss_cache
                     "leed": "liːd",
                     "led": "/lɛd/",
                     "base": "beɪs",
+                    "ess cue ell": "ɛs kjuː ɛl",
                 }[item["authored_spoken"]]
                 pronunciations.append(SimpleNamespace(key=item["key"], ipa=ipa))
             return SimpleNamespace(
@@ -76,6 +77,11 @@ async def test_v3_pronunciation_conversion_is_cached_and_hint_changes_miss_cache
                 display_text="The bass sounded low.",
                 speech_text="The base sounded low.",
                 context="A sentence about a musical instrument.",
+            ),
+            elevenlabs_pronunciation.SpeechTextItem(
+                item_id=13,
+                display_text="Use SQL here.",
+                speech_text="Use ess cue ell here.",
             ),
         ],
     )
@@ -123,6 +129,11 @@ async def test_v3_pronunciation_conversion_is_cached_and_hint_changes_miss_cache
                 display_text="The lead pipe.",
                 speech_text='The "/lɛd/" pipe.',
             ),
+            elevenlabs_pronunciation.SpeechTextItem(
+                item_id=42,
+                display_text="Visit New York today.",
+                speech_text='Visit "/nuː jɔːrk/" today.',
+            ),
         ],
     )
 
@@ -130,12 +141,14 @@ async def test_v3_pronunciation_conversion_is_cached_and_hint_changes_miss_cache
         10: 'Please "/liːd/", the class.',
         11: 'We "/liːd/" together.',
         12: 'The "/beɪs/" sounded low.',
+        13: 'Use "/ɛs kjuː ɛl/" here.',
     }
     assert cached == {20: 'They "/liːd/" today.'}
     assert changed == {30: 'The "/lɛd/" pipe.'}
     assert authored_ipa == {
         40: 'The "/lɛd/" pipe.',
         41: 'The "/lɛd/" pipe.',
+        42: 'Visit "/nuː jɔːrk/" today.',
     }
     assert len(requests) == 2
 
@@ -146,7 +159,7 @@ async def test_v3_pronunciation_conversion_is_cached_and_hint_changes_miss_cache
     request_payload = json.loads(first_request["input"])
     assert request_payload["language_code"] == "en"
     assert request_payload["scope"] == "lecture_slide_narration"
-    assert len(request_payload["items"]) == 2
+    assert len(request_payload["items"]) == 3
     lead_item = next(
         item for item in request_payload["items"] if item["written"] == "lead"
     )
@@ -162,4 +175,5 @@ async def test_v3_pronunciation_conversion_is_cached_and_hint_changes_miss_cache
             "liːd",
             "beɪs",
             "lɛd",
+            "ɛs kjuː ɛl",
         }

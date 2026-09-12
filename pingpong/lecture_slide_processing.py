@@ -78,6 +78,7 @@ from pingpong.now import utcnow
 from pingpong.say_transform import (
     TTS_PRONUNCIATION_INSTRUCTIONS,
     split_tts_pronunciation_text,
+    tts_word_spans,
 )
 from pingpong.worker_pool import (
     DEFAULT_WORKER_POLL_INTERVAL_SECONDS,
@@ -877,27 +878,27 @@ def _display_word_timings(
     speech_text: str,
 ) -> tuple[ElevenLabsSpeechWordTiming, ...]:
     """Restore display spellings while retaining ElevenLabs timing boundaries."""
-    if display_text == speech_text:
+    if display_text == speech_text or not timings:
         return tuple(timings)
     display_words = display_text.split()
-    speech_words = speech_text.split()
-    if len(display_words) != len(speech_words) or len(display_words) != len(timings):
-        logger.warning(
-            "Unable to map ElevenLabs pronunciation timing words to display text. "
-            "display_words=%s speech_words=%s timing_words=%s",
-            len(display_words),
-            len(speech_words),
-            len(timings),
+    if not display_words:
+        return ()
+    mapped: list[ElevenLabsSpeechWordTiming] = []
+    for i, end_i, j, end_j in tts_word_spans(
+        display_words, [timing.word for timing in timings]
+    ):
+        start_ms = timings[j].start_ms
+        duration_ms = timings[end_j - 1].end_ms - start_ms
+        count = end_i - i
+        mapped.extend(
+            ElevenLabsSpeechWordTiming(
+                word=display_words[i + offset],
+                start_ms=start_ms + duration_ms * offset // count,
+                end_ms=start_ms + duration_ms * (offset + 1) // count,
+            )
+            for offset in range(count)
         )
-        return tuple(timings)
-    return tuple(
-        ElevenLabsSpeechWordTiming(
-            word=display_word,
-            start_ms=timing.start_ms,
-            end_ms=timing.end_ms,
-        )
-        for display_word, timing in zip(display_words, timings, strict=True)
-    )
+    return tuple(mapped)
 
 
 @dataclass(frozen=True)

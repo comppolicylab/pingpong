@@ -5371,7 +5371,7 @@
 									<Helper class="text-xs text-gray-400">
 										Saving manual narration edits regenerates audio. Use
 										<span class="font-mono">{LECTURE_PRONUNCIATION_EXAMPLE}</span> to display “lead” and
-										pronounce it “leed.”
+										pronounce it “leed.” Words or phrases are supported on either side of the arrow.
 									</Helper>
 								{/if}
 							</div>
@@ -6905,7 +6905,7 @@
 										<Helper class="pb-1">
 											In spoken intro and feedback fields, use
 											<span class="font-mono">{LECTURE_PRONUNCIATION_EXAMPLE}</span> to display “lead”
-											and pronounce it “leed.”
+											and pronounce it “leed.” Words or phrases are supported on either side of the arrow.
 										</Helper>
 									{/if}
 									{#if canGenerateLectureVideoManifest && originalOverwriteManifest && !overwriteManifest}
@@ -7077,7 +7077,7 @@
 											The source_context fields are reference-only; slide timing is derived
 											automatically. In spoken fields, use
 											<span class="font-mono">{LECTURE_PRONUNCIATION_EXAMPLE}</span> to display “lead”
-											and pronounce it “leed.”
+											and pronounce it “leed.” Words or phrases are supported on either side of the arrow.
 										</Helper>
 										<Textarea
 											id="lecture_slide_content_json"

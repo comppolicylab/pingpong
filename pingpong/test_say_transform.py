@@ -33,13 +33,38 @@ def test_manual_tts_pronunciation_round_trip() -> None:
 
 
 @pytest.mark.parametrize(
+    ("written", "spoken"),
+    [
+        ("SQL", "ess cue ell"),
+        ("data base", "database"),
+        ("New York", "noo york"),
+        ("the data", "the"),
+        ("data", "the data"),
+    ],
+)
+def test_manual_tts_phrase_round_trip(written: str, spoken: str) -> None:
+    split = split_manual_tts_pronunciation_text(
+        f"Use [[ {written} => {spoken} ]] here."
+    )
+
+    assert split.display == f"Use {written} here."
+    assert split.speech == f"Use {spoken} here."
+    assert (
+        split_manual_tts_pronunciation_text(
+            combine_manual_tts_pronunciation_text(split.display, split.speech_override)
+        )
+        == split
+    )
+
+
+@pytest.mark.parametrize(
     "text",
     [
         "Broken [[lead=leed]].",
         "Broken [[lead=>leed].",
         "Broken [lead=>leed]].",
-        "Broken [[two words=>spoken]].",
-        "Broken [[lead=>two words]].",
+        "Broken [[ =>spoken]].",
+        "Broken [[lead=> ]].",
         "Broken [[lead=>leed=>led]].",
     ],
 )
@@ -228,13 +253,13 @@ def test_split_tts_pronunciation_text_returns_optional_override():
     assert unchanged.speech_override is None
 
 
-def test_split_tts_pronunciation_text_rejects_word_count_changes():
+def test_split_tts_pronunciation_text_accepts_word_count_changes():
     tagged = "Use " + snippet("say", "lead forward", "lead") + " now."
 
     split = split_tts_pronunciation_text(tagged)
 
     assert split.display == "Use lead now."
-    assert split.speech_override is None
+    assert split.speech_override == "Use lead forward now."
 
 
 def test_transform_accepts_content_only_snippet_for_silent_display():

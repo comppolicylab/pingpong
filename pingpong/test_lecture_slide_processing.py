@@ -3319,8 +3319,9 @@ async def test_total_stored_audio_duration_requires_every_duration():
         )
 
 
+@pytest.mark.parametrize("spoken", ["nuh-ray-shun.", "nuh ray shun."])
 async def test_synthesize_slide_audio_skips_empty_pages_and_stores_ogg_metadata(
-    db, monkeypatch
+    db, monkeypatch, spoken
 ):
     await _create_class_and_deck(db, slide_count=3)
     async with db.async_session() as session:
@@ -3329,7 +3330,7 @@ async def test_synthesize_slide_audio_skips_empty_pages_and_stores_ogg_metadata(
                 lecture_slide_deck_id=1,
                 position=0,
                 narration_text="First narration.",
-                narration_tts_text="First nuh-ray-shun.",
+                narration_tts_text=f"First {spoken}",
             ),
             models.LectureSlidePage(
                 lecture_slide_deck_id=1,
@@ -3395,7 +3396,7 @@ async def test_synthesize_slide_audio_skips_empty_pages_and_stores_ogg_metadata(
         run_id, "lease", 1
     )
 
-    assert requested_texts == ["First nuh-ray-shun.", "Final narration."]
+    assert requested_texts == [f"First {spoken}", "Final narration."]
     assert stored_content_types == ["audio/ogg", "audio/ogg"]
     assert artifacts is not None
     assert [artifact.page_id for artifact in artifacts] == [page_ids[0], page_ids[2]]
@@ -3403,6 +3404,8 @@ async def test_synthesize_slide_audio_skips_empty_pages_and_stores_ogg_metadata(
         "First",
         "narration.",
     ]
+    assert artifacts[0].word_timings[1].start_ms == 100
+    assert artifacts[0].word_timings[1].end_ms == 100 * (1 + len(spoken.split()))
     assert [artifact.content_type for artifact in artifacts] == [
         "audio/ogg",
         "audio/ogg",

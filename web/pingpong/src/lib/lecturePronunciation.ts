@@ -1,6 +1,6 @@
 export const LECTURE_PRONUNCIATION_EXAMPLE = '[[lead=>leed]]';
 
-const pronunciationPattern = /\[\[([^\s[\]]+)=>([^\s[\]]+)\]\]/g;
+const pronunciationPattern = /\[\[([^[\]\r\n]+)=>([^[\]\r\n]+)\]\]/g;
 
 export const lecturePronunciationError = (text: string): string | null => {
 	if (!text.includes('[[') && !text.includes(']]')) return null;
@@ -14,6 +14,9 @@ export const lecturePronunciationError = (text: string): string | null => {
 			return `Malformed pronunciation. Use ${LECTURE_PRONUNCIATION_EXAMPLE}.`;
 		}
 		const [, written, spoken] = match;
+		if (!written.trim() || !spoken.trim()) {
+			return 'Pronunciation annotations require text on both sides of =>.';
+		}
 		if (written.includes('=>') || spoken.includes('=>')) {
 			return 'Pronunciation annotations must contain exactly one => separator.';
 		}
