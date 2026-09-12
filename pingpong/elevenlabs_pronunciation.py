@@ -17,6 +17,7 @@ from pingpong.elevenlabs_config import (
     with_pronunciation_cache_entries,
 )
 from pingpong.schemas import ElevenLabsTTSModel
+from pingpong.say_transform import tts_word_spans
 
 
 PRONUNCIATION_MODEL = "gpt-5.6-terra"
@@ -68,23 +69,27 @@ def _pronunciation_occurrences(
     *,
     language_code: str | None,
 ) -> tuple[list[str], list[_PronunciationOccurrence]]:
-    display_parts = re.findall(r"\s+|\S+", item.display_text)
-    speech_parts = re.findall(r"\s+|\S+", item.speech_text)
-    display_words = [part for part in display_parts if not part.isspace()]
-    speech_word_indexes = [
-        index for index, part in enumerate(speech_parts) if not part.isspace()
-    ]
-    speech_words = [speech_parts[index] for index in speech_word_indexes]
-    if len(display_words) != len(speech_words):
-        raise ValueError("Pronunciation display and speech word counts do not match.")
+    if item.display_text == item.speech_text:
+        return [_quote_inline_ipa(item.speech_text)], []
+    display_matches = list(re.finditer(r"\S+", item.display_text))
+    speech_matches = list(re.finditer(r"\S*?/[^/\r\n]+/\S*|\S+", item.speech_text))
+    speech_parts: list[str] = []
 
     occurrences: list[_PronunciationOccurrence] = []
-    for display_word, speech_word, part_index in zip(
-        display_words,
-        speech_words,
-        speech_word_indexes,
-        strict=True,
+    cursor = 0
+    for i, end_i, j, end_j in tts_word_spans(
+        [match.group() for match in display_matches],
+        [match.group() for match in speech_matches],
     ):
+        start, end = speech_matches[j].start(), speech_matches[end_j - 1].end()
+        speech_parts.append(item.speech_text[cursor:start])
+        part_index = len(speech_parts)
+        speech_word = item.speech_text[start:end]
+        speech_parts.append(speech_word)
+        cursor = end
+        display_word = item.display_text[
+            display_matches[i].start() : display_matches[end_i - 1].end()
+        ]
         if display_word == speech_word or _IPA_PATTERN.search(speech_word):
             continue
 
@@ -97,12 +102,9 @@ def _pronunciation_occurrences(
         if display_match is not None and speech_match is not None:
             display_prefix, display_core, display_suffix = display_match.groups()
             speech_prefix, speech_core, speech_suffix = speech_match.groups()
-            if (
-                display_prefix == speech_prefix
-                and display_suffix == speech_suffix
-                and display_core
-                and speech_core
-            ):
+            if display_core == speech_core:
+                continue
+            if display_prefix == speech_prefix and display_core and speech_core:
                 prefix = speech_prefix
                 suffix = speech_suffix
                 written = display_core
@@ -122,6 +124,7 @@ def _pronunciation_occurrences(
                 suffix=suffix,
             )
         )
+    speech_parts.append(item.speech_text[cursor:])
     return [_quote_inline_ipa(part) for part in speech_parts], occurrences
 
 
