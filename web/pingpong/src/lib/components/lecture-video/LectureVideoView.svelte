@@ -1090,6 +1090,11 @@
 					return null;
 				}
 
+				if (controllerSessionId !== expanded.data.controller_session_id) {
+					// Old seeks cannot decrement the counter after control is replaced.
+					// Start the new controller with no pending seeks of its own.
+					seekInteractionsInFlight = 0;
+				}
 				controllerSessionId = expanded.data.controller_session_id;
 				const session = responseSession(expanded);
 				if (!session) return null;
