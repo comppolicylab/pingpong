@@ -5321,9 +5321,9 @@
 								</Label>
 								<Textarea
 									id="slide_author_notes"
-									rows={6}
+									rows={2}
 									placeholder="Instructor notes used when generating narration for this slide."
-									class="resize-none rounded-lg border-gray-300 text-sm focus:border-gray-900 focus:ring-gray-900"
+									class="field-sizing-content max-h-32 min-h-16 resize-none overflow-y-auto rounded-lg border-gray-300 text-sm focus:border-gray-900 focus:ring-gray-900"
 									value={selectedLectureSlidePage.user_notes || ''}
 									disabled={preventEdits}
 									oninput={(event) =>
@@ -5358,9 +5358,9 @@
 								{#if selectedLectureSlidePage.content_kind !== 'video'}
 									<Textarea
 										id="slide_narration_text"
-										rows={9}
+										rows={3}
 										placeholder="The spoken narration for this slide."
-										class="resize-none rounded-lg border-gray-300 text-sm focus:border-gray-900 focus:ring-gray-900"
+										class="field-sizing-content max-h-40 min-h-20 resize-none overflow-y-auto rounded-lg border-gray-300 text-sm focus:border-gray-900 focus:ring-gray-900"
 										value={selectedLectureSlidePage.narration_text || ''}
 										disabled={preventEdits || !selectedLectureSlideHasNarration}
 										oninput={(event) =>
