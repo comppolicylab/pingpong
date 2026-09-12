@@ -6405,8 +6405,9 @@ async def test_process_claimed_narration_run_marks_lecture_video_ready_and_store
 
 
 @with_institution(11, "Test Institution")
+@pytest.mark.parametrize("first_failure_index", [None, 0, 1, 2])
 async def test_process_claimed_narration_run_marks_failed_on_provider_error(
-    db, institution, monkeypatch
+    db, institution, monkeypatch, first_failure_index
 ):
     monkeypatch.setattr(
         lecture_video_processing,
@@ -6427,6 +6428,52 @@ async def test_process_claimed_narration_run_marks_failed_on_provider_error(
             run,
         ) = await create_processing_lecture_video_assistant(session, institution)
         assert run is not None
+        narration_ids = list(
+            await session.scalars(
+                select(models.LectureVideoNarration.id).order_by(
+                    models.LectureVideoNarration.id.asc()
+                )
+            )
+        )
+
+    if first_failure_index is not None:
+        # Force each possible first failure without depending on task/DB scheduling.
+        first_failure_id = narration_ids[first_failure_index]
+        failure_persisted = asyncio.Event()
+        all_started = asyncio.Event()
+        started = 0
+        mark_run_failed = lecture_video_processing._mark_run_failed
+
+        async def prepare_speech(**kwargs):
+            return {item.item_id: str(item.item_id) for item in kwargs["items"]}
+
+        async def fail_synthesis(_api_key, _voice_id, speech_text, **kwargs):
+            nonlocal started
+            started += 1
+            if started == len(narration_ids):
+                all_started.set()
+            await asyncio.wait_for(all_started.wait(), timeout=5)
+            if int(speech_text) != first_failure_id:
+                await asyncio.wait_for(failure_persisted.wait(), timeout=5)
+            raise ClassCredentialValidationUnavailableError(
+                provider=schemas.ClassCredentialProvider.ELEVENLABS,
+                message="ElevenLabs is temporarily unavailable.",
+            )
+
+        async def persist_failure(run_id, lease_token, narration_id, error_message):
+            await mark_run_failed(run_id, lease_token, narration_id, error_message)
+            if narration_id == first_failure_id:
+                failure_persisted.set()
+
+        monkeypatch.setattr(
+            lecture_video_processing, "speech_texts_for_elevenlabs", prepare_speech
+        )
+        monkeypatch.setattr(
+            lecture_video_processing, "synthesize_elevenlabs_speech", fail_synthesis
+        )
+        monkeypatch.setattr(
+            lecture_video_processing, "_mark_run_failed", persist_failure
+        )
 
     claim = await lecture_video_processing._claim_next_narration_run(
         leased_by="test-runner"
@@ -6456,9 +6503,24 @@ async def test_process_claimed_narration_run_marks_failed_on_provider_error(
     assert refreshed_run is not None
     assert refreshed_run.status == schemas.LectureVideoProcessingRunStatus.FAILED
     assert refreshed_run.error_message == "ElevenLabs is temporarily unavailable."
-    assert narrations[0].status == schemas.LectureVideoNarrationStatus.FAILED
-    assert narrations[1].status == schemas.LectureVideoNarrationStatus.PROCESSING
-    assert narrations[2].status == schemas.LectureVideoNarrationStatus.PROCESSING
+    failed_narrations = [
+        narration
+        for narration in narrations
+        if narration.status == schemas.LectureVideoNarrationStatus.FAILED
+    ]
+    assert len(failed_narrations) == 1
+    assert (
+        failed_narrations[0].error_message == "ElevenLabs is temporarily unavailable."
+    )
+    assert (
+        sum(
+            narration.status == schemas.LectureVideoNarrationStatus.PROCESSING
+            for narration in narrations
+        )
+        == 2
+    )
+    if first_failure_index is not None:
+        assert failed_narrations[0].id == narration_ids[first_failure_index]
 
 
 async def test_process_claimed_narration_run_raises_type_error_for_unexpected_work_item(
