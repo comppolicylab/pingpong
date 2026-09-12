@@ -118,6 +118,7 @@
 		subtitleText = null,
 		subtitlesCollapsed = false,
 		subtitleHeight = $bindable(0),
+		subtitlesExpanded = $bindable(false),
 		disabled = false,
 		manualPlaybackPrompt = false,
 		allowFullSeek = false,
@@ -161,6 +162,7 @@
 		subtitleText?: string | null;
 		subtitlesCollapsed?: boolean;
 		subtitleHeight?: number;
+		subtitlesExpanded?: boolean;
 		disabled?: boolean;
 		manualPlaybackPrompt?: boolean;
 		allowFullSeek?: boolean;
@@ -512,7 +514,10 @@
 		subtitleText != null || (customCaptionsVisible && !subtitlesCollapsed)
 	);
 	$effect(() => {
-		if (!subtitlesVisible) subtitleHeight = 0;
+		if (!subtitlesVisible) {
+			subtitleHeight = 0;
+			subtitlesExpanded = false;
+		}
 	});
 	let activeCaptionText = $derived(activeCaptionLines.join(' '));
 	let balancedCaptionLines = $derived(balanceCaptionLines(activeCaptionText));
@@ -2018,7 +2023,7 @@
 													class="flex items-center rounded-lg px-1.5 py-1 transition-colors duration-150 ease-out disabled:cursor-default {clusterInteractive
 														? 'cursor-pointer hover:bg-white/10 focus-visible:bg-white/10'
 														: ''}"
-													aria-label={`Show ${cluster.markers.length} comprehension checks`}
+													aria-label={`Show ${cluster.markers.length} learning checks`}
 													aria-expanded={clusterInteractive ? isActive : undefined}
 													disabled={!clusterInteractive}
 													onclick={(e) => {
@@ -2497,6 +2502,8 @@
 {#if subtitlesVisible}
 	<div
 		bind:clientHeight={subtitleHeight}
+		onintrostart={() => (subtitlesExpanded = false)}
+		onintroend={() => (subtitlesExpanded = true)}
 		class="-mb-3 flex h-[calc(2lh+0.5rem)] flex-col overflow-y-auto px-3 py-1 text-center text-sm leading-[1.4] font-medium text-slate-700 sm:text-base"
 		transition:slide={{ duration: prefersReducedMotion.current ? 0 : 250 }}
 	>

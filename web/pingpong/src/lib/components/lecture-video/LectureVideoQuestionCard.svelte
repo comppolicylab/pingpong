@@ -64,6 +64,7 @@
 		headerTrailing
 	}: Props = $props();
 
+	const showAnswerFeedback = false;
 	const cardClass = 'rounded-lg border border-slate-200 bg-white p-4';
 	const questionLabelClass = 'text-xs font-semibold uppercase tracking-widest text-slate-400';
 	const questionTextClass = 'mt-1 text-sm font-medium text-slate-900';
@@ -271,7 +272,7 @@
 									{#if reviewState === 'selected'}<span class="sr-only">Your answer: </span>{/if}
 									{option.option_text}
 								</div>
-								{#if feedbackText && reviewStyle.feedback}
+								{#if showAnswerFeedback && feedbackText && reviewStyle.feedback}
 									<div class={reviewStyle.feedback}>{feedbackText}</div>
 								{/if}
 							</div>
