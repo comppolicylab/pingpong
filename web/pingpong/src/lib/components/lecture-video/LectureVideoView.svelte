@@ -35,7 +35,7 @@
 	import LectureVideoQuestionGallery from './LectureVideoQuestionGallery.svelte';
 	import LectureVideoCompletedView from './LectureVideoCompletedView.svelte';
 
-	type QuestionMarkerState = 'upcoming' | 'correct' | 'incorrect';
+	type QuestionMarkerState = 'upcoming' | 'answered' | 'correct' | 'incorrect';
 	type QuestionPresentationRollbackState = {
 		questionId: number;
 		sessionState: LessonSessionState;
@@ -303,9 +303,11 @@
 				const state: QuestionMarkerState =
 					answer == null
 						? 'upcoming'
-						: answer.correctOptionId != null && answer.selectedOptionId === answer.correctOptionId
-							? 'correct'
-							: 'incorrect';
+						: answer.correctOptionId == null
+							? 'answered'
+							: answer.selectedOptionId === answer.correctOptionId
+								? 'correct'
+								: 'incorrect';
 				return {
 					id,
 					offsetMs,

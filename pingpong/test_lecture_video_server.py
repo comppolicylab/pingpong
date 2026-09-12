@@ -7726,17 +7726,10 @@ def test_lecture_video_config_matches_checks_video_description_duration(
                 "questions": [
                     {
                         "type": "single_select",
-                        "question_text": "Only one option?",
+                        "question_text": "No options?",
                         "intro_text": "Intro",
                         "stop_offset_ms": 1000,
-                        "options": [
-                            {
-                                "option_text": "Only option",
-                                "post_answer_text": "Nope",
-                                "continue_offset_ms": 1500,
-                                "correct": True,
-                            }
-                        ],
+                        "options": [],
                     }
                 ],
             },
@@ -8011,15 +8004,6 @@ async def test_get_assistant_lecture_video_config_returns_409_for_invalid_stored
         )
         session.add(question)
         await session.flush()
-        session.add(
-            models.LectureVideoQuestionOption(
-                question_id=question.id,
-                position=0,
-                option_text="Only option",
-                post_answer_text="Nope",
-                continue_offset_ms=1500,
-            )
-        )
 
         assistant = models.Assistant(
             id=1,

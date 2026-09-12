@@ -336,7 +336,7 @@
 			client_id: nextLectureSlideQuestionDraftId(),
 			option_text: option.option_text,
 			post_answer_text: option.post_answer_text || '',
-			correct: option.correct
+			correct: question.mode === 'partial' || question.options.length > 1 ? option.correct : false
 		}))
 	});
 
@@ -467,12 +467,12 @@
 			if (!question.question_text.trim()) {
 				return `Question ${index + 1} needs question text.`;
 			}
-			if (question.options.length < 2) {
-				return `Question ${index + 1} needs at least two answer options.`;
+			if (question.options.length < 1) {
+				return `Question ${index + 1} needs at least one answer option.`;
 			}
 			const correctCount = question.options.filter((option) => option.correct).length;
-			if (correctCount !== 1) {
-				return `Question ${index + 1} needs exactly one correct answer.`;
+			if (correctCount > 1) {
+				return `Question ${index + 1} needs at most one correct answer.`;
 			}
 			for (let optionIndex = 0; optionIndex < question.options.length; optionIndex += 1) {
 				if (!question.options[optionIndex].option_text.trim()) {
@@ -997,10 +997,10 @@
 					error: `Question ${index + 1} must have a non-negative stop_offset_ms.`
 				};
 			}
-			if (!Array.isArray(question.options) || question.options.length < 2) {
+			if (!Array.isArray(question.options) || question.options.length < 1) {
 				return {
 					manifest: null,
-					error: `Question ${index + 1} must include at least two options.`
+					error: `Question ${index + 1} must include at least one option.`
 				};
 			}
 
@@ -1046,10 +1046,10 @@
 					correctCount += 1;
 				}
 			}
-			if (question.type === 'single_select' && correctCount !== 1) {
+			if (question.type === 'single_select' && correctCount > 1) {
 				return {
 					manifest: null,
-					error: `Question ${index + 1} must have exactly one correct option.`
+					error: `Question ${index + 1} must have at most one correct option.`
 				};
 			}
 		}
@@ -1830,23 +1830,24 @@
 				return question;
 			}
 			if (mode === 'complete') {
-				const hasSingleCorrectOption =
-					question.options.filter((option) => option.correct).length === 1;
+				const hasValidCorrectOptions =
+					question.options.filter((option) => option.correct).length <= 1;
 				const existingOptions = question.options.map((option, index) => ({
 					...option,
-					correct: hasSingleCorrectOption ? option.correct : index === 0
+					correct:
+						question.options.length > 1 && (hasValidCorrectOptions ? option.correct : index === 0)
 				}));
 				return {
 					...question,
 					mode,
 					options: [
 						...existingOptions,
-						...Array.from({ length: Math.max(0, 2 - existingOptions.length) }, (_, index) => ({
+						...Array.from({ length: Math.max(0, 1 - existingOptions.length) }, () => ({
 							id: null,
 							client_id: nextLectureSlideQuestionDraftId(),
 							option_text: '',
 							post_answer_text: '',
-							correct: existingOptions.length === 0 && index === 0
+							correct: false
 						}))
 					]
 				};
@@ -1885,7 +1886,7 @@
 
 	const setLectureSlideQuestionCorrectOption = (
 		questionClientId: string,
-		optionClientId: string
+		optionClientId: string | null
 	) => {
 		lectureSlideQuestionDrafts = lectureSlideQuestionDrafts.map((question) =>
 			question.client_id === questionClientId
@@ -1893,7 +1894,9 @@
 						...question,
 						options: question.options.map((option) => ({
 							...option,
-							correct: option.client_id === optionClientId
+							correct:
+								(question.mode === 'partial' || question.options.length > 1) &&
+								option.client_id === optionClientId
 						}))
 					}
 				: question
@@ -1922,12 +1925,14 @@
 
 	const removeLectureSlideQuestionOption = (questionClientId: string, optionClientId: string) => {
 		lectureSlideQuestionDrafts = lectureSlideQuestionDrafts.map((question) => {
-			if (question.client_id !== questionClientId || question.options.length <= 2) {
+			if (question.client_id !== questionClientId || question.options.length <= 1) {
 				return question;
 			}
 			const removedOption = question.options.find((option) => option.client_id === optionClientId);
 			const nextOptions = question.options.filter((option) => option.client_id !== optionClientId);
-			if (removedOption?.correct && nextOptions.length > 0) {
+			if (question.mode === 'complete' && nextOptions.length === 1) {
+				nextOptions[0] = { ...nextOptions[0], correct: false };
+			} else if (removedOption?.correct && nextOptions.length > 0) {
 				nextOptions[0] = { ...nextOptions[0], correct: true };
 			}
 			return { ...question, options: nextOptions };
@@ -5164,7 +5169,9 @@
 												<div class="text-xs text-gray-400">
 													{selectedLectureSlideQuestion.mode === 'partial'
 														? 'Optional: add answer hints or mark a correct-answer hint.'
-														: 'Tap the circle to mark the correct one.'}
+														: selectedLectureSlideQuestion.options.length === 1
+															? 'Single-answer questions are not graded.'
+															: 'Tap the circle to mark the correct one.'}
 												</div>
 												<div class="text-xs text-gray-400">
 													Spoken feedback supports
@@ -5184,6 +5191,23 @@
 												Add
 											</Button>
 										</div>
+										{#if selectedLectureSlideQuestion.mode === 'complete' && selectedLectureSlideQuestion.options.length > 1}
+											<Checkbox
+												checked={!selectedLectureSlideQuestion.options.some(
+													(option) => option.correct
+												)}
+												disabled={preventEdits}
+												onchange={(event) =>
+													setLectureSlideQuestionCorrectOption(
+														selectedLectureSlideQuestion.client_id,
+														(event.target as HTMLInputElement).checked
+															? null
+															: (selectedLectureSlideQuestion.options[0]?.client_id ?? null)
+													)}
+											>
+												No correct answer
+											</Checkbox>
+										{/if}
 										{#if selectedLectureSlideQuestion.options.length > 0}
 											<div class="space-y-2.5">
 												{#each selectedLectureSlideQuestion.options as option, optionIndex (option.client_id)}
@@ -5200,23 +5224,25 @@
 															</span>
 														{/if}
 														<div class="flex items-start gap-3">
-															<button
-																type="button"
-																role="radio"
-																aria-checked={option.correct}
-																aria-label={`Mark option ${optionIndex + 1} as correct`}
-																disabled={preventEdits}
-																onclick={() =>
-																	setLectureSlideQuestionCorrectOption(
-																		selectedLectureSlideQuestion.client_id,
-																		option.client_id
-																	)}
-																class="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border-2 transition disabled:cursor-not-allowed {option.correct
-																	? 'border-gray-900 bg-gray-900 text-white'
-																	: 'border-gray-300 text-transparent hover:border-gray-700 hover:text-gray-700'}"
-															>
-																<CheckOutline class="h-3.5 w-3.5" />
-															</button>
+															{#if selectedLectureSlideQuestion.mode === 'partial' || selectedLectureSlideQuestion.options.length > 1}
+																<button
+																	type="button"
+																	role="radio"
+																	aria-checked={option.correct}
+																	aria-label={`Mark option ${optionIndex + 1} as correct`}
+																	disabled={preventEdits}
+																	onclick={() =>
+																		setLectureSlideQuestionCorrectOption(
+																			selectedLectureSlideQuestion.client_id,
+																			option.client_id
+																		)}
+																	class="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border-2 transition disabled:cursor-not-allowed {option.correct
+																		? 'border-gray-900 bg-gray-900 text-white'
+																		: 'border-gray-300 text-transparent hover:border-gray-700 hover:text-gray-700'}"
+																>
+																	<CheckOutline class="h-3.5 w-3.5" />
+																</button>
+															{/if}
 															<div class="min-w-0 flex-1 space-y-2">
 																<input
 																	id={`slide_question_option_${option.client_id}`}
@@ -5251,7 +5277,7 @@
 																type="button"
 																class="mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-gray-400 opacity-0 transition group-hover:opacity-100 hover:bg-gray-100 hover:text-red-600 focus:opacity-100 disabled:cursor-not-allowed disabled:opacity-0"
 																disabled={preventEdits ||
-																	selectedLectureSlideQuestion.options.length <= 2}
+																	selectedLectureSlideQuestion.options.length <= 1}
 																aria-label={`Remove option ${optionIndex + 1}`}
 																title={`Remove option ${optionIndex + 1}`}
 																onclick={() =>

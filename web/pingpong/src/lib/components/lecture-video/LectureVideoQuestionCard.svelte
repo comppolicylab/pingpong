@@ -9,7 +9,7 @@
 		post_answer_text?: string | null;
 	};
 
-	type ReviewState = 'selected-correct' | 'selected-wrong' | 'correct' | 'neutral';
+	type ReviewState = 'selected-correct' | 'selected-wrong' | 'selected' | 'correct' | 'neutral';
 
 	type ReviewStyle = {
 		row: string;
@@ -90,6 +90,15 @@
 			feedback: 'mt-1 text-sm leading-5 text-red-700',
 			showCheck: false
 		},
+		selected: {
+			row: 'bg-blue-50',
+			divider: 'bg-blue-600',
+			marker:
+				'flex size-6 shrink-0 items-center justify-center rounded-full border border-blue-600 bg-blue-600 text-[10px] font-semibold text-white',
+			text: 'text-blue-700',
+			feedback: 'mt-1 text-sm leading-5 text-blue-700',
+			showCheck: false
+		},
 		correct: {
 			row: '',
 			divider: '',
@@ -145,6 +154,9 @@
 		}
 		if (optionId === selectedOptionId && correctOptionId != null && optionId !== correctOptionId) {
 			return 'selected-wrong';
+		}
+		if (optionId === selectedOptionId) {
+			return 'selected';
 		}
 		if (correctOptionId != null && optionId === correctOptionId) {
 			return 'correct';
@@ -256,6 +268,7 @@
 							</div>
 							<div class="min-w-0 flex-1">
 								<div class="text-sm leading-6 font-medium {reviewStyle.text}">
+									{#if reviewState === 'selected'}<span class="sr-only">Your answer: </span>{/if}
 									{option.option_text}
 								</div>
 								{#if feedbackText && reviewStyle.feedback}
