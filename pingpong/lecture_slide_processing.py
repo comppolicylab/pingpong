@@ -5148,6 +5148,7 @@ async def _generate_slide_context_v5_for_window(
     context = await _parse_responses_output(
         openai_client,
         model=model,
+        fast_mode=True,
         instructions=_build_slide_context_generation_instructions(
             generation_prompt,
             total_duration_ms=total_duration_ms,
@@ -5259,6 +5260,7 @@ async def _generate_slide_manifest_for_window(
     manifest = await _parse_responses_output(
         openai_client,
         model=model,
+        fast_mode=True,
         instructions=_build_slide_manifest_generation_instructions(
             generation_prompt,
             total_duration_ms=total_duration_ms,

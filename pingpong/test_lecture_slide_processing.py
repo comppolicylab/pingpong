@@ -913,7 +913,9 @@ async def test_generate_slide_context_v5_uses_context_only_response_model(monkey
         instructions,
         response_model,
         input_messages,
+        fast_mode=False,
     ):
+        assert fast_mode is True
         captured["model"] = model
         captured["instructions"] = instructions
         captured["response_model"] = response_model
@@ -967,7 +969,9 @@ async def test_generate_slide_context_v5_chunks_skips_empty_filtered_context(
         instructions,
         response_model,
         input_messages,
+        fast_mode=False,
     ):
+        assert fast_mode is True
         return response_model(
             deck_summary="Outside chunk summary.",
             slides=[
@@ -1939,6 +1943,7 @@ async def test_generate_slide_manifest_uses_pdf_and_transcript_not_extracted_tex
     assert "pause_after_word_id" not in instructions
     assert "stop_offset_ms" not in instructions
     assert "continue_offset_ms" not in instructions
+    assert captured["service_tier"] == "priority"
     assert captured["text_format"] is lecture_slide_processing.GeneratedSlideManifest
     payload = json.dumps(captured["input"])
     assert "file-pdf" in payload
