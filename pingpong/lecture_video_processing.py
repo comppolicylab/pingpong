@@ -221,7 +221,7 @@ def _worker_process_main(
                             assignment.lease_token,
                         )
                     )
-                except Exception as exc:
+                except (Exception, asyncio.CancelledError) as exc:
                     with sentry_sdk.new_scope() as scope:
                         scope.set_tag("source", "lecture-video-worker-child")
                         scope.set_tag("worker_slot", worker_slot)
@@ -241,7 +241,11 @@ def _worker_process_main(
                             run_id=assignment.run_id,
                             lease_token=assignment.lease_token,
                             error_message=str(exc)
-                            or UNEXPECTED_WORKER_EXIT_ERROR_MESSAGE,
+                            or (
+                                "Lecture video processing was cancelled."
+                                if isinstance(exc, asyncio.CancelledError)
+                                else UNEXPECTED_WORKER_EXIT_ERROR_MESSAGE
+                            ),
                         )
                     )
                 else:
@@ -1187,7 +1191,14 @@ async def _process_claimed_narration_run(run_id: int, lease_token: str) -> None:
                 run_id, lease_token, work_item, persistence_lock, prepared_speech_texts
             )
 
-        results = await map_tts_job(items, process)
+        try:
+            results = await map_tts_job(items, process)
+        except Exception as exc:
+            logger.exception("Lecture video narration batch failed. run_id=%s", run_id)
+            await _mark_run_failed(
+                run_id, lease_token, None, _user_safe_processing_error_message(exc)
+            )
+            return
         if any(result is None for result in results):
             return
 

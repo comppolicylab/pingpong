@@ -5220,8 +5220,8 @@ async def test_tts_job_drains_provider_tasks_on_cancellation(monkeypatch):
     job = asyncio.create_task(lecture_slide_processing._map_tts_job([1], synthesize))
     await started.wait()
     job.cancel()
-    with pytest.raises(asyncio.CancelledError):
-        await job
+    results = await asyncio.gather(job, return_exceptions=True)
+    assert isinstance(results[0], asyncio.CancelledError)
     assert stopped.is_set()
 
 

@@ -13961,3 +13961,94 @@ async def test_get_thread_video_rejects_assistant_mismatch(
     )
     assert thread_response.status_code == 200
     assert thread_response.json()["lecture_video_matches_assistant"] is False
+
+
+@pytest.mark.parametrize("cancelled", [False, True])
+def test_worker_reports_assignment_error_and_accepts_next_job(monkeypatch, cancelled):
+    assignments = FakeQueue()
+    results = FakeQueue()
+    for run_id in (41, 42):
+        assignments.put(
+            lecture_video_processing.RunAssignment(
+                kind="run", run_id=run_id, lease_token=f"lease-{run_id}"
+            )
+        )
+    assignments.put(None)
+    processed = []
+
+    @contextmanager
+    def fake_sentry():
+        yield
+
+    async def process(run_id, lease_token):
+        processed.append(run_id)
+        if run_id == 41:
+            if cancelled:
+                raise asyncio.CancelledError()
+            raise RuntimeError("Audio attachment failed")
+
+    monkeypatch.setattr(lecture_video_processing, "sentry", fake_sentry)
+    monkeypatch.setattr(
+        lecture_video_processing, "ignore_sigint_in_worker", lambda: None
+    )
+    monkeypatch.setattr(lecture_video_processing, "_process_claimed_run", process)
+    lecture_video_processing._worker_process_main(2, assignments, results)
+
+    assert processed == [41, 42]
+    failures = [
+        item
+        for item in results.puts
+        if isinstance(item, lecture_video_processing.WorkerJobException)
+    ]
+    assert len(failures) == 1
+    assert failures[0].run_id == 41
+    assert failures[0].error_message == (
+        "Lecture video processing was cancelled."
+        if cancelled
+        else "Audio attachment failed"
+    )
+    completed = [
+        item
+        for item in results.puts
+        if isinstance(item, lecture_video_processing.WorkerCompleted)
+    ]
+    assert [item.run_id for item in completed] == [42]
+
+
+@with_institution(11, "Test Institution")
+async def test_narration_batch_records_attachment_failure(
+    db, institution, config, monkeypatch, tmp_path
+):
+    narration_dir = tmp_path / "narration-audio"
+    monkeypatch.setattr(
+        config,
+        "lecture_video_audio_store",
+        LocalAudioStoreSettings(save_target=str(narration_dir)),
+    )
+    monkeypatch.setattr(
+        lecture_video_processing,
+        "synthesize_elevenlabs_speech",
+        AsyncMock(return_value=("audio/ogg", b"fake-opus-audio")),
+    )
+    monkeypatch.setattr(
+        lecture_video_processing,
+        "_attach_stored_audio_to_narration",
+        AsyncMock(side_effect=RuntimeError("Audio attachment failed")),
+    )
+    async with db.async_session() as session:
+        _, lecture_video, _, run = await create_processing_lecture_video_assistant(
+            session, institution
+        )
+        assert run is not None
+    claim = await lecture_video_processing._claim_next_narration_run(
+        leased_by="test-runner"
+    )
+    assert claim is not None
+    await lecture_video_processing._process_claimed_narration_run(*claim)
+    async with db.async_session() as session:
+        refreshed_run = await session.get(models.LectureVideoProcessingRun, run.id)
+        refreshed_video = await session.get(models.LectureVideo, lecture_video.id)
+        assert refreshed_run.status == schemas.LectureVideoProcessingRunStatus.FAILED
+        assert refreshed_run.error_message == "Audio attachment failed"
+        assert refreshed_video.status == schemas.LectureVideoStatus.FAILED
+    assert not [path for path in narration_dir.rglob("*") if path.is_file()]
