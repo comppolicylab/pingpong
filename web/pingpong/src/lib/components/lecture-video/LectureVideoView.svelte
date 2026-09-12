@@ -30,6 +30,7 @@
 		LessonInteractionHistoryItem
 	} from '$lib/api';
 	import { hasVisiblePostAnswerFeedback } from '$lib/lectureVideoFeedback';
+	import { createLessonInteractionQueue } from '$lib/lessonInteractionQueue';
 	import { mergeQuestionOptions } from '$lib/utils/lecture-video';
 	import { ArchiveOutline, ChevronDownOutline, InfoCircleOutline } from 'flowbite-svelte-icons';
 	import { LECTURE_NARRATION_VOLUME_SCALE } from './audio-levels';
@@ -901,20 +902,26 @@
 		return session;
 	}
 
-	async function postLessonInteraction(payload: LessonInteractionPayload) {
-		return lessonMode === 'lecture_slides'
-			? api.expandResponse(
-					await api.postLectureSlideInteraction(
-						fetch,
-						classId,
-						threadId,
-						lectureSlideInteractionPayload(payload)
+	const postLessonInteraction = createLessonInteractionQueue({
+		getControllerSessionId: () => controllerSessionId,
+		getStateVersion: () => stateVersion,
+		setStateVersion: (version) => (stateVersion = version),
+		getResponseVersion: (expanded) =>
+			expanded.error ? null : (responseSession(expanded)?.state_version ?? null),
+		send: async (payload: LessonInteractionPayload) =>
+			lessonMode === 'lecture_slides'
+				? api.expandResponse(
+						await api.postLectureSlideInteraction(
+							fetch,
+							classId,
+							threadId,
+							lectureSlideInteractionPayload(payload)
+						)
 					)
-				)
-			: api.expandResponse(
-					await api.postLectureVideoInteraction(fetch, classId, threadId, payload)
-				);
-	}
+				: api.expandResponse(
+						await api.postLectureVideoInteraction(fetch, classId, threadId, payload)
+					)
+	});
 
 	async function acquireLessonControl() {
 		return lessonMode === 'lecture_slides'
@@ -1137,6 +1144,11 @@
 					return null;
 				}
 
+				if (controllerSessionId !== expanded.data.controller_session_id) {
+					// Old seeks cannot decrement the counter after control is replaced.
+					// Start the new controller with no pending seeks of its own.
+					seekInteractionsInFlight = 0;
+				}
 				controllerSessionId = expanded.data.controller_session_id;
 				const session = responseSession(expanded);
 				if (!session) return null;
@@ -1858,7 +1870,9 @@
 					playerDisabled = false;
 					introNarrationPending = false;
 					postAnswerNarrationPending = false;
-					setVideoPosition(toOffsetMs);
+					if (seekInteractionsInFlight === 1) {
+						setVideoPosition(toOffsetMs);
+					}
 				}
 				return;
 			}
@@ -1878,7 +1892,9 @@
 			setVideoPosition(fromOffsetMs);
 			failClosedControl(error instanceof Error ? error.message : String(error));
 		} finally {
-			seekInteractionsInFlight = Math.max(0, seekInteractionsInFlight - 1);
+			if (controllerSessionId === seekControllerSessionId) {
+				seekInteractionsInFlight = Math.max(0, seekInteractionsInFlight - 1);
+			}
 		}
 	}
 
