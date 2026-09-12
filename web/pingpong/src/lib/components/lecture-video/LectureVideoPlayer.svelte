@@ -27,8 +27,8 @@
 	import SkipForwardIcon from '$lib/assets/icons/SkipForwardIcon.svelte';
 	import SkipBackwardIcon from '$lib/assets/icons/SkipBackwardIcon.svelte';
 	import type { Snippet } from 'svelte';
-	import { fade, fly } from 'svelte/transition';
-	import { Tween } from 'svelte/motion';
+	import { fade, fly, slide } from 'svelte/transition';
+	import { prefersReducedMotion, Tween } from 'svelte/motion';
 	import { cubicOut } from 'svelte/easing';
 
 	function formatTime(ms: number): string {
@@ -59,7 +59,6 @@
 	const MARKER_CLUSTER_COLLAPSE_DELAY_MS = 120;
 	const SEGMENT_END_PAUSE_DEFER_MS = 100;
 	const OVERLAY_TEXT_SHADOW = 'text-shadow: rgb(0 0 0) 0 0 2px;';
-	const CAPTION_CONTROL_GAP_PX = 12;
 	const CAPTIONS_PREFERENCE_STORAGE_KEY = 'pingpong:lecture-video:captions-enabled';
 	const PLAYBACK_RATE_PREFERENCE_STORAGE_KEY = 'pingpong:lecture-lesson:playback-rate';
 	const PLAYBACK_RATE_PRESETS = [0.25, 0.5, 1, 1.5, 2] as const;
@@ -117,6 +116,8 @@
 		startOffsetMs = 0,
 		questionMarkers = [],
 		subtitleText = null,
+		subtitlesCollapsed = false,
+		subtitleHeight = $bindable(0),
 		disabled = false,
 		manualPlaybackPrompt = false,
 		allowFullSeek = false,
@@ -158,6 +159,8 @@
 		startOffsetMs?: number;
 		questionMarkers?: QuestionMarker[];
 		subtitleText?: string | null;
+		subtitlesCollapsed?: boolean;
+		subtitleHeight?: number;
 		disabled?: boolean;
 		manualPlaybackPrompt?: boolean;
 		allowFullSeek?: boolean;
@@ -256,7 +259,6 @@
 	let playbackSpeedButtonElement: HTMLButtonElement | null = $state(null);
 	let playbackSpeedMenuElement: HTMLDivElement | null = $state(null);
 	let activeCaptionLines: string[] = $state([]);
-	let controlsOverlayHeight = $state(0);
 	let isFullscreen = $state(false);
 	let isFullscreenSupported = $derived(
 		browser &&
@@ -503,16 +505,15 @@
 		questionPendingControls && maxSeekOffsetMs == null && !allowFullSeek
 	);
 	let captionsAvailable = $derived(Boolean(captionsSrc));
-	let captionOverlayBottomPx = $derived(
-		visibleControls ? controlsOverlayHeight + CAPTION_CONTROL_GAP_PX : 20
-	);
 	let customCaptionsVisible = $derived(
-		startedPlaybackOnce &&
-			captionsAvailable &&
-			captionsEnabled &&
-			subtitleText == null &&
-			activeCaptionLines.length > 0
+		startedPlaybackOnce && captionsAvailable && captionsEnabled && subtitleText == null
 	);
+	let subtitlesVisible = $derived(
+		subtitleText != null || (customCaptionsVisible && !subtitlesCollapsed)
+	);
+	$effect(() => {
+		if (!subtitlesVisible) subtitleHeight = 0;
+	});
 	let activeCaptionText = $derived(activeCaptionLines.join(' '));
 	let balancedCaptionLines = $derived(balanceCaptionLines(activeCaptionText));
 
@@ -1942,34 +1943,8 @@
 		</div>
 	{/if}
 
-	{#if subtitleText != null}
-		<div class="pointer-events-none absolute inset-x-0 top-4 z-[11] flex justify-center px-4">
-			<span class="rounded bg-black/70 px-3 py-1 text-center text-sm text-white">
-				{subtitleText}
-			</span>
-		</div>
-	{/if}
-
-	{#if customCaptionsVisible}
-		<div
-			class="pointer-events-none absolute inset-x-0 z-[12] flex justify-center px-4 transition-[bottom] duration-200 ease-out"
-			style="bottom: {captionOverlayBottomPx}px;"
-		>
-			<div class="max-w-[64rem] px-2 text-center">
-				<div
-					class="inline-block max-w-full rounded bg-black/45 px-3 py-1 text-center text-sm leading-[1.4] font-medium text-white shadow-sm sm:text-base"
-				>
-					{#each balancedCaptionLines as captionLine, idx (idx)}
-						<div>{captionLine}</div>
-					{/each}
-				</div>
-			</div>
-		</div>
-	{/if}
-
 	{#if (!disabled || questionPendingControls) && !manualPlaybackPrompt}
 		<div
-			bind:clientHeight={controlsOverlayHeight}
 			class="pointer-events-none absolute inset-x-0 bottom-0 transition-opacity duration-200 ease-out select-none"
 			style="opacity: {visibleControls ? 1 : 0};"
 		>
@@ -2518,3 +2493,21 @@
 		</div>
 	{/if}
 </div>
+
+{#if subtitlesVisible}
+	<div
+		bind:clientHeight={subtitleHeight}
+		class="-mb-3 flex h-[calc(2lh+0.5rem)] flex-col overflow-y-auto px-3 py-1 text-center text-sm leading-[1.4] font-medium text-slate-700 sm:text-base"
+		transition:slide={{ duration: prefersReducedMotion.current ? 0 : 250 }}
+	>
+		<div class="m-auto w-full max-w-[64rem] shrink-0">
+			{#if subtitleText != null}
+				{subtitleText}
+			{:else}
+				{#each balancedCaptionLines as captionLine, idx (idx)}
+					<div>{captionLine}</div>
+				{/each}
+			{/if}
+		</div>
+	</div>
+{/if}

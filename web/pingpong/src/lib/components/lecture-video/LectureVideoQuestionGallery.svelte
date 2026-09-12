@@ -71,7 +71,7 @@
 
 	const ANSWER_SUBMISSION_TIMEOUT_MS = 30_000;
 	const navigationButtonClass =
-		'mt-4 xl:mt-12 inline-flex shrink-0 items-center justify-center rounded-full p-1.5 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-300 disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-slate-400';
+		'mt-4 inline-flex shrink-0 items-center justify-center rounded-full p-1.5 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-300 disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-slate-400';
 	const dotBaseClass =
 		'size-2.5 rounded-full transition-all focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-300';
 	let continueCardProps = $derived({ showContinue, continueDisabled, oncontinue });
@@ -198,7 +198,7 @@
 	}
 </script>
 
-<div class="flex flex-col gap-4 pt-5 xl:h-full xl:min-h-0 xl:gap-0 xl:pt-0">
+<div class="flex flex-col gap-4 xl:h-full xl:min-h-0 xl:gap-0">
 	<!-- Gallery area -->
 	{#if sortedQuestions.length > 0}
 		<div class="flex items-start gap-2 sm:gap-3 xl:min-h-0 xl:flex-1">
@@ -213,9 +213,9 @@
 			</button>
 
 			<div
-				class="min-w-0 flex-1 xl:-mt-4 xl:min-h-0 xl:[scrollbar-width:thin] xl:self-stretch xl:overflow-y-auto"
+				class="min-w-0 flex-1 xl:min-h-0 xl:[scrollbar-width:thin] xl:self-stretch xl:overflow-y-auto"
 			>
-				<div class="xl:pt-12">
+				<div>
 					{#if activeQuestion}
 						{#if activeAnsweredQuestion && !isCurrentFeedback}
 							<LectureVideoQuestionCard

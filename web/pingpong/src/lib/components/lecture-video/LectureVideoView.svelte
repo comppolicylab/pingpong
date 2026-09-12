@@ -13,6 +13,8 @@
 	import { createEventDispatcher } from 'svelte';
 	import { onMount } from 'svelte';
 	import { SvelteMap, SvelteSet } from 'svelte/reactivity';
+	import { prefersReducedMotion } from 'svelte/motion';
+	import { slide } from 'svelte/transition';
 	import * as api from '$lib/api';
 	import type {
 		InteractiveLessonSession,
@@ -29,7 +31,7 @@
 	} from '$lib/api';
 	import { hasVisiblePostAnswerFeedback } from '$lib/lectureVideoFeedback';
 	import { mergeQuestionOptions } from '$lib/utils/lecture-video';
-	import { ArchiveOutline, InfoCircleOutline } from 'flowbite-svelte-icons';
+	import { ArchiveOutline, ChevronDownOutline, InfoCircleOutline } from 'flowbite-svelte-icons';
 	import { LECTURE_NARRATION_VOLUME_SCALE } from './audio-levels';
 	import LectureVideoPlayer from './LectureVideoPlayer.svelte';
 	import LectureVideoQuestionGallery from './LectureVideoQuestionGallery.svelte';
@@ -172,6 +174,13 @@
 
 	// --- UI state ---
 	let scrollToQuestionId: number | null = $state(null);
+	let mediaColumnElement: HTMLDivElement | null = $state(null);
+	let layoutElement: HTMLDivElement | null = $state(null);
+	let questionPanelPercent = $state(40);
+	let resizingQuestions = $state(false);
+	let subtitleHeight = $state(0);
+	let resizeStartY = 0;
+	let resizeStartPercent = 40;
 	let isDesktopLayout: boolean = $state(false);
 	let activeMobilePanel: 'checks' | 'chat' | null = $state('checks');
 	let historyLoaded: boolean = $state(false);
@@ -236,7 +245,7 @@
 	let narrationVolume = $derived(playerVolume * LECTURE_NARRATION_VOLUME_SCALE);
 	let safePlayerMediaAspectRatio = $derived(playerMediaAspectRatio ?? DEFAULT_MEDIA_ASPECT_RATIO);
 	let playerFrameStyle = $derived(
-		`--lecture-media-aspect-ratio: ${safePlayerMediaAspectRatio}; --lecture-player-frame-chrome: ${PLAYER_FRAME_CHROME_WIDTH};`
+		`--lecture-media-aspect-ratio: ${safePlayerMediaAspectRatio}; --lecture-player-frame-chrome: ${PLAYER_FRAME_CHROME_WIDTH}; --lecture-subtitle-height: ${Math.max(0, subtitleHeight - 12)}px;`
 	);
 	function shouldShowContinuePrompt(): boolean {
 		return (
@@ -320,6 +329,7 @@
 	let usesAudioSegmentBoundaries = $derived(mediaKind === 'audio' && audioSegments.length > 0);
 	let playbackInteractionAllowed = $derived(allowsPlaybackInteraction(sessionState));
 	let hasQuestionPrompt = $derived(hasVisibleQuestionPrompt(sessionState));
+	let showQuestionGallery = $derived(!introNarrationPending && hasQuestionPrompt);
 	let isCompleted = $derived(isCompletedSession(sessionState));
 	let completedPlaybackReachedEnd = $derived(
 		durationMsOverride == null ||
@@ -345,7 +355,7 @@
 	let playerInteractionDisabled = $derived(
 		!canParticipate || (playbackLocked && !questionReviewPlaybackAllowed)
 	);
-	let hasMobileChecksPanel = $derived(true);
+	let hasMobileChecksPanel = $derived(showQuestionGallery || (isCompleted && !canParticipate));
 	let hasMobileChatPanel = $derived(chatAvailable);
 	let activeQuestionIds = $derived(
 		isCompleted
@@ -550,7 +560,7 @@
 	});
 
 	$effect(() => {
-		if (hasQuestionPrompt && hasMobileChecksPanel) {
+		if (showQuestionGallery && hasMobileChecksPanel) {
 			activeMobilePanel = 'checks';
 			return;
 		}
@@ -560,6 +570,34 @@
 		}
 		activeMobilePanel = hasMobileChecksPanel ? 'checks' : hasMobileChatPanel ? 'chat' : null;
 	});
+
+	function resizeQuestions(event: PointerEvent) {
+		const divider = event.currentTarget as HTMLElement;
+		if (!divider.hasPointerCapture(event.pointerId)) return;
+		const container = isDesktopLayout ? mediaColumnElement : layoutElement;
+		if (!container) return;
+		const height = container.getBoundingClientRect().height;
+		if (height <= 0) return;
+		questionPanelPercent = Math.max(
+			20,
+			Math.min(70, resizeStartPercent - ((event.clientY - resizeStartY) / height) * 100)
+		);
+	}
+
+	function resizeQuestionsWithKeyboard(event: KeyboardEvent) {
+		if (!['ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) return;
+		event.preventDefault();
+		const step = event.shiftKey ? 10 : 5;
+		questionPanelPercent =
+			event.key === 'Home'
+				? 20
+				: event.key === 'End'
+					? 70
+					: Math.max(
+							20,
+							Math.min(70, questionPanelPercent + (event.key === 'ArrowUp' ? step : -step))
+						);
+	}
 
 	function mobileSegmentClass(panel: 'checks' | 'chat'): string {
 		return `rounded-xl px-4 py-1 text-sm font-medium transition-colors ${
@@ -579,6 +617,7 @@
 		sessionState = 'playing';
 		stateVersion = 1;
 		currentQuestion = null;
+		showQuestionGallery = false;
 		currentContinuation = null;
 		answeredQuestions.clear();
 		allQuestions = [];
@@ -678,6 +717,7 @@
 	}
 
 	function beginPostAnswerNarration(narrationId: number) {
+		subtitleText = currentContinuation?.post_answer_text || null;
 		playerDisabled = true;
 		postAnswerNarrationPending = true;
 		void playNarration(
@@ -1245,7 +1285,6 @@
 				initialStartOffsetMs = initialSession.last_known_offset_ms ?? 0;
 				if (sessionState === 'awaiting_answer' && currentQuestion) {
 					questionPresentedForId = currentQuestion.id;
-					subtitleText = currentQuestion.intro_text || null;
 				}
 			}
 			return;
@@ -1273,7 +1312,10 @@
 				void playNarration(currentQuestion.intro_narration_id, () => {
 					playerDisabled = false;
 					introNarrationPending = false;
+					subtitleText = null;
 				});
+			} else {
+				subtitleText = null;
 			}
 		}
 
@@ -1989,6 +2031,7 @@
 			void playNarration(currentQuestion.intro_narration_id, () => {
 				playerDisabled = false;
 				introNarrationPending = false;
+				subtitleText = null;
 				void postQuestionPresented(rollbackState);
 			});
 		} else {
@@ -2016,6 +2059,7 @@
 			}
 			if (!expanded.error) {
 				applyResponseSession(expanded);
+				subtitleText = null;
 				return;
 			}
 		} catch {
@@ -2108,15 +2152,14 @@
 				});
 			}
 
+			subtitleText = null;
+
 			// Play post-answer narration if available
 			if (continuationAtAnswer?.post_answer_narration_id) {
 				beginPostAnswerNarration(continuationAtAnswer.post_answer_narration_id);
 			} else if (!hasVisiblePostAnswerFeedback(currentContinuation)) {
 				maybeAutoContinueAfterPostAnswer();
 			}
-
-			// Clear subtitle
-			subtitleText = null;
 		} catch (error) {
 			failClosedControl(error instanceof Error ? error.message : String(error));
 		} finally {
@@ -2253,6 +2296,11 @@
 	}
 
 	function handleQuestionClick(markerId: number) {
+		const question: LessonQuestionPrompt | null = currentQuestion;
+		if (!answeredQuestions.has(markerId) && !(hasQuestionPrompt && markerId === question?.id))
+			return;
+		showQuestionGallery = true;
+		activeMobilePanel = 'checks';
 		scrollToQuestionId = markerId;
 	}
 
@@ -2315,6 +2363,7 @@
 		class="lecture-fullscreen-root h-full w-full overflow-hidden"
 	>
 		<div
+			bind:this={layoutElement}
 			class={`lecture-layout mx-auto flex h-full w-full max-w-screen-2xl flex-col gap-6 px-4 py-4 min-[900px]:grid min-[900px]:grid-cols-5 min-[900px]:items-stretch min-[900px]:justify-center min-[900px]:gap-8 min-[900px]:py-6 lg:px-6 ${groupArchived || lessonUpdated ? 'min-[900px]:grid-rows-[auto_minmax(0,1fr)]' : ''}`}
 		>
 			{#if groupArchived || lessonUpdated}
@@ -2353,7 +2402,12 @@
 				</div>
 			{/if}
 			<div
-				class="lecture-media-col col-span-3 flex max-h-[40%] min-h-0 min-w-0 shrink-0 flex-col gap-4 min-[900px]:[container-type:size] min-[900px]:h-full min-[900px]:max-h-none min-[900px]:shrink"
+				bind:this={mediaColumnElement}
+				class="lecture-media-col col-span-3 flex min-h-0 min-w-0 flex-1 flex-col min-[900px]:h-full"
+				class:resizing-questions={resizingQuestions}
+				style:flex={!isDesktopLayout && showQuestionGallery && activeMobilePanel === 'checks'
+					? `0 1 ${100 - questionPanelPercent}%`
+					: undefined}
 			>
 				{#if !canParticipate && showParticipantNotice}
 					<div
@@ -2370,73 +2424,129 @@
 						initialInteractions={historyInteractions}
 					/>
 				{:else if !isCompleted || canParticipate}
-					{#if lessonUpdated}
-						<div
-							class="mx-auto flex min-h-0 w-full max-w-[calc((40dvh_-_4rem)_*_var(--lecture-media-aspect-ratio)_+_var(--lecture-player-frame-chrome))] shrink-0 items-center justify-center overflow-hidden rounded-3xl border border-slate-200 bg-slate-50 p-6 text-center shadow-sm min-[900px]:max-w-[calc((50cqh_-_var(--lecture-player-frame-chrome))_*_var(--lecture-media-aspect-ratio)_+_var(--lecture-player-frame-chrome))]"
-							style={playerFrameStyle}
-						>
-							<div class="text-sm leading-6 text-slate-600">
-								Playback isn't available for this older lesson. Start a new lesson to continue with
-								the latest version.
+					<div class="lecture-video-stage [container-type:size] min-h-0 flex-1">
+						{#if lessonUpdated}
+							<div
+								class="mx-auto flex min-h-0 w-full max-w-[calc((100cqh_-_var(--lecture-player-frame-chrome)_-_var(--lecture-subtitle-height))_*_var(--lecture-media-aspect-ratio)_+_var(--lecture-player-frame-chrome))] shrink-0 items-center justify-center overflow-hidden rounded-3xl border border-slate-200 bg-slate-50 p-6 text-center shadow-sm"
+								style={playerFrameStyle}
+							>
+								<div class="text-sm leading-6 text-slate-600">
+									Playback isn't available for this older lesson. Start a new lesson to continue
+									with the latest version.
+								</div>
 							</div>
-						</div>
-					{:else}
-						<div
-							class="mx-auto min-h-0 w-full max-w-[calc((40dvh_-_4rem)_*_var(--lecture-media-aspect-ratio)_+_var(--lecture-player-frame-chrome))] shrink-0 overflow-hidden rounded-3xl border border-slate-200 bg-white p-3 shadow-xl min-[900px]:max-w-[calc((50cqh_-_var(--lecture-player-frame-chrome))_*_var(--lecture-media-aspect-ratio)_+_var(--lecture-player-frame-chrome))]"
-							style={playerFrameStyle}
+						{:else}
+							<div
+								class="mx-auto min-h-0 w-full max-w-[calc((100cqh_-_var(--lecture-player-frame-chrome)_-_var(--lecture-subtitle-height))_*_var(--lecture-media-aspect-ratio)_+_var(--lecture-player-frame-chrome))] shrink-0 overflow-hidden rounded-3xl border border-slate-200 bg-white p-3 shadow-xl"
+								style={playerFrameStyle}
+							>
+								<LectureVideoPlayer
+									bind:this={playerComponent}
+									src={lectureVideoSrc}
+									{captionsSrc}
+									fullscreenTarget={lectureContainerElement}
+									{mediaKind}
+									{audioSegments}
+									{durationMsOverride}
+									{visualQuestionBoundaryMs}
+									{visual}
+									bind:mediaAspectRatio={playerMediaAspectRatio}
+									displayTitle={sessionState === 'awaiting_answer'
+										? 'Answer the comprehension check to continue'
+										: title}
+									startOffsetMs={initialStartOffsetMs}
+									{questionMarkers}
+									{subtitleText}
+									bind:subtitleHeight
+									subtitlesCollapsed={hasQuestionPrompt && !introNarrationPending}
+									disabled={playerInteractionDisabled}
+									{activeQuestionIds}
+									{questionPresentationVersion}
+									{furthestOffsetMs}
+									allowFullSeek={timelineBypassEnabled ||
+										(isCompleted && canParticipate && completedPlaybackReachedEnd)}
+									maxSeekOffsetMs={questionReviewSeekLimitMs}
+									manualPlaybackPrompt={playbackRequiresManualStart}
+									bind:videoElement
+									bind:currentTimeMs
+									bind:paused
+									bind:endedPlayback={videoAtEnd}
+									bind:effectiveVolume={playerVolume}
+									bind:playbackRate
+									{playbackRateMin}
+									{playbackRateMax}
+									{playbackRateStep}
+									ontimeupdate={handleTimeUpdate}
+									onseek={handleSeek}
+									onended={handleVideoEnded}
+									onsegmentended={handleAudioSegmentEnded}
+									oncanplay={handleCanPlay}
+									onerror={() =>
+										failClosedControl(
+											'We could not load this video lesson. Refresh the lesson and try again.'
+										)}
+									onplay={handlePlay}
+									onpause={handlePause}
+									onquestionclick={handleQuestionClick}
+									onmanualplayrequest={handleManualPlaybackRequest}
+								/>
+							</div>
+						{/if}
+					</div>
+					<div class="flex shrink-0 items-center gap-3 py-2">
+						{#if showQuestionGallery && (isDesktopLayout || activeMobilePanel === 'checks')}
+							<div
+								role="slider"
+								tabindex="0"
+								aria-label="Resize video and questions"
+								aria-orientation="vertical"
+								aria-valuemin="20"
+								aria-valuemax="70"
+								aria-valuenow={Math.round(questionPanelPercent)}
+								aria-valuetext={`${Math.round(questionPanelPercent)}% questions height`}
+								class="group flex h-8 min-w-12 flex-1 cursor-row-resize touch-none items-center justify-center rounded-full focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400"
+								onpointerdown={(event) => {
+									if (event.button !== 0) return;
+									event.preventDefault();
+									event.currentTarget.focus();
+									resizeStartY = event.clientY;
+									resizeStartPercent = questionPanelPercent;
+									resizingQuestions = true;
+									event.currentTarget.setPointerCapture(event.pointerId);
+								}}
+								onpointermove={resizeQuestions}
+								onpointerup={(event) => event.currentTarget.releasePointerCapture(event.pointerId)}
+								onlostpointercapture={() => (resizingQuestions = false)}
+								onkeydown={resizeQuestionsWithKeyboard}
+								ondblclick={() => (questionPanelPercent = 40)}
+							>
+								<span class="h-px flex-1 bg-slate-200"></span>
+								<span
+									class="mx-3 h-1 w-10 rounded-full bg-slate-300 transition-colors group-hover:bg-slate-500 group-focus-visible:bg-slate-500"
+								></span>
+								<span class="h-px flex-1 bg-slate-200"></span>
+							</div>
+						{/if}
+						<button
+							type="button"
+							class="mx-auto inline-flex shrink-0 items-center justify-center gap-2 self-center rounded-full px-4 py-2 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400"
+							aria-expanded={showQuestionGallery}
+							onclick={() => (showQuestionGallery = !showQuestionGallery)}
 						>
-							<LectureVideoPlayer
-								bind:this={playerComponent}
-								src={lectureVideoSrc}
-								{captionsSrc}
-								fullscreenTarget={lectureContainerElement}
-								{mediaKind}
-								{audioSegments}
-								{durationMsOverride}
-								{visualQuestionBoundaryMs}
-								{visual}
-								bind:mediaAspectRatio={playerMediaAspectRatio}
-								displayTitle={sessionState === 'awaiting_answer'
-									? 'Answer the comprehension check to continue'
-									: title}
-								startOffsetMs={initialStartOffsetMs}
-								{questionMarkers}
-								{subtitleText}
-								disabled={playerInteractionDisabled}
-								{activeQuestionIds}
-								{questionPresentationVersion}
-								{furthestOffsetMs}
-								allowFullSeek={timelineBypassEnabled ||
-									(isCompleted && canParticipate && completedPlaybackReachedEnd)}
-								maxSeekOffsetMs={questionReviewSeekLimitMs}
-								manualPlaybackPrompt={playbackRequiresManualStart}
-								bind:videoElement
-								bind:currentTimeMs
-								bind:paused
-								bind:endedPlayback={videoAtEnd}
-								bind:effectiveVolume={playerVolume}
-								bind:playbackRate
-								{playbackRateMin}
-								{playbackRateMax}
-								{playbackRateStep}
-								ontimeupdate={handleTimeUpdate}
-								onseek={handleSeek}
-								onended={handleVideoEnded}
-								onsegmentended={handleAudioSegmentEnded}
-								oncanplay={handleCanPlay}
-								onerror={() =>
-									failClosedControl(
-										'We could not load this video lesson. Refresh the lesson and try again.'
-									)}
-								onplay={handlePlay}
-								onpause={handlePause}
-								onquestionclick={handleQuestionClick}
-								onmanualplayrequest={handleManualPlaybackRequest}
+							{showQuestionGallery ? 'Hide questions' : 'Show questions'}
+							<ChevronDownOutline
+								class="size-4 transition-transform duration-250 motion-reduce:transition-none {showQuestionGallery
+									? ''
+									: 'rotate-180'}"
 							/>
-						</div>
-					{/if}
-					{#if isDesktopLayout}
-						<div class="min-h-0 flex-1">
+						</button>
+					</div>
+					{#if isDesktopLayout && showQuestionGallery}
+						<div
+							class="min-h-0 shrink-0 overflow-y-auto"
+							style:height={`${questionPanelPercent}%`}
+							transition:slide={{ duration: prefersReducedMotion.current ? 0 : 250 }}
+						>
 							<LectureVideoQuestionGallery
 								{allQuestions}
 								currentQuestionId={currentQuestion?.id ?? null}
@@ -2461,7 +2571,7 @@
 				<div class="lecture-chat-col col-span-2 h-full min-h-0 min-w-0">
 					{@render chat?.(videoAtEnd)}
 				</div>
-			{:else}
+			{:else if hasMobileChecksPanel || hasMobileChatPanel}
 				<div class="flex min-h-0 flex-1 flex-col gap-4">
 					{#if hasMobileChecksPanel && hasMobileChatPanel}
 						<div class="shrink-0 rounded-2xl border border-slate-200 bg-slate-50 p-1">
@@ -2488,7 +2598,10 @@
 						</div>
 					{/if}
 					{#if hasMobileChecksPanel && (!hasMobileChatPanel || activeMobilePanel === 'checks')}
-						<div class="min-h-0 flex-1 overflow-y-auto">
+						<div
+							class="h-full min-h-0 flex-[0_1_auto] overflow-y-auto"
+							transition:slide={{ duration: prefersReducedMotion.current ? 0 : 250 }}
+						>
 							{#if isCompleted && !canParticipate}
 								<LectureVideoCompletedView
 									{classId}
@@ -2527,6 +2640,11 @@
 {/if}
 
 <style>
+	.resizing-questions {
+		cursor: row-resize;
+		user-select: none;
+	}
+
 	.lecture-fullscreen-root:fullscreen {
 		/* need to add this back in because it's set by the parent div, which does not
 		get full-screened */
