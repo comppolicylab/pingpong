@@ -14058,9 +14058,10 @@ async def test_store_narration_audio_cleans_up_cancelled_upload(config, monkeypa
     upload.delete_file.assert_awaited_once()
 
 
-@pytest.mark.parametrize("cancelled", [False, True])
+@pytest.mark.parametrize("stop_reason", ["lease_lost", "cancelled", "storage_error"])
+@pytest.mark.parametrize("cleanup_cancelled", [False, True])
 async def test_narration_cleans_up_audio_when_stopped_after_storage(
-    monkeypatch, cancelled
+    monkeypatch, stop_reason, cleanup_cancelled
 ):
     work_item = lecture_video_processing.NarrationWorkItem(
         class_id=1,
@@ -14093,7 +14094,16 @@ async def test_narration_cleans_up_audio_when_stopped_after_storage(
         "_store_narration_audio",
         AsyncMock(return_value=("stored-audio", 5)),
     )
-    delete_audio = AsyncMock()
+    mark_failed = AsyncMock()
+    monkeypatch.setattr(lecture_video_processing, "_mark_run_failed", mark_failed)
+
+    async def cleanup(store_key):
+        if stop_reason == "storage_error":
+            mark_failed.assert_awaited_once_with(1, "lease", 1, "Storage failed")
+        if cleanup_cancelled:
+            raise asyncio.CancelledError()
+
+    delete_audio = AsyncMock(side_effect=cleanup)
     monkeypatch.setattr(
         lecture_video_processing, "_delete_audio_key_quietly", delete_audio
     )
@@ -14101,20 +14111,26 @@ async def test_narration_cleans_up_audio_when_stopped_after_storage(
     async def heartbeat(run_id, lease_token, operation, **kwargs):
         result = await operation
         if result == ("stored-audio", 5):
-            if cancelled:
+            if stop_reason == "cancelled":
                 raise asyncio.CancelledError()
+            if stop_reason == "storage_error":
+                raise RuntimeError("Storage failed")
             return None
         return result
 
     monkeypatch.setattr(
         lecture_video_processing, "_await_with_run_lease_heartbeat", heartbeat
     )
-    operation = lecture_video_processing._process_narration_work_item(
-        1, "lease", work_item, asyncio.Lock(), {1: "Hello"}
-    )
-    if cancelled:
+    if stop_reason == "cancelled" or cleanup_cancelled:
         with pytest.raises(asyncio.CancelledError):
-            await operation
+            await lecture_video_processing._process_narration_work_item(
+                1, "lease", work_item, asyncio.Lock(), {1: "Hello"}
+            )
     else:
-        assert await operation is None
+        result = await lecture_video_processing._process_narration_work_item(
+            1, "lease", work_item, asyncio.Lock(), {1: "Hello"}
+        )
+        assert result is None
     delete_audio.assert_awaited_once_with("stored-audio")
+    if stop_reason != "storage_error":
+        mark_failed.assert_not_awaited()

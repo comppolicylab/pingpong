@@ -1311,12 +1311,12 @@ async def _process_narration_work_item(
             store_audio(),
             persistence_lock=persistence_lock,
         )
-    except BaseException as exc:
+    except asyncio.CancelledError:
         # Storage may finish before the heartbeat wrapper receives cancellation.
         if stored_audio is not None:
             await _delete_audio_key_quietly(stored_audio[0])
-        if not isinstance(exc, Exception):
-            raise
+        raise
+    except Exception as exc:
         logger.info(
             "Lecture video narration storage failed. "
             "run_id=%s lecture_video_id=%s narration_id=%s",
@@ -1324,13 +1324,18 @@ async def _process_narration_work_item(
             work_item.lecture_video_id,
             work_item.narration_id,
         )
-        async with persistence_lock:
-            await _mark_run_failed(
-                run_id,
-                lease_token,
-                work_item.narration_id,
-                _user_safe_processing_error_message(exc),
-            )
+        try:
+            # Persist the failure before cleanup, which can itself be cancelled.
+            async with persistence_lock:
+                await _mark_run_failed(
+                    run_id,
+                    lease_token,
+                    work_item.narration_id,
+                    _user_safe_processing_error_message(exc),
+                )
+        finally:
+            if stored_audio is not None:
+                await _delete_audio_key_quietly(stored_audio[0])
         return None
 
     if store_result is None:
