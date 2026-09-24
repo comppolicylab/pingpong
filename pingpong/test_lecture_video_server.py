@@ -14036,3 +14036,101 @@ async def test_narration_batch_records_attachment_failure(
         assert refreshed_run.error_message == "Audio attachment failed"
         assert refreshed_video.status == schemas.LectureVideoStatus.FAILED
     assert not [path for path in narration_dir.rglob("*") if path.is_file()]
+
+
+async def test_store_narration_audio_cleans_up_cancelled_upload(config, monkeypatch):
+    upload = SimpleNamespace(
+        upload_part=AsyncMock(),
+        complete_upload=AsyncMock(side_effect=asyncio.CancelledError()),
+        delete_file=AsyncMock(),
+    )
+    monkeypatch.setattr(
+        config,
+        "lecture_video_audio_store",
+        SimpleNamespace(
+            store=SimpleNamespace(create_upload=AsyncMock(return_value=upload))
+        ),
+    )
+
+    with pytest.raises(asyncio.CancelledError):
+        await lecture_video_processing._store_narration_audio("audio/ogg", b"audio")
+
+    upload.delete_file.assert_awaited_once()
+
+
+@pytest.mark.parametrize("stop_reason", ["lease_lost", "cancelled", "storage_error"])
+@pytest.mark.parametrize("cleanup_cancelled", [False, True])
+async def test_narration_cleans_up_audio_when_stopped_after_storage(
+    monkeypatch, stop_reason, cleanup_cancelled
+):
+    work_item = lecture_video_processing.NarrationWorkItem(
+        class_id=1,
+        assistant_id=1,
+        lecture_video_id=1,
+        voice_id="voice",
+        narration_id=1,
+        display_text="Hello",
+        speech_text="Hello",
+        model_id="model",
+        voice_settings={},
+    )
+    monkeypatch.setattr(
+        lecture_video_processing,
+        "_get_elevenlabs_api_key",
+        AsyncMock(return_value="key"),
+    )
+    monkeypatch.setattr(
+        lecture_video_processing,
+        "synthesize_elevenlabs_speech",
+        AsyncMock(return_value=("audio/ogg", b"audio")),
+    )
+    monkeypatch.setattr(
+        lecture_video_processing,
+        "_ensure_run_can_continue",
+        AsyncMock(return_value=True),
+    )
+    monkeypatch.setattr(
+        lecture_video_processing,
+        "_store_narration_audio",
+        AsyncMock(return_value=("stored-audio", 5)),
+    )
+    mark_failed = AsyncMock()
+    monkeypatch.setattr(lecture_video_processing, "_mark_run_failed", mark_failed)
+
+    async def cleanup(store_key):
+        if stop_reason == "storage_error":
+            mark_failed.assert_awaited_once_with(1, "lease", 1, "Storage failed")
+        if cleanup_cancelled:
+            raise asyncio.CancelledError()
+
+    delete_audio = AsyncMock(side_effect=cleanup)
+    monkeypatch.setattr(
+        lecture_video_processing, "_delete_audio_key_quietly", delete_audio
+    )
+
+    async def heartbeat(run_id, lease_token, operation, **kwargs):
+        result = await operation
+        if result == ("stored-audio", 5):
+            if stop_reason == "cancelled":
+                raise asyncio.CancelledError()
+            if stop_reason == "storage_error":
+                raise RuntimeError("Storage failed")
+            return None
+        return result
+
+    monkeypatch.setattr(
+        lecture_video_processing, "_await_with_run_lease_heartbeat", heartbeat
+    )
+    if stop_reason == "cancelled" or cleanup_cancelled:
+        with pytest.raises(asyncio.CancelledError):
+            await lecture_video_processing._process_narration_work_item(
+                1, "lease", work_item, asyncio.Lock(), {1: "Hello"}
+            )
+    else:
+        result = await lecture_video_processing._process_narration_work_item(
+            1, "lease", work_item, asyncio.Lock(), {1: "Hello"}
+        )
+        assert result is None
+    delete_audio.assert_awaited_once_with("stored-audio")
+    if stop_reason != "storage_error":
+        mark_failed.assert_not_awaited()

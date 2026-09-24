@@ -574,6 +574,8 @@ async def _await_with_run_lease_heartbeat(
     run_id: int,
     lease_token: str,
     operation: Coroutine[Any, Any, Any],
+    *,
+    persistence_lock: asyncio.Lock | None = None,
 ) -> Any | None:
     task: asyncio.Task[Any] = asyncio.create_task(operation)
     try:
@@ -585,7 +587,12 @@ async def _await_with_run_lease_heartbeat(
             if task in done:
                 return await task
 
-            if not await _ensure_run_can_continue(run_id, lease_token):
+            if persistence_lock is None:
+                can_continue = await _ensure_run_can_continue(run_id, lease_token)
+            else:
+                async with persistence_lock:
+                    can_continue = await _ensure_run_can_continue(run_id, lease_token)
+            if not can_continue:
                 task.cancel()
                 try:
                     await task
@@ -1230,6 +1237,7 @@ async def _process_narration_work_item(
                 model_id=work_item.model_id,
                 voice_settings=work_item.voice_settings,
             ),
+            persistence_lock=persistence_lock,
         )
     except Exception as exc:
         logger.info(
@@ -1268,7 +1276,10 @@ async def _process_narration_work_item(
         len(audio),
     )
 
-    if not await _ensure_run_can_continue(run_id, lease_token):
+    # Lease checks also write to the database and must share the batch's lock.
+    async with persistence_lock:
+        can_continue = await _ensure_run_can_continue(run_id, lease_token)
+    if not can_continue:
         logger.info(
             "Lecture video narration stopped after synthesis. "
             "run_id=%s lecture_video_id=%s narration_id=%s",
@@ -1277,6 +1288,13 @@ async def _process_narration_work_item(
             work_item.narration_id,
         )
         return None
+
+    stored_audio: tuple[str, int] | None = None
+
+    async def store_audio() -> tuple[str, int]:
+        nonlocal stored_audio
+        stored_audio = await _store_narration_audio(content_type, audio)
+        return stored_audio
 
     try:
         logger.debug(
@@ -1290,11 +1308,14 @@ async def _process_narration_work_item(
         store_result = await _await_with_run_lease_heartbeat(
             run_id,
             lease_token,
-            _store_narration_audio(
-                content_type,
-                audio,
-            ),
+            store_audio(),
+            persistence_lock=persistence_lock,
         )
+    except asyncio.CancelledError:
+        # Storage may finish before the heartbeat wrapper receives cancellation.
+        if stored_audio is not None:
+            await _delete_audio_key_quietly(stored_audio[0])
+        raise
     except Exception as exc:
         logger.info(
             "Lecture video narration storage failed. "
@@ -1303,16 +1324,23 @@ async def _process_narration_work_item(
             work_item.lecture_video_id,
             work_item.narration_id,
         )
-        async with persistence_lock:
-            await _mark_run_failed(
-                run_id,
-                lease_token,
-                work_item.narration_id,
-                _user_safe_processing_error_message(exc),
-            )
+        try:
+            # Persist the failure before cleanup, which can itself be cancelled.
+            async with persistence_lock:
+                await _mark_run_failed(
+                    run_id,
+                    lease_token,
+                    work_item.narration_id,
+                    _user_safe_processing_error_message(exc),
+                )
+        finally:
+            if stored_audio is not None:
+                await _delete_audio_key_quietly(stored_audio[0])
         return None
 
     if store_result is None:
+        if stored_audio is not None:
+            await _delete_audio_key_quietly(stored_audio[0])
         logger.info(
             "Lecture video narration stopped during storage. "
             "run_id=%s lecture_video_id=%s narration_id=%s",
@@ -1847,7 +1875,7 @@ async def _store_narration_audio(
     try:
         await upload.upload_part(io.BytesIO(audio))
         await upload.complete_upload()
-    except Exception:
+    except BaseException:
         try:
             await upload.delete_file()
         except Exception:
