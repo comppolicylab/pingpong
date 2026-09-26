@@ -4782,10 +4782,14 @@ async def get_thread(
             assistant and not assistant.hide_file_search_document_names
         )
         show_web_search_sources = is_supervisor or (
-            assistant and not assistant.hide_web_search_sources
+            assistant
+            and not assistant.hide_web_search_sources
+            and not _is_lecture_lesson_mode(thread.interaction_mode)
         )
         show_web_search_actions = is_supervisor or (
-            assistant and not assistant.hide_web_search_actions
+            assistant
+            and not assistant.hide_web_search_actions
+            and not _is_lecture_lesson_mode(thread.interaction_mode)
         )
         show_mcp_server_call_details = is_supervisor or (
             assistant and not assistant.hide_mcp_server_call_details
@@ -7445,10 +7449,14 @@ async def list_thread_messages(
             assistant and not assistant.hide_file_search_document_names
         )
         show_web_search_sources = is_supervisor or (
-            assistant and not assistant.hide_web_search_sources
+            assistant
+            and not assistant.hide_web_search_sources
+            and not _is_lecture_lesson_mode(thread.interaction_mode)
         )
         show_web_search_actions = is_supervisor or (
-            assistant and not assistant.hide_web_search_actions
+            assistant
+            and not assistant.hide_web_search_actions
+            and not _is_lecture_lesson_mode(thread.interaction_mode)
         )
         show_mcp_server_call_details = is_supervisor or (
             assistant and not assistant.hide_mcp_server_call_details
@@ -8718,7 +8726,11 @@ async def create_lecture_thread(
         "vector_store_id": None,
         "code_interpreter_file_ids": [],
         "image_file_ids": [],
-        "tools_available": json.dumps([]),
+        "tools_available": json.dumps(
+            [{"type": "web_search"}]
+            if assistant.tools and {"type": "web_search"} in json.loads(assistant.tools)
+            else []
+        ),
         "version": assistant.version,
         "last_activity": func.now(),
         "instructions": assistant.instructions,
@@ -9475,9 +9487,15 @@ async def create_run(
                 show_reasoning_summaries=is_supervisor
                 or not asst.hide_reasoning_summaries,
                 show_web_search_sources=is_supervisor
-                or not asst.hide_web_search_sources,
+                or (
+                    not asst.hide_web_search_sources
+                    and not _is_lecture_lesson_mode(thread.interaction_mode)
+                ),
                 show_web_search_actions=is_supervisor
-                or not asst.hide_web_search_actions,
+                or (
+                    not asst.hide_web_search_actions
+                    and not _is_lecture_lesson_mode(thread.interaction_mode)
+                ),
                 show_code_interpreter_code=is_supervisor
                 or not asst.hide_code_interpreter_code,
                 show_code_interpreter_output=is_supervisor
@@ -10029,10 +10047,14 @@ async def send_message(
                 asst and not asst.hide_file_search_document_names
             )
             show_web_search_sources = is_supervisor or (
-                asst and not asst.hide_web_search_sources
+                asst
+                and not asst.hide_web_search_sources
+                and not _is_lecture_lesson_mode(thread.interaction_mode)
             )
             show_web_search_actions = is_supervisor or (
-                asst and not asst.hide_web_search_actions
+                asst
+                and not asst.hide_web_search_actions
+                and not _is_lecture_lesson_mode(thread.interaction_mode)
             )
             show_mcp_server_call_details = is_supervisor or (
                 asst and not asst.hide_mcp_server_call_details
@@ -14296,12 +14318,6 @@ async def update_assistant(
         raise HTTPException(
             400,
             "The selected model does not support Web Search. Please select a different model or remove the Web Search tool.",
-        )
-
-    if uses_web_search and (is_video or is_slides):
-        raise HTTPException(
-            400,
-            detail="Assistants in lecture lesson modes do not support Web Search capabilities. Please remove the Web Search tool or create a new assistant without a lecture lesson mode.",
         )
 
     uses_mcp_server = False
