@@ -2004,7 +2004,7 @@ async def _prepare_translation_feedback(
         assistant = await models.Assistant.get_by_lecture_slide_deck_id(
             session, deck.id
         )
-        profile = profile_for(assistant, "knowledge_check") if assistant else None
+        profile = profile_for(assistant, "narration") if assistant else None
         voice_id, class_id = deck.voice_id, deck.class_id
         language_code, language_name = (
             translation.language_code,
@@ -2138,7 +2138,7 @@ async def _prepare_translation_feedback(
             lease_token,
             speech_texts_for_elevenlabs(
                 assistant_id=assistant.id,
-                component="knowledge_check",
+                component="narration",
                 scope="lecture_slide_translation_feedback",
                 language_code=language_code,
                 items=[
@@ -5646,9 +5646,7 @@ async def _synthesize_knowledge_check_audio(
         assistant = await models.Assistant.get_by_lecture_slide_deck_id(
             session, deck.id
         )
-        knowledge_profile = (
-            profile_for(assistant, "knowledge_check") if assistant else None
-        )
+        knowledge_profile = profile_for(assistant, "narration") if assistant else None
         voice_id = deck.voice_id
         class_id = deck.class_id
         narration_items: list[tuple[int, str, str, str]] = []
@@ -5700,7 +5698,7 @@ async def _synthesize_knowledge_check_audio(
             lease_token,
             speech_texts_for_elevenlabs(
                 assistant_id=assistant.id,
-                component="knowledge_check",
+                component="narration",
                 scope="lecture_slide_knowledge_check",
                 language_code=None,
                 items=[
