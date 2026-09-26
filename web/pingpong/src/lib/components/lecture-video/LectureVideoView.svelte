@@ -213,6 +213,7 @@
 	// (e.g. auto-pause at question timestamps).
 	let suppressPauseInteraction = false;
 	let suppressPlayInteraction = false;
+	let cancelAudioStartHold: (() => void) | null = null;
 	let ignorePauseEventUntilMs = 0;
 	let playbackInteractionInFlight = false;
 	let playbackSessionRefreshController: AbortController | null = null;
@@ -1093,6 +1094,21 @@
 		}
 	}
 
+	function holdAudioStart(): Promise<boolean> {
+		cancelAudioStartHold?.();
+		return new Promise((resolve) => {
+			const timeout = setTimeout(() => {
+				cancelAudioStartHold = null;
+				resolve(true);
+			}, AUDIO_START_HOLD_MS);
+			cancelAudioStartHold = () => {
+				clearTimeout(timeout);
+				cancelAudioStartHold = null;
+				resolve(false);
+			};
+		});
+	}
+
 	async function tryPlayVideo({
 		suppressInteractionPost = false,
 		queueRetryOnFailure = false
@@ -1110,8 +1126,8 @@
 
 		try {
 			if (mediaKind === 'audio' && currentTimeMs === 0) {
-				await new Promise((resolve) => setTimeout(resolve, AUDIO_START_HOLD_MS));
-				if (!videoElement) {
+				const held = await holdAudioStart();
+				if (!held || !videoElement) {
 					if (suppressInteractionPost) {
 						suppressPlayInteraction = false;
 					}
@@ -1252,6 +1268,7 @@
 		postPause: boolean;
 		releaseControl: boolean;
 	}) {
+		cancelAudioStartHold?.();
 		if (sessionCleanupInFlight) return;
 
 		const cleanupSessionId = controllerSessionId;
