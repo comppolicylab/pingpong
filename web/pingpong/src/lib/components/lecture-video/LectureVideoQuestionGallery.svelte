@@ -45,7 +45,7 @@
 			options: QuestionOption[];
 		} | null;
 		currentContinuation: {
-			option_id: number;
+			option_id: number | null;
 			correct_option_id: number | null;
 			post_answer_text: string | null;
 			post_answer_narration_id: number | null;

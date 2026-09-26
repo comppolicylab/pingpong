@@ -12,6 +12,8 @@ export type LectureSlideContentJsonOption = {
 };
 
 export type LectureSlideContentJsonQuestion = {
+	passing_criteria?: string | null;
+	allow_skip?: boolean;
 	type: LectureSlideQuestionType;
 	mode: LectureSlideQuestionDraftMode;
 	intro_text: string;
@@ -56,6 +58,9 @@ export type LectureSlideContentQuestionOptionDraft = {
 };
 
 export type LectureSlideContentQuestionDraft = {
+	type?: LectureSlideQuestionType;
+	passing_criteria?: string | null;
+	allow_skip?: boolean;
 	id?: number | null;
 	client_id: string;
 	mode: LectureSlideQuestionDraftMode;
@@ -85,11 +90,14 @@ export const buildLectureSlideContentJson = (
 			questions: questions
 				.filter((question) => question.slide_position === page.position)
 				.map((question) => ({
-					type: 'single_select',
+					type: question.type || 'single_select',
+					...(question.type === 'open_ended'
+						? { passing_criteria: question.passing_criteria, allow_skip: question.allow_skip }
+						: {}),
 					mode: question.mode,
 					intro_text: question.intro_text || '',
 					question_text: question.question_text || '',
-					options: question.options.map((option) => ({
+					options: (question.type === 'open_ended' ? [] : question.options).map((option) => ({
 						option_text: option.option_text || '',
 						correct: option.correct,
 						post_answer_text: option.post_answer_text || ''
@@ -188,7 +196,7 @@ export const parseLectureSlideContentJson = (
 		for (const rawQuestion of rawSlide.questions) {
 			if (
 				!isJsonRecord(rawQuestion) ||
-				rawQuestion.type !== 'single_select' ||
+				(rawQuestion.type !== 'single_select' && rawQuestion.type !== 'open_ended') ||
 				!isQuestionMode(rawQuestion.mode) ||
 				typeof rawQuestion.intro_text !== 'string' ||
 				typeof rawQuestion.question_text !== 'string' ||
@@ -233,7 +241,16 @@ export const parseLectureSlideContentJson = (
 				});
 			}
 			questions.push({
-				type: 'single_select',
+				type: rawQuestion.type,
+				...(rawQuestion.type === 'open_ended'
+					? {
+							passing_criteria:
+								typeof rawQuestion.passing_criteria === 'string'
+									? rawQuestion.passing_criteria
+									: '',
+							allow_skip: rawQuestion.allow_skip === true
+						}
+					: {}),
 				mode: rawQuestion.mode,
 				intro_text: rawQuestion.intro_text,
 				question_text: rawQuestion.question_text,
@@ -313,6 +330,9 @@ export const applyLectureSlideContentJson = <Page extends LectureSlideContentPag
 			return {
 				id: existingQuestion?.id,
 				client_id: existingQuestion?.client_id || nextClientId(),
+				type: question.type,
+				passing_criteria: question.passing_criteria,
+				allow_skip: question.allow_skip,
 				mode: question.mode,
 				slide_position: slidePosition,
 				question_text: question.question_text,

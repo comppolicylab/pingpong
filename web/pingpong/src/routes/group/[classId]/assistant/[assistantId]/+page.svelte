@@ -125,7 +125,8 @@
 	$: lectureSlideDefaultInstructions =
 		data.lectureLessonEditorConfig?.lecture_slides_instructions || '';
 	const SUPPORTED_LECTURE_VIDEO_QUESTION_TYPES = new Set<api.LectureVideoQuestionType>([
-		'single_select'
+		'single_select',
+		'open_ended'
 	]);
 	const DEFAULT_LECTURE_VIDEO_MANIFEST = {
 		version: 1,
@@ -178,10 +179,12 @@
 
 	type LectureVideoQuestionInput = {
 		type: string;
+		passing_criteria?: string | null;
+		allow_skip?: boolean;
 		question_text: string;
 		intro_text: string;
 		stop_offset_ms: number;
-		options: LectureVideoOptionInput[];
+		options?: LectureVideoOptionInput[];
 	};
 
 	type LectureVideoManifestInput = {
@@ -289,6 +292,26 @@
 		narration_text: page.content_kind === 'video' ? undefined : page.narration_text
 	});
 
+	const lectureSlideQuestionTypeDetails: {
+		type: api.LectureSlideQuestionType;
+		label: string;
+		tagline: string;
+		icon: typeof ClipboardCheckOutline;
+	}[] = [
+		{
+			type: 'single_select',
+			label: 'Multiple choice',
+			tagline: 'Students pick an answer',
+			icon: CheckCircleOutline
+		},
+		{
+			type: 'open_ended',
+			label: 'Open-ended',
+			tagline: 'Students explain in chat',
+			icon: MessageDotsOutline
+		}
+	];
+
 	const lectureSlideQuestionModeDetails: Record<
 		api.LectureSlideQuestionDraftMode,
 		{
@@ -329,6 +352,9 @@
 		client_id: nextLectureSlideQuestionDraftId(),
 		mode: question.mode || 'complete',
 		slide_position: question.slide_position,
+		type: question.type || 'single_select',
+		passing_criteria: question.passing_criteria || null,
+		allow_skip: question.allow_skip || false,
 		question_text: question.question_text,
 		intro_text: question.intro_text || '',
 		options: question.options.map((option) => ({
@@ -346,6 +372,9 @@
 			id: question.id,
 			mode: 'complete' as api.LectureSlideQuestionDraftMode,
 			slide_position: question.slide_position,
+			type: question.type || 'single_select',
+			passing_criteria: question.passing_criteria || null,
+			allow_skip: question.allow_skip || false,
 			question_text: question.question_text,
 			intro_text: question.intro_text || '',
 			options: question.options.map((option) => ({
@@ -375,11 +404,14 @@
 		id: question.id,
 		mode: question.mode,
 		slide_position: question.slide_position,
+		type: question.type || 'single_select',
+		passing_criteria: question.passing_criteria || null,
+		allow_skip: question.allow_skip || false,
 		question_text: question.mode === 'marker' ? '' : question.question_text.trim(),
 		intro_text: question.mode === 'marker' ? '' : question.intro_text.trim(),
 		intro_tts_text: null,
 		options:
-			question.mode === 'marker'
+			question.mode === 'marker' || question.type === 'open_ended'
 				? []
 				: question.options.map((option) => ({
 						id: option.id,
@@ -393,6 +425,9 @@
 	const lectureSlideQuestionComparable = (question: LectureSlideQuestionDraft) => ({
 		mode: question.mode,
 		slide_position: question.slide_position,
+		type: question.type || 'single_select',
+		passing_criteria: question.passing_criteria || null,
+		allow_skip: question.allow_skip || false,
 		question_text: question.question_text.trim(),
 		intro_text: question.intro_text.trim(),
 		options: question.options.map((option) => ({
@@ -429,6 +464,9 @@
 	const lectureSlideQuestionInputComparable = (question: api.LectureSlideQuestionInput) => ({
 		mode: question.mode || 'complete',
 		slide_position: question.slide_position,
+		type: question.type || 'single_select',
+		passing_criteria: question.passing_criteria || null,
+		allow_skip: question.allow_skip || false,
 		question_text: question.question_text.trim(),
 		intro_text: (question.intro_text || '').trim(),
 		options: question.options.map((option) => ({
@@ -466,6 +504,11 @@
 			}
 			if (!question.question_text.trim()) {
 				return `Question ${index + 1} needs question text.`;
+			}
+			if (question.type === 'open_ended') {
+				if (!question.passing_criteria?.trim())
+					return `Question ${index + 1} needs passing criteria.`;
+				continue;
 			}
 			if (question.options.length < 1) {
 				return `Question ${index + 1} needs at least one answer option.`;
@@ -965,7 +1008,7 @@
 			) {
 				return {
 					manifest: null,
-					error: `Question ${index + 1} must use a supported type (single_select).`
+					error: `Question ${index + 1} must use a supported type (single_select or open_ended).`
 				};
 			}
 			if (typeof question.question_text !== 'string' || question.question_text.length < 1) {
@@ -996,6 +1039,23 @@
 					manifest: null,
 					error: `Question ${index + 1} must have a non-negative stop_offset_ms.`
 				};
+			}
+			if (question.type === 'open_ended') {
+				if (candidate.version === 1)
+					return {
+						manifest: null,
+						error: `Question ${index + 1} is open-ended, which needs lesson chat. Use manifest version 2 or later.`
+					};
+				if (
+					typeof question.passing_criteria !== 'string' ||
+					!question.passing_criteria.trim() ||
+					question.options?.length
+				)
+					return {
+						manifest: null,
+						error: `Question ${index + 1} needs passing criteria and no answer options.`
+					};
+				continue;
 			}
 			if (!Array.isArray(question.options) || question.options.length < 1) {
 				return {
@@ -1056,10 +1116,12 @@
 
 		const questions = candidate.questions.map((question) => ({
 			type: question.type as api.LectureVideoQuestionType,
+			passing_criteria: question.passing_criteria || null,
+			allow_skip: question.allow_skip || false,
 			question_text: question.question_text,
 			intro_text: question.intro_text,
 			stop_offset_ms: question.stop_offset_ms,
-			options: question.options.map((option) => ({
+			options: (question.options ?? []).map((option) => ({
 				option_text: option.option_text,
 				post_answer_text: option.post_answer_text,
 				continue_offset_ms: option.continue_offset_ms,
@@ -1852,13 +1914,13 @@
 					]
 				};
 			}
-			return { ...question, mode };
+			return { ...question, mode, type: 'single_select' as api.LectureSlideQuestionType };
 		});
 	};
 
 	const updateLectureSlideQuestionDraft = (
 		questionClientId: string,
-		field: 'question_text' | 'intro_text',
+		field: 'question_text' | 'intro_text' | 'passing_criteria',
 		value: string
 	) => {
 		lectureSlideQuestionDrafts = lectureSlideQuestionDrafts.map((question) =>
@@ -5100,6 +5162,59 @@
 										</div>
 									{/if}
 								</div>
+
+								{#if selectedLectureSlideQuestion.mode === 'complete'}
+									<div class="space-y-2.5">
+										<div class="text-[11px] font-semibold tracking-wide text-gray-500 uppercase">
+											Question type
+										</div>
+										<div class="grid gap-2 sm:grid-cols-2">
+											{#each lectureSlideQuestionTypeDetails as details (details.type)}
+												{@const Icon = details.icon}
+												{@const isActive =
+													(selectedLectureSlideQuestion.type || 'single_select') === details.type}
+												<button
+													type="button"
+													disabled={preventEdits}
+													aria-pressed={isActive}
+													class="group relative flex items-center gap-2.5 rounded-xl border p-3 text-left transition-all duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-900/15 disabled:cursor-not-allowed disabled:opacity-60 {isActive
+														? 'border-gray-900 bg-gray-50 shadow-sm'
+														: 'border-gray-200 bg-white hover:border-gray-400 hover:shadow-sm'}"
+													onclick={() =>
+														(lectureSlideQuestionDrafts = lectureSlideQuestionDrafts.map(
+															(question) =>
+																question.client_id === selectedLectureSlideQuestion.client_id
+																	? { ...question, type: details.type }
+																	: question
+														))}
+												>
+													<span
+														class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition-colors {isActive
+															? 'bg-gray-900 text-white'
+															: 'bg-gray-100 text-gray-500 group-hover:bg-gray-200'}"
+													>
+														<Icon class="h-4 w-4" />
+													</span>
+													<span class="block">
+														<span class="block text-sm font-semibold text-gray-900"
+															>{details.label}</span
+														>
+														<span class="mt-0.5 block text-[11px] font-medium text-gray-400"
+															>{details.tagline}</span
+														>
+													</span>
+													{#if isActive}
+														<span
+															class="absolute top-2 right-2 flex h-4 w-4 items-center justify-center rounded-full bg-gray-900 text-white"
+														>
+															<CheckOutline class="h-2.5 w-2.5" />
+														</span>
+													{/if}
+												</button>
+											{/each}
+										</div>
+									</div>
+								{/if}
 								{#if selectedLectureSlideQuestion.mode === 'marker'}
 									<div class="rounded-lg border border-dashed border-gray-300 bg-white p-4">
 										<div class="text-sm font-semibold text-gray-900">
@@ -5137,180 +5252,232 @@
 												)}
 										/>
 									</div>
-									<div class="space-y-1.5">
-										<Label
-											for="slide_question_intro_text"
-											class="text-xs font-semibold text-gray-500 uppercase"
-										>
-											Spoken intro{selectedLectureSlideQuestion.mode === 'partial' ? ' hint' : ''}
-										</Label>
-										<Textarea
-											id="slide_question_intro_text"
-											rows={3}
-											placeholder={selectedLectureSlideQuestion.mode === 'partial'
-												? 'Optional: give the model a narration cue to preserve.'
-												: 'Optional narration spoken right before the question.'}
-											class="resize-none rounded-lg border-gray-300 text-sm focus:border-gray-900 focus:ring-gray-900"
-											value={selectedLectureSlideQuestion.intro_text}
-											disabled={preventEdits}
-											oninput={(event) =>
-												updateLectureSlideQuestionDraft(
-													selectedLectureSlideQuestion.client_id,
-													'intro_text',
-													(event.target as HTMLTextAreaElement).value
-												)}
-										/>
-										<Helper class="text-xs text-gray-400">
-											Saving narration changes regenerates this question's audio. Use
-											<span class="font-mono">{LECTURE_PRONUNCIATION_EXAMPLE}</span> for a pronunciation
-											override.
-										</Helper>
-									</div>
-									<div class="space-y-2.5">
-										<div class="flex items-end justify-between">
-											<div>
-												<div class="text-xs font-semibold text-gray-500 uppercase">
-													Answers{selectedLectureSlideQuestion.mode === 'partial' ? ' / hints' : ''}
-												</div>
-												<div class="text-xs text-gray-400">
-													{selectedLectureSlideQuestion.mode === 'partial'
-														? 'Optional: add answer hints or mark a correct-answer hint.'
-														: selectedLectureSlideQuestion.options.length === 1
-															? 'Single-answer questions are not graded.'
-															: 'Tap the circle to mark the correct one.'}
-												</div>
-												<div class="text-xs text-gray-400">
-													Spoken feedback supports
-													<span class="font-mono">{LECTURE_PRONUNCIATION_EXAMPLE}</span>.
-												</div>
-											</div>
-											<Button
-												type="button"
-												color="light"
-												size="xs"
-												class="gap-1 rounded-lg border-gray-300"
-												disabled={preventEdits}
-												onclick={() =>
-													addLectureSlideQuestionOption(selectedLectureSlideQuestion.client_id)}
+
+									{#if selectedLectureSlideQuestion.mode === 'complete' && selectedLectureSlideQuestion.type === 'open_ended'}
+										<div class="space-y-1.5">
+											<Label
+												for="slide_question_passing_criteria"
+												class="text-xs font-semibold text-gray-500 uppercase"
 											>
-												<PlusOutline class="h-3.5 w-3.5" />
-												Add
-											</Button>
-										</div>
-										{#if selectedLectureSlideQuestion.mode === 'complete' && selectedLectureSlideQuestion.options.length > 1}
-											<Checkbox
-												checked={!selectedLectureSlideQuestion.options.some(
-													(option) => option.correct
-												)}
+												What should a correct answer include?
+											</Label>
+											<Textarea
+												id="slide_question_passing_criteria"
+												rows={3}
+												placeholder="e.g. Evaporation removes heat from the skin, which cools the body."
+												class="resize-none rounded-lg border-gray-300 text-sm focus:border-gray-900 focus:ring-gray-900"
+												value={selectedLectureSlideQuestion.passing_criteria || ''}
 												disabled={preventEdits}
-												onchange={(event) =>
-													setLectureSlideQuestionCorrectOption(
+												oninput={(event) =>
+													updateLectureSlideQuestionDraft(
 														selectedLectureSlideQuestion.client_id,
-														(event.target as HTMLInputElement).checked
-															? null
-															: (selectedLectureSlideQuestion.options[0]?.client_id ?? null)
+														'passing_criteria',
+														(event.target as HTMLTextAreaElement).value
 													)}
+											/>
+											<Helper class="text-xs text-gray-400">
+												Describe the answer or concepts the student must demonstrate. Equivalent
+												wording is accepted. Students never see this.
+											</Helper>
+										</div>
+										<div class="rounded-xl border border-gray-200 bg-gray-50 p-3">
+											<Checkbox
+												id="slide_question_allow_skip"
+												class="text-sm font-medium text-gray-900"
+												disabled={preventEdits}
+												checked={selectedLectureSlideQuestion.allow_skip || false}
+												onchange={(event) => {
+													const allow_skip = (event.target as HTMLInputElement).checked;
+													lectureSlideQuestionDrafts = lectureSlideQuestionDrafts.map((question) =>
+														question.client_id === selectedLectureSlideQuestion.client_id
+															? { ...question, allow_skip }
+															: question
+													);
+												}}>Allow students to skip this check</Checkbox
 											>
-												No correct answer
-											</Checkbox>
-										{/if}
-										{#if selectedLectureSlideQuestion.options.length > 0}
-											<div class="space-y-2.5">
-												{#each selectedLectureSlideQuestion.options as option, optionIndex (option.client_id)}
-													<div
-														class="group relative rounded-lg border p-3 transition-all duration-150 {option.correct
-															? 'border-gray-900 bg-gray-50'
-															: 'border-gray-200 bg-white hover:border-gray-400'}"
-													>
-														{#if option.correct}
-															<span
-																class="absolute -top-2 left-9 rounded bg-gray-900 px-2 py-0.5 text-[10px] leading-none font-semibold text-white"
-															>
-																Correct
-															</span>
-														{/if}
-														<div class="flex items-start gap-3">
-															{#if selectedLectureSlideQuestion.mode === 'partial' || selectedLectureSlideQuestion.options.length > 1}
+											<Helper class="mt-1 ml-6 text-xs text-gray-400">
+												Students can move on without passing. Skips are recorded separately from
+												passes.
+											</Helper>
+										</div>
+									{:else}
+										<div class="space-y-1.5">
+											<Label
+												for="slide_question_intro_text"
+												class="text-xs font-semibold text-gray-500 uppercase"
+											>
+												Spoken intro{selectedLectureSlideQuestion.mode === 'partial' ? ' hint' : ''}
+											</Label>
+											<Textarea
+												id="slide_question_intro_text"
+												rows={3}
+												placeholder={selectedLectureSlideQuestion.mode === 'partial'
+													? 'Optional: give the model a narration cue to preserve.'
+													: 'Optional narration spoken right before the question.'}
+												class="resize-none rounded-lg border-gray-300 text-sm focus:border-gray-900 focus:ring-gray-900"
+												value={selectedLectureSlideQuestion.intro_text}
+												disabled={preventEdits}
+												oninput={(event) =>
+													updateLectureSlideQuestionDraft(
+														selectedLectureSlideQuestion.client_id,
+														'intro_text',
+														(event.target as HTMLTextAreaElement).value
+													)}
+											/>
+											<Helper class="text-xs text-gray-400">
+												Saving narration changes regenerates this question's audio. Use
+												<span class="font-mono">{LECTURE_PRONUNCIATION_EXAMPLE}</span> for a pronunciation
+												override.
+											</Helper>
+										</div>
+										<div class="space-y-2.5">
+											<div class="flex items-end justify-between">
+												<div>
+													<div class="text-xs font-semibold text-gray-500 uppercase">
+														Answers{selectedLectureSlideQuestion.mode === 'partial'
+															? ' / hints'
+															: ''}
+													</div>
+													<div class="text-xs text-gray-400">
+														{selectedLectureSlideQuestion.mode === 'partial'
+															? 'Optional: add answer hints or mark a correct-answer hint.'
+															: selectedLectureSlideQuestion.options.length === 1
+																? 'Single-answer questions are not graded.'
+																: 'Tap the circle to mark the correct one.'}
+													</div>
+													<div class="text-xs text-gray-400">
+														Spoken feedback supports
+														<span class="font-mono">{LECTURE_PRONUNCIATION_EXAMPLE}</span>.
+													</div>
+												</div>
+												<Button
+													type="button"
+													color="light"
+													size="xs"
+													class="gap-1 rounded-lg border-gray-300"
+													disabled={preventEdits}
+													onclick={() =>
+														addLectureSlideQuestionOption(selectedLectureSlideQuestion.client_id)}
+												>
+													<PlusOutline class="h-3.5 w-3.5" />
+													Add
+												</Button>
+											</div>
+											{#if selectedLectureSlideQuestion.mode === 'complete' && selectedLectureSlideQuestion.options.length > 1}
+												<Checkbox
+													checked={!selectedLectureSlideQuestion.options.some(
+														(option) => option.correct
+													)}
+													disabled={preventEdits}
+													onchange={(event) =>
+														setLectureSlideQuestionCorrectOption(
+															selectedLectureSlideQuestion.client_id,
+															(event.target as HTMLInputElement).checked
+																? null
+																: (selectedLectureSlideQuestion.options[0]?.client_id ?? null)
+														)}
+												>
+													No correct answer
+												</Checkbox>
+											{/if}
+											{#if selectedLectureSlideQuestion.options.length > 0}
+												<div class="space-y-2.5">
+													{#each selectedLectureSlideQuestion.options as option, optionIndex (option.client_id)}
+														<div
+															class="group relative rounded-lg border p-3 transition-all duration-150 {option.correct
+																? 'border-gray-900 bg-gray-50'
+																: 'border-gray-200 bg-white hover:border-gray-400'}"
+														>
+															{#if option.correct}
+																<span
+																	class="absolute -top-2 left-9 rounded bg-gray-900 px-2 py-0.5 text-[10px] leading-none font-semibold text-white"
+																>
+																	Correct
+																</span>
+															{/if}
+															<div class="flex items-start gap-3">
+																{#if selectedLectureSlideQuestion.mode === 'partial' || selectedLectureSlideQuestion.options.length > 1}
+																	<button
+																		type="button"
+																		role="radio"
+																		aria-checked={option.correct}
+																		aria-label={`Mark option ${optionIndex + 1} as correct`}
+																		disabled={preventEdits}
+																		onclick={() =>
+																			setLectureSlideQuestionCorrectOption(
+																				selectedLectureSlideQuestion.client_id,
+																				option.client_id
+																			)}
+																		class="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border-2 transition disabled:cursor-not-allowed {option.correct
+																			? 'border-gray-900 bg-gray-900 text-white'
+																			: 'border-gray-300 text-transparent hover:border-gray-700 hover:text-gray-700'}"
+																	>
+																		<CheckOutline class="h-3.5 w-3.5" />
+																	</button>
+																{/if}
+																<div class="min-w-0 flex-1 space-y-2">
+																	<input
+																		id={`slide_question_option_${option.client_id}`}
+																		value={option.option_text}
+																		placeholder={`Answer option ${optionIndex + 1}`}
+																		disabled={preventEdits}
+																		class="w-full border-0 border-b border-transparent bg-transparent p-0 pb-1 text-sm font-medium text-gray-900 placeholder:font-normal placeholder:text-gray-400 focus:border-gray-700 focus:ring-0 focus:outline-none disabled:cursor-not-allowed"
+																		oninput={(event) =>
+																			updateLectureSlideQuestionOptionDraft(
+																				selectedLectureSlideQuestion.client_id,
+																				option.client_id,
+																				'option_text',
+																				(event.target as HTMLInputElement).value
+																			)}
+																	/>
+																	<textarea
+																		id={`slide_question_feedback_${option.client_id}`}
+																		rows={2}
+																		value={option.post_answer_text}
+																		placeholder="Spoken feedback when this answer is chosen (optional)"
+																		disabled={preventEdits}
+																		class="w-full resize-none rounded-lg bg-gray-50 px-2.5 py-1.5 text-xs text-gray-600 placeholder:text-gray-400 focus:bg-white focus:ring-1 focus:ring-gray-700 focus:outline-none disabled:cursor-not-allowed"
+																		oninput={(event) =>
+																			updateLectureSlideQuestionOptionDraft(
+																				selectedLectureSlideQuestion.client_id,
+																				option.client_id,
+																				'post_answer_text',
+																				(event.target as HTMLTextAreaElement).value
+																			)}></textarea>
+																</div>
 																<button
 																	type="button"
-																	role="radio"
-																	aria-checked={option.correct}
-																	aria-label={`Mark option ${optionIndex + 1} as correct`}
-																	disabled={preventEdits}
+																	class="mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-gray-400 opacity-0 transition group-hover:opacity-100 hover:bg-gray-100 hover:text-red-600 focus:opacity-100 disabled:cursor-not-allowed disabled:opacity-0"
+																	disabled={preventEdits ||
+																		selectedLectureSlideQuestion.options.length <= 1}
+																	aria-label={`Remove option ${optionIndex + 1}`}
+																	title={`Remove option ${optionIndex + 1}`}
 																	onclick={() =>
-																		setLectureSlideQuestionCorrectOption(
+																		removeLectureSlideQuestionOption(
 																			selectedLectureSlideQuestion.client_id,
 																			option.client_id
 																		)}
-																	class="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border-2 transition disabled:cursor-not-allowed {option.correct
-																		? 'border-gray-900 bg-gray-900 text-white'
-																		: 'border-gray-300 text-transparent hover:border-gray-700 hover:text-gray-700'}"
 																>
-																	<CheckOutline class="h-3.5 w-3.5" />
+																	<TrashBinOutline class="h-4 w-4" />
 																</button>
-															{/if}
-															<div class="min-w-0 flex-1 space-y-2">
-																<input
-																	id={`slide_question_option_${option.client_id}`}
-																	value={option.option_text}
-																	placeholder={`Answer option ${optionIndex + 1}`}
-																	disabled={preventEdits}
-																	class="w-full border-0 border-b border-transparent bg-transparent p-0 pb-1 text-sm font-medium text-gray-900 placeholder:font-normal placeholder:text-gray-400 focus:border-gray-700 focus:ring-0 focus:outline-none disabled:cursor-not-allowed"
-																	oninput={(event) =>
-																		updateLectureSlideQuestionOptionDraft(
-																			selectedLectureSlideQuestion.client_id,
-																			option.client_id,
-																			'option_text',
-																			(event.target as HTMLInputElement).value
-																		)}
-																/>
-																<textarea
-																	id={`slide_question_feedback_${option.client_id}`}
-																	rows={2}
-																	value={option.post_answer_text}
-																	placeholder="Spoken feedback when this answer is chosen (optional)"
-																	disabled={preventEdits}
-																	class="w-full resize-none rounded-lg bg-gray-50 px-2.5 py-1.5 text-xs text-gray-600 placeholder:text-gray-400 focus:bg-white focus:ring-1 focus:ring-gray-700 focus:outline-none disabled:cursor-not-allowed"
-																	oninput={(event) =>
-																		updateLectureSlideQuestionOptionDraft(
-																			selectedLectureSlideQuestion.client_id,
-																			option.client_id,
-																			'post_answer_text',
-																			(event.target as HTMLTextAreaElement).value
-																		)}></textarea>
 															</div>
-															<button
-																type="button"
-																class="mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-gray-400 opacity-0 transition group-hover:opacity-100 hover:bg-gray-100 hover:text-red-600 focus:opacity-100 disabled:cursor-not-allowed disabled:opacity-0"
-																disabled={preventEdits ||
-																	selectedLectureSlideQuestion.options.length <= 1}
-																aria-label={`Remove option ${optionIndex + 1}`}
-																title={`Remove option ${optionIndex + 1}`}
-																onclick={() =>
-																	removeLectureSlideQuestionOption(
-																		selectedLectureSlideQuestion.client_id,
-																		option.client_id
-																	)}
-															>
-																<TrashBinOutline class="h-4 w-4" />
-															</button>
 														</div>
-													</div>
-												{/each}
-											</div>
-										{:else}
-											<button
-												type="button"
-												disabled={preventEdits}
-												onclick={() =>
-													addLectureSlideQuestionOption(selectedLectureSlideQuestion.client_id)}
-												class="flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-gray-300 bg-gray-50 px-4 py-4 text-sm font-medium text-gray-700 transition hover:border-gray-500 hover:bg-white disabled:cursor-not-allowed disabled:opacity-60"
-											>
-												<PlusOutline class="h-4 w-4" />
-												Add an answer hint
-											</button>
-										{/if}
-									</div>
+													{/each}
+												</div>
+											{:else}
+												<button
+													type="button"
+													disabled={preventEdits}
+													onclick={() =>
+														addLectureSlideQuestionOption(selectedLectureSlideQuestion.client_id)}
+													class="flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-gray-300 bg-gray-50 px-4 py-4 text-sm font-medium text-gray-700 transition hover:border-gray-500 hover:bg-white disabled:cursor-not-allowed disabled:opacity-60"
+												>
+													<PlusOutline class="h-4 w-4" />
+													Add an answer hint
+												</button>
+											{/if}
+										</div>
+									{/if}
 								{/if}
 							</div>
 							<div

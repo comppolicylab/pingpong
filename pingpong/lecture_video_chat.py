@@ -47,6 +47,7 @@ class LectureChatContextBuildResult:
 class LectureChatTurnPreparation:
     prepended_messages: list[models.Message]
     user_output_index: int
+    check_instructions: str = ""
     user_assistant_messages_only: bool = False
     user_message_metadata: dict[str, str | bool | int] | None = None
 

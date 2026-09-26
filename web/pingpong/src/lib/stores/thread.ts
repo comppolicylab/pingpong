@@ -654,6 +654,37 @@ export class ThreadManager {
 		}
 	}
 
+	checkAttemptId: number | null = null;
+	#forceCheckSpeech = false;
+
+	setCheckAttemptId(checkAttemptId: number | null) {
+		this.checkAttemptId = checkAttemptId;
+	}
+
+	async refreshMessages() {
+		let response: Awaited<ReturnType<typeof api.getThreadMessages>>;
+		try {
+			response = await api.getThreadMessages(this.#fetcher, this.classId, this.threadId, {});
+		} catch (e) {
+			console.warn('Failed to refresh thread messages', e);
+			return;
+		}
+		if (response.error || !response.messages.length) return;
+		this.#data.update((d) => {
+			if (!d.data || d.waiting || d.submitting) return d;
+			// Lesson streams omit persisted message IDs, so replace the latest page instead of merging.
+			const fetched = [...response.messages].sort(compareApiMessagesAsc);
+			const older = d.data.messages.filter(
+				(message) => compareApiMessagesAsc(message, fetched[0]) < 0
+			);
+			return {
+				...d,
+				optimistic: [],
+				data: { ...d.data, messages: [...older, ...fetched] }
+			};
+		});
+	}
+
 	/**
 	 * Fetch an earlier page of results.
 	 */
@@ -834,7 +865,8 @@ export class ThreadManager {
 		const isLessonThread =
 			currentState?.data?.thread?.interaction_mode === 'lecture_video' ||
 			currentState?.data?.thread?.interaction_mode === 'lecture_slides';
-		if (isLessonThread && !get(this.#ttsMuted)) {
+		this.#forceCheckSpeech = this.checkAttemptId !== null;
+		if (isLessonThread && (this.#forceCheckSpeech || !get(this.#ttsMuted))) {
 			// Unlock the playback AudioContext synchronously while the user's
 			// send gesture is still live. Creating or resuming it later — when
 			// the audio_started chunk arrives off the network — is blocked by
@@ -859,6 +891,7 @@ export class ThreadManager {
 			],
 			created_at: optimisticCreatedAt,
 			metadata: {
+				...(this.checkAttemptId ? { check_attempt_id: this.checkAttemptId } : {}),
 				user_id: fromUserId,
 				is_current_user: true,
 				optimistic_vision_files:
@@ -894,6 +927,7 @@ export class ThreadManager {
 					// consumers fall back to created_at ordering before output_index is available.
 					created_at: optimisticCreatedAt + 0.001,
 					metadata: {
+						...(this.checkAttemptId ? { check_attempt_id: this.checkAttemptId } : {}),
 						lecture_context_pending: true
 					},
 					assistant_id: '',
@@ -937,7 +971,9 @@ export class ThreadManager {
 			vision_file_ids,
 			vision_image_descriptions,
 			timezone: this.timezone,
-			...(isLessonThread ? { generate_speech: !get(this.#ttsMuted) } : {}),
+			...(isLessonThread
+				? { generate_speech: this.#forceCheckSpeech || !get(this.#ttsMuted) }
+				: {}),
 			...(lecture_video_playback_position_ms !== undefined
 				? { lecture_video_playback_position_ms }
 				: {})
@@ -1088,6 +1124,10 @@ export class ThreadManager {
 						version === 3 ? (chunk.message.output_index ?? this.#getNextOutputIndex(d)) : undefined;
 					const message: api.OpenAIMessage = {
 						...chunk.message,
+						metadata: {
+							...chunk.message.metadata,
+							...(this.checkAttemptId ? { check_attempt_id: this.checkAttemptId } : {})
+						},
 						created_at: createdAt,
 						output_index: outputIndex
 					};
@@ -1250,7 +1290,13 @@ export class ThreadManager {
 				this.#disposeTtsPlayer(player).catch(() => {});
 				return;
 			}
-			player.setVolume(get(this.#ttsMuted) ? 0 : this.#ttsVolume);
+			player.setVolume(
+				this.#forceCheckSpeech
+					? Math.max(this.#ttsVolume, 0.5)
+					: get(this.#ttsMuted)
+						? 0
+						: this.#ttsVolume
+			);
 			this.#ttsPlayer = player;
 			this.#ttsTrackId = crypto.randomUUID();
 			this.#ttsPlaying.set(true);
@@ -1357,7 +1403,13 @@ export class ThreadManager {
 	 */
 	setTtsVolume(volume: number) {
 		this.#ttsVolume = Math.max(0, Math.min(1, volume));
-		this.#ttsPlayer?.setVolume(get(this.#ttsMuted) ? 0 : this.#ttsVolume);
+		this.#ttsPlayer?.setVolume(
+			this.#forceCheckSpeech
+				? Math.max(this.#ttsVolume, 0.5)
+				: get(this.#ttsMuted)
+					? 0
+					: this.#ttsVolume
+		);
 	}
 
 	/**

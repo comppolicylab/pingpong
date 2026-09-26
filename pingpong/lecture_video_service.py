@@ -324,6 +324,8 @@ def lecture_video_manifest_from_model(
         questions.append(
             schemas.LectureVideoManifestQuestionV1(
                 type=question.question_type,
+                passing_criteria=question.passing_criteria,
+                allow_skip=question.allow_skip,
                 question_text=question.question_text,
                 intro_text=(
                     combine_manual_tts_pronunciation_text(
@@ -1412,6 +1414,8 @@ async def persist_manifest(
                 lecture_video_id=lecture_video.id,
                 position=question_position,
                 question_type=question.type,
+                passing_criteria=question.passing_criteria,
+                allow_skip=question.allow_skip,
                 question_text=question.question_text,
                 intro_text=question.intro_text,
                 stop_offset_ms=question.stop_offset_ms,
