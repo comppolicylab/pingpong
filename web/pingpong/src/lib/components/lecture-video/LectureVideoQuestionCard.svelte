@@ -121,6 +121,7 @@
 	};
 
 	function optionLabel(index: number): string {
+		if (options.length === 1) return '';
 		return String.fromCharCode(65 + index);
 	}
 
