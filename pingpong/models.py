@@ -2596,6 +2596,8 @@ class LectureVideo(Base):
                 lecture_video_id=new_lecture_video.id,
                 position=question.position,
                 question_type=question.question_type,
+                passing_criteria=question.passing_criteria,
+                allow_skip=question.allow_skip,
                 question_text=question.question_text,
                 intro_text=question.intro_text,
                 stop_offset_ms=question.stop_offset_ms,

@@ -247,7 +247,8 @@ def _question_markers(
             stop_offset_ms=question.stop_offset_ms,
         )
         for question in sorted(
-            adapter.get_questions(thread), key=lambda item: item.stop_offset_ms
+            _lesson_questions(thread, adapter=adapter),
+            key=lambda item: item.stop_offset_ms,
         )
     ]
 
@@ -259,7 +260,7 @@ def _get_current_question(
         return state.current_question
     if adapter.get_asset(thread) is None:
         return None
-    for question in adapter.get_questions(thread):
+    for question in _lesson_questions(thread, adapter=adapter):
         if question.id == state.current_question_id:
             return question
     return None
@@ -290,10 +291,23 @@ def _get_next_question(
     if adapter.get_asset(thread) is None or current_question is None:
         return None
     next_position = current_question.position + 1
-    for question in adapter.get_questions(thread):
+    for question in _lesson_questions(thread, adapter=adapter):
         if question.position == next_position:
             return question
     return None
+
+
+def _lesson_questions(
+    thread: models.Thread, *, adapter: InteractiveLessonAdapter
+) -> list[LessonQuestion]:
+    asset = adapter.get_asset(thread)
+    chat_available = asset is not None and adapter.lesson_chat_available(asset)
+    return [
+        question
+        for question in adapter.get_questions(thread)
+        if chat_available
+        or _question_type_value(question.question_type) != "open_ended"
+    ]
 
 
 def _is_timeline_bypass_enabled(
@@ -324,7 +338,7 @@ async def _reset_question_queue_for_offset(
         (
             question
             for question in sorted(
-                adapter.get_questions(state.thread),
+                _lesson_questions(state.thread, adapter=adapter),
                 key=lambda item: item.stop_offset_ms,
             )
             if question.stop_offset_ms >= offset_ms
@@ -362,7 +376,7 @@ def _build_continuation(
 
     correct_option_id: int | None = None
     if current_question is not None and adapter.get_asset(thread) is not None:
-        for question in adapter.get_questions(thread):
+        for question in _lesson_questions(thread, adapter=adapter):
             if (
                 question.id == current_question.id
                 and question.correct_option is not None
@@ -584,6 +598,10 @@ async def get_thread_session(
     state = adapter.get_state(thread) or await get_or_initialize_thread_state(
         session, thread_id, adapter=adapter
     )
+    if state.check_attempt_id and state.state == _state_enum(adapter).AWAITING_ANSWER:
+        from pingpong.lesson_checks import reconcile
+
+        await reconcile(session, thread_id, adapter)
     latest_interaction_at = (
         await adapter.interaction_model.get_latest_created_by_thread_id(
             session, thread.id
@@ -610,7 +628,12 @@ async def initialize_thread_state(
         raise InteractiveLessonNotFoundError("Interactive lesson thread not found.")
 
     first_question = next(
-        iter(sorted(adapter.get_questions(thread), key=lambda item: item.position)),
+        iter(
+            sorted(
+                _lesson_questions(thread, adapter=adapter),
+                key=lambda item: item.position,
+            )
+        ),
         None,
     )
     state_enum = _state_enum(adapter)
@@ -1020,9 +1043,16 @@ async def _handle_answer_submitted(
         )
 
     if _question_type_value(current_question.question_type) == "open_ended":
-        if not request.skip or not current_question.allow_skip:
+        if not request.skip or not (
+            current_question.allow_skip
+            or _is_timeline_bypass_enabled(state.thread, adapter=adapter)
+        ):
             raise InteractiveLessonValidationError(
                 "This check must be passed in chat before continuing."
+            )
+        if (request.idempotency_key or "").startswith("check-"):
+            raise InteractiveLessonValidationError(
+                "Idempotency keys starting with 'check-' are reserved."
             )
         from pingpong.lesson_checks import finish_check
 

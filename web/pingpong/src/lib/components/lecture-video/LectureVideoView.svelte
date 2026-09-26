@@ -1565,10 +1565,7 @@
 	export async function skipCheck(): Promise<boolean> {
 		if (!controllerSessionId || !currentQuestion || sessionState !== 'awaiting_answer')
 			return false;
-		if (!currentQuestion.allow_skip) {
-			await handleSkipQuestion();
-			return false;
-		}
+		if (!currentQuestion.allow_skip && !timelineBypassEnabled) return false;
 		answerSubmissionInFlight = true;
 		try {
 			const expanded = await postLessonInteraction({

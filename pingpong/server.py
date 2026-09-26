@@ -17281,7 +17281,12 @@ async def health():
 async def _stream_lesson_check(stream, run_id: int, attempt_id: int):
     async for chunk in stream:
         if chunk == b'{"type":"done"}\n':
-            async with config.db.driver.async_session() as session:
-                await lesson_checks.complete_run(session, run_id, attempt_id)
-                await session.commit()
+            try:
+                async with config.db.driver.async_session() as session:
+                    await lesson_checks.complete_run(session, run_id, attempt_id)
+                    await session.commit()
+            except Exception:
+                logger.exception(
+                    "Failed to record lesson check result for run %s", run_id
+                )
         yield chunk

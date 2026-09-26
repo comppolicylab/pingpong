@@ -977,6 +977,17 @@ class LectureVideoManifestBase(BaseModel):
 class LectureVideoManifestV1(LectureVideoManifestBase):
     version: Literal[1] = 1
 
+    @model_validator(mode="after")
+    def validate_no_open_ended_questions(self):
+        if any(
+            question.type == LectureVideoQuestionType.OPEN_ENDED
+            for question in self.questions
+        ):
+            raise ValueError(
+                "Open-ended checks need lesson chat, which version 1 manifests do not support."
+            )
+        return self
+
 
 class LectureVideoManifestWordV2(BaseModel):
     id: str = Field(..., min_length=1)

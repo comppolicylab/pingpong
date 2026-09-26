@@ -39,6 +39,23 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     for kind in ("video", "slide"):
+        op.execute(
+            f"DELETE FROM lecture_{kind}_questions WHERE question_type = 'OPEN_ENDED'"
+        )
+        if op.get_bind().dialect.name == "postgresql":
+            op.execute(
+                f"ALTER TYPE lecture{kind}questiontype "
+                f"RENAME TO lecture{kind}questiontype_old"
+            )
+            op.execute(
+                f"CREATE TYPE lecture{kind}questiontype AS ENUM ('SINGLE_SELECT')"
+            )
+            op.execute(
+                f"ALTER TABLE lecture_{kind}_questions ALTER COLUMN question_type "
+                f"TYPE lecture{kind}questiontype "
+                f"USING question_type::text::lecture{kind}questiontype"
+            )
+            op.execute(f"DROP TYPE lecture{kind}questiontype_old")
         op.drop_column(f"lecture_{kind}_thread_states", "check_outcome")
         op.drop_column(f"lecture_{kind}_thread_states", "check_attempt_id")
         op.drop_column(f"lecture_{kind}_questions", "allow_skip")

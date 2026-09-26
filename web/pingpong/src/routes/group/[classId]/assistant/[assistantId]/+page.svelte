@@ -184,7 +184,7 @@
 		question_text: string;
 		intro_text: string;
 		stop_offset_ms: number;
-		options: LectureVideoOptionInput[];
+		options?: LectureVideoOptionInput[];
 	};
 
 	type LectureVideoManifestInput = {
@@ -1008,7 +1008,7 @@
 			) {
 				return {
 					manifest: null,
-					error: `Question ${index + 1} must use a supported type (single_select).`
+					error: `Question ${index + 1} must use a supported type (single_select or open_ended).`
 				};
 			}
 			if (typeof question.question_text !== 'string' || question.question_text.length < 1) {
@@ -1041,7 +1041,16 @@
 				};
 			}
 			if (question.type === 'open_ended') {
-				if (!question.passing_criteria?.trim() || question.options?.length)
+				if (candidate.version === 1)
+					return {
+						manifest: null,
+						error: `Question ${index + 1} is open-ended, which needs lesson chat. Use manifest version 2 or later.`
+					};
+				if (
+					typeof question.passing_criteria !== 'string' ||
+					!question.passing_criteria.trim() ||
+					question.options?.length
+				)
 					return {
 						manifest: null,
 						error: `Question ${index + 1} needs passing criteria and no answer options.`
@@ -1112,7 +1121,7 @@
 			question_text: question.question_text,
 			intro_text: question.intro_text,
 			stop_offset_ms: question.stop_offset_ms,
-			options: question.options.map((option) => ({
+			options: (question.options ?? []).map((option) => ({
 				option_text: option.option_text,
 				post_answer_text: option.post_answer_text,
 				continue_offset_ms: option.continue_offset_ms,

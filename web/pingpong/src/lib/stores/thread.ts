@@ -662,7 +662,13 @@ export class ThreadManager {
 	}
 
 	async refreshMessages() {
-		const response = await api.getThreadMessages(this.#fetcher, this.classId, this.threadId, {});
+		let response: Awaited<ReturnType<typeof api.getThreadMessages>>;
+		try {
+			response = await api.getThreadMessages(this.#fetcher, this.classId, this.threadId, {});
+		} catch (e) {
+			console.warn('Failed to refresh thread messages', e);
+			return;
+		}
 		if (response.error || !response.messages.length) return;
 		this.#data.update((d) => {
 			if (!d.data || d.waiting || d.submitting) return d;
