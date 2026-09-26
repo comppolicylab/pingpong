@@ -53,6 +53,7 @@
 	const COMPLETED_SEEK_TOLERANCE_MS = 2_000;
 	const QUESTION_BOUNDARY_STALL_RETRY_MS = 16;
 	const DEFAULT_MEDIA_ASPECT_RATIO = 16 / 9;
+	const AUDIO_START_HOLD_MS = 500;
 	const PLAYER_FRAME_CHROME_WIDTH = '1.625rem';
 	type InitErrorAction = 'refresh' | null;
 	type InitErrorState = {
@@ -1108,6 +1109,12 @@
 		}
 
 		try {
+			if (mediaKind === 'audio' && currentTimeMs === 0) {
+				await new Promise((resolve) => setTimeout(resolve, AUDIO_START_HOLD_MS));
+				if (!videoElement) {
+					return false;
+				}
+			}
 			await videoElement.play();
 			clearPendingVideoRetry();
 			return true;
