@@ -69,8 +69,6 @@
 	let copyPermissionLoading: Record<number, boolean> = {};
 	let copyPermissionError: Record<number, string> = {};
 	let assistants: Assistant[] = [];
-	let lecturePollingInFlight = false;
-	let lectureRefreshSeconds: number | null = null;
 	let lectureMediaRefreshingIds = new Set<number>();
 	const baseUrl = typeof window !== 'undefined' ? window.location.origin : '';
 	const classOptions = (data.classes || []).map((c) => ({
@@ -253,9 +251,6 @@
 </script>
 
 <LectureGenerationPoller
-	bind:inFlight={lecturePollingInFlight}
-	bind:secondsUntilRefresh={lectureRefreshSeconds}
-	showStatus={false}
 	classId={data.class.id}
 	{assistants}
 	on:refresh={({ detail }) => {
@@ -300,9 +295,7 @@
 					creator={creators[assistant.creator_id]}
 					editable={data.editableAssistants.has(assistant.id)}
 					currentClassId={data.class.id}
-					lectureMediaRefreshing={lectureMediaRefreshingIds.has(assistant.id) ||
-						lecturePollingInFlight}
-					lectureMediaRefreshIn={lectureRefreshSeconds}
+					lectureMediaRefreshing={lectureMediaRefreshingIds.has(assistant.id)}
 					onRefreshLectureMedia={() => void refreshLectureMediaAssistant(assistant.id)}
 					{classOptions}
 				/>
@@ -322,9 +315,7 @@
 					editable={data.editableAssistants.has(assistant.id)}
 					shareable={data.grants.canShareAssistants && !!assistant.published}
 					currentClassId={data.class.id}
-					lectureMediaRefreshing={lectureMediaRefreshingIds.has(assistant.id) ||
-						lecturePollingInFlight}
-					lectureMediaRefreshIn={lectureRefreshSeconds}
+					lectureMediaRefreshing={lectureMediaRefreshingIds.has(assistant.id)}
 					onRefreshLectureMedia={() => void refreshLectureMediaAssistant(assistant.id)}
 					{classOptions}
 				/>
