@@ -1112,6 +1112,9 @@
 			if (mediaKind === 'audio' && currentTimeMs === 0) {
 				await new Promise((resolve) => setTimeout(resolve, AUDIO_START_HOLD_MS));
 				if (!videoElement) {
+					if (suppressInteractionPost) {
+						suppressPlayInteraction = false;
+					}
 					return false;
 				}
 			}
