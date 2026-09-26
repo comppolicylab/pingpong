@@ -2864,7 +2864,7 @@ async def _await_with_translation_lease_heartbeat(
                 task.cancel()
                 await asyncio.gather(task, return_exceptions=True)
                 return None
-    except Exception:
+    except BaseException:
         if not task.done():
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
