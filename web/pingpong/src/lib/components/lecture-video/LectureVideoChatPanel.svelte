@@ -10,7 +10,9 @@
 		VolumeUpSolid,
 		VolumeMuteSolid,
 		PlaySolid,
-		ReplyOutline
+		ReplyOutline,
+		CheckCircleSolid,
+		ArrowRightOutline
 	} from 'flowbite-svelte-icons';
 	import AssistantAvatar from '$lib/components/AssistantAvatar.svelte';
 	import Markdown from '$lib/components/Markdown.svelte';
@@ -33,6 +35,10 @@
 	import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 
 	let {
+		activeCheck = false,
+		checkAwaitingContinue = false,
+		allowSkip = false,
+		onskipcheck,
 		languageCode = null,
 		classId,
 		threadId,
@@ -70,6 +76,10 @@
 		onmutettstoggle,
 		oncontinuewatching
 	}: {
+		activeCheck?: boolean;
+		checkAwaitingContinue?: boolean;
+		allowSkip?: boolean;
+		onskipcheck?: () => Promise<void>;
 		languageCode?: string | null;
 		classId: number;
 		threadId: number;
@@ -244,7 +254,28 @@
 	const canLatchContinuePromptDecision = (message: Message) =>
 		isLatestStreamedAssistantResponse(message) && !waiting && !submitting;
 
+	let checkAttemptIds = $derived.by(() => {
+		const ids: (number | undefined)[] = messages.map(() => undefined);
+		messages.forEach((question, start) => {
+			const attemptId = question.data.metadata?.check_attempt_id as number | undefined;
+			if (!question.data.metadata?.check_question || !attemptId) return;
+			const isLatestQuestion = !messages
+				.slice(start + 1)
+				.some((message) => message.data.metadata?.check_question);
+			const end =
+				activeCheck && isLatestQuestion
+					? messages.length - 1
+					: messages.findLastIndex(
+							(message) => message.data.metadata?.check_attempt_id === attemptId
+						);
+			for (let index = start; index <= end; index++) ids[index] = attemptId;
+		});
+		return ids;
+	});
+	const checkAttemptIdAt = (index: number) => checkAttemptIds[index];
+
 	const getVisibleFollowupSuggestions = (message: Message) => {
+		if (activeCheck || checkAttemptIds[messages.indexOf(message)]) return [];
 		if (
 			!showInput ||
 			!canSubmitChatText ||
@@ -415,8 +446,41 @@
 				</div>
 			</div>
 		{/if}
-		{#each messages as message (message.data.id)}
-			<div class="mx-auto flex max-w-4xl gap-x-3 px-2 py-4">
+		{#each messages as message, messageIndex (message.data.id)}
+			{@const checkAttemptId = checkAttemptIdAt(messageIndex)}
+			{@const checkStarts =
+				!!checkAttemptId && checkAttemptIdAt(messageIndex - 1) !== checkAttemptId}
+			{@const checkEnds =
+				!!checkAttemptId &&
+				checkAttemptIdAt(messageIndex + 1) !== checkAttemptId &&
+				!(activeCheck && messageIndex === messages.length - 1)}
+			{@const checkOutcome = checkEnds
+				? messages.find(
+						(item) =>
+							item.data.metadata?.check_question &&
+							item.data.metadata?.check_attempt_id === checkAttemptId
+					)?.data.metadata?.check_outcome
+				: null}
+			{#if message.data.metadata?.check_question}
+				<div
+					id={message.data.metadata.check_question_id
+						? `lesson-check-${message.data.metadata.check_question_id}`
+						: undefined}
+					class="relative z-10 mx-auto mt-6 flex h-0 max-w-4xl scroll-mt-10 items-center justify-center"
+					role="separator"
+				>
+					<span class="rounded-full bg-white px-3 py-1 text-xs font-medium text-slate-500">
+						Learning Check{message.data.metadata.check_question_number
+							? ` ${message.data.metadata.check_question_number}`
+							: ''}
+					</span>
+				</div>
+			{/if}
+			<div
+				class="mx-auto flex max-w-4xl gap-x-3 py-4 {checkAttemptId
+					? `border-x border-slate-200 bg-slate-100 px-3 ${checkStarts ? 'rounded-t-2xl border-t pt-6' : ''} ${checkEnds ? 'rounded-b-2xl border-b pb-6' : ''}`
+					: 'px-2'}"
+			>
 				<div class="shrink-0">
 					{#if message.data.role === 'user'}
 						<Avatar size="sm" src={getImage(message.data)} />
@@ -576,7 +640,7 @@
 							</div>
 						{/if}
 					{/each}
-					{#if shouldShowContinueWatchingPrompt(message)}
+					{#if !activeCheck && !checkAwaitingContinue && shouldShowContinueWatchingPrompt(message)}
 						<div class="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1" aria-live="polite">
 							<button
 								type="button"
@@ -597,12 +661,65 @@
 					{/if}
 				</div>
 			</div>
+			{#if checkOutcome === 'passed' || checkOutcome === 'skipped'}
+				<div
+					class="relative z-10 mx-auto mb-6 flex h-0 max-w-4xl items-center justify-center"
+					role="separator"
+				>
+					<span
+						class="inline-flex items-center gap-1.5 rounded-full bg-white px-3 py-1 text-xs font-medium text-slate-500"
+					>
+						{#if checkOutcome === 'skipped'}
+							<span
+								class="flex h-3.5 w-3.5 items-center justify-center rounded-full bg-slate-400 text-white"
+							>
+								<ArrowRightOutline class="h-2.5 w-2.5" />
+							</span>
+							Check skipped
+						{:else}
+							<CheckCircleSolid class="h-3.5 w-3.5 text-emerald-600" />
+							<span class="text-emerald-700">Check passed</span>
+						{/if}
+					</span>
+				</div>
+			{/if}
 		{/each}
+		{#if checkAwaitingContinue && !ttsPlaying && !waiting && !submitting}
+			<div class="mx-auto flex max-w-4xl justify-center px-2 pb-2" aria-live="polite">
+				<button
+					type="button"
+					class="inline-flex items-center gap-1.5 rounded-full bg-orange px-3 py-1 text-sm font-medium text-white transition hover:bg-orange-dark focus:outline-none"
+					onclick={() => oncontinuewatching?.()}
+				>
+					<PlaySolid class="h-3 w-3" />
+					Continue watching
+				</button>
+			</div>
+		{/if}
 	</div>
 	{#if showInput}
-		<div class="border-t border-slate-200 px-4 pt-1 pb-3">
+		<div class="border-t border-slate-200 px-4 pt-1 pb-3 {activeCheck ? 'bg-slate-100' : ''}">
+			{#if activeCheck}
+				<div
+					class="mx-auto flex w-full max-w-4xl items-center justify-between gap-2 px-1 pt-1 pb-1"
+				>
+					<span class="text-xs font-semibold tracking-widest text-slate-400 uppercase">
+						Learning check
+					</span>
+					{#if allowSkip}
+						<button
+							type="button"
+							class="rounded-full px-2.5 py-1 text-xs text-slate-500 transition-colors hover:bg-slate-200 hover:text-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
+							disabled={waiting || submitting || ttsPlaying}
+							onclick={() => onskipcheck?.()}
+						>
+							Skip and continue
+						</button>
+					{/if}
+				</div>
+			{/if}
 			<div class="relative mx-auto flex w-full max-w-4xl flex-col">
-				{#if ttsAvailable}
+				{#if ttsAvailable && !activeCheck}
 					<div class="flex items-center justify-end gap-2 px-1 pb-1">
 						<button
 							class="flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs transition-colors {ttsMuted
@@ -647,7 +764,7 @@
 					threadVersion={version}
 					assistantVersion={resolvedAssistantVersion}
 					bypassedSettingsSections={[]}
-					placeholderMessage="Ask about the lecture"
+					placeholderMessage={activeCheck ? 'Type your answer' : 'Ask about the lecture'}
 					on:submit={(e) => onsubmit?.(e.detail)}
 					on:dismissError={() => ondismisserror?.()}
 				/>

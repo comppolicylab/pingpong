@@ -30,6 +30,7 @@ from pydantic import (
     ValidationError,
     computed_field,
     field_validator,
+    model_serializer,
     model_validator,
 )
 
@@ -509,10 +510,12 @@ class LectureVideoStatus(StrEnum):
 
 class LectureVideoQuestionType(StrEnum):
     SINGLE_SELECT = "single_select"
+    OPEN_ENDED = "open_ended"
 
 
 class LectureSlideQuestionType(StrEnum):
     SINGLE_SELECT = "single_select"
+    OPEN_ENDED = "open_ended"
 
 
 class LectureSlideQuestionDraftMode(StrEnum):
@@ -658,6 +661,7 @@ class InteractiveLessonOptionPrompt(BaseModel):
 class InteractiveLessonQuestionPrompt(BaseModel):
     id: int
     type: str
+    allow_skip: bool = False
     question_text: str
     intro_text: str
     stop_offset_ms: int = Field(..., ge=0)
@@ -671,7 +675,7 @@ class InteractiveLessonQuestionMarker(BaseModel):
 
 
 class InteractiveLessonContinuation(BaseModel):
-    option_id: int
+    option_id: int | None = None
     correct_option_id: int | None = None
     post_answer_text: str | None = None
     post_answer_narration_id: int | None = None
@@ -715,6 +719,8 @@ class InteractiveLessonSessionController(BaseModel):
 
 
 class InteractiveLessonSession(BaseModel):
+    check_attempt_id: int | None = None
+    check_outcome: str | None = None
     state: InteractiveLessonSessionState
     lesson_chat_available: bool = False
     playback_rate_min: float = Field(..., gt=0)
@@ -780,7 +786,8 @@ class InteractiveLessonQuestionPresentedRequest(
 class InteractiveLessonAnswerSubmittedRequest(InteractiveLessonInteractionRequestBase):
     type: Literal["answer_submitted"]
     question_id: int
-    option_id: int
+    option_id: int | None = None
+    skip: bool = False
 
 
 class InteractiveLessonResumedRequest(InteractiveLessonInteractionRequestBase):
@@ -866,6 +873,8 @@ class LectureSlideQuestionView(BaseModel):
     slide_offset_ms: int = Field(..., ge=0)
     stop_offset_ms: int = Field(..., ge=0)
     type: LectureSlideQuestionType
+    passing_criteria: str | None = Field(None, max_length=5000)
+    allow_skip: bool = False
     question_text: str
     intro_text: str
     options: list[LectureSlideQuestionOptionView] = Field(default_factory=list)
@@ -913,11 +922,13 @@ class LectureVideoManifestOptionV1(BaseModel):
 
 class LectureVideoManifestQuestionV1(BaseModel):
     type: LectureVideoQuestionType
+    passing_criteria: str | None = Field(None, max_length=5000)
+    allow_skip: bool = False
     question_text: str = Field(..., min_length=1)
     intro_text: str
     intro_tts_text: str | None = Field(None, exclude=True)
     stop_offset_ms: int = Field(..., ge=0)
-    options: list[LectureVideoManifestOptionV1] = Field(..., min_length=1)
+    options: list[LectureVideoManifestOptionV1] = Field(default_factory=list)
 
     @field_validator("intro_text")
     @classmethod
@@ -927,6 +938,20 @@ class LectureVideoManifestQuestionV1(BaseModel):
 
     @model_validator(mode="after")
     def validate_options(self):
+        if self.type.value == "open_ended":
+            if (
+                not (self.passing_criteria or "").strip()
+                or not self.question_text.strip()
+            ):
+                raise ValueError(
+                    "Open-ended checks need a question and passing criteria."
+                )
+            if self.options:
+                raise ValueError("Open-ended checks cannot have answer options.")
+            self.intro_text = self.question_text
+            return self
+        if not self.options:
+            raise ValueError("Single-select questions need at least one option.")
         if len(self.options) == 1:
             self.options[0].correct = False
         correct_count = sum(1 for option in self.options if option.correct)
@@ -935,6 +960,14 @@ class LectureVideoManifestQuestionV1(BaseModel):
                 "Single-select questions must have at most one correct option."
             )
         return self
+
+    @model_serializer(mode="wrap")
+    def serialize_question(self, handler):
+        data = handler(self)
+        if self.type != LectureVideoQuestionType.OPEN_ENDED:
+            data.pop("passing_criteria", None)
+            data.pop("allow_skip", None)
+        return data
 
 
 class LectureVideoManifestBase(BaseModel):
@@ -1447,8 +1480,11 @@ class LectureSlideQuestionOptionInput(BaseModel):
 
 class LectureSlideQuestionInput(BaseModel):
     id: int | None = None
+    type: LectureSlideQuestionType = LectureSlideQuestionType.SINGLE_SELECT
     mode: LectureSlideQuestionDraftMode = LectureSlideQuestionDraftMode.COMPLETE
     slide_position: int = Field(..., ge=0)
+    passing_criteria: str | None = Field(None, max_length=5000)
+    allow_skip: bool = False
     question_text: str = Field("", max_length=5000)
     intro_text: str = Field("", max_length=5000)
     intro_tts_text: str | None = Field(None, exclude=True)
@@ -1462,6 +1498,22 @@ class LectureSlideQuestionInput(BaseModel):
 
     @model_validator(mode="after")
     def validate_options(self):
+        if self.type.value == "open_ended":
+            if (
+                not (self.passing_criteria or "").strip()
+                or not self.question_text.strip()
+            ):
+                raise ValueError(
+                    "Open-ended checks need a question and passing criteria."
+                )
+            if self.mode != LectureSlideQuestionDraftMode.COMPLETE:
+                raise ValueError(
+                    "Open-ended checks must be instructor-authored complete questions."
+                )
+            if self.options:
+                raise ValueError("Open-ended checks cannot have answer options.")
+            self.intro_text = self.question_text
+            return self
         if self.mode == LectureSlideQuestionDraftMode.MARKER:
             return self
         if self.mode == LectureSlideQuestionDraftMode.PARTIAL:
@@ -1587,6 +1639,7 @@ class LectureVideoOptionPrompt(BaseModel):
 class LectureVideoQuestionPrompt(BaseModel):
     id: int
     type: LectureVideoQuestionType
+    allow_skip: bool = False
     question_text: str
     intro_text: str
     stop_offset_ms: int = Field(..., ge=0)
@@ -1600,7 +1653,7 @@ class LectureVideoQuestionMarker(BaseModel):
 
 
 class LectureVideoContinuation(BaseModel):
-    option_id: int
+    option_id: int | None = None
     correct_option_id: int | None = None
     post_answer_text: str | None = None
     post_answer_narration_id: int | None = None
@@ -1644,6 +1697,8 @@ class LectureVideoSessionController(BaseModel):
 
 
 class LectureVideoSession(BaseModel):
+    check_attempt_id: int | None = None
+    check_outcome: str | None = None
     state: LectureVideoSessionState
     lecture_video_chat_available: bool = False
     playback_rate_min: float = Field(..., gt=0)
@@ -1705,7 +1760,8 @@ class LectureVideoQuestionPresentedRequest(LectureVideoInteractionRequestBase):
 class LectureVideoAnswerSubmittedRequest(LectureVideoInteractionRequestBase):
     type: Literal["answer_submitted"]
     question_id: int
-    option_id: int
+    option_id: int | None = None
+    skip: bool = False
 
 
 class LectureVideoResumedRequest(LectureVideoInteractionRequestBase):
@@ -1765,6 +1821,7 @@ class LessonInteractionHistoryItem(BaseModel):
     offset_ms: int | None = None
     from_offset_ms: int | None = None
     to_offset_ms: int | None = None
+    check_outcome: str | None = None
     created: datetime
 
 

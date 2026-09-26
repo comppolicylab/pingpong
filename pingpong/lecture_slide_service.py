@@ -1212,6 +1212,16 @@ def _question_input_payload(
         "id": question.id,
         "mode": question.mode.value,
         "slide_position": question.slide_position,
+        **(
+            {
+                "type": "open_ended",
+                "passing_criteria": question.passing_criteria,
+                "allow_skip": question.allow_skip,
+            }
+            if getattr(question, "type", getattr(question, "question_type", None))
+            == schemas.LectureSlideQuestionType.OPEN_ENDED
+            else {}
+        ),
         "question_text": question.question_text.strip(),
         "intro_text": question.intro_text.strip(),
         "options": [
@@ -1244,6 +1254,16 @@ def _question_model_payload(
         "id": question.id,
         "mode": schemas.LectureSlideQuestionDraftMode.COMPLETE.value,
         "slide_position": question.slide_position,
+        **(
+            {
+                "type": "open_ended",
+                "passing_criteria": question.passing_criteria,
+                "allow_skip": question.allow_skip,
+            }
+            if getattr(question, "type", getattr(question, "question_type", None))
+            == schemas.LectureSlideQuestionType.OPEN_ENDED
+            else {}
+        ),
         "question_text": question.question_text,
         "intro_text": question.intro_text,
         "options": [
@@ -1607,7 +1627,9 @@ async def apply_lecture_slide_question_drafts(
                 slide_position=question_input.slide_position,
                 slide_offset_ms=slide_offset_ms,
                 stop_offset_ms=stop_offset_ms,
-                question_type=schemas.LectureSlideQuestionType.SINGLE_SELECT,
+                question_type=question_input.type,
+                passing_criteria=question_input.passing_criteria,
+                allow_skip=question_input.allow_skip,
                 question_text=question_text,
                 intro_text=intro_text,
             )
@@ -1672,6 +1694,16 @@ async def apply_lecture_slide_question_drafts(
                 audio_changed = audio_changed or narration_changed
             changed = changed or question_changed
             session.add(question)
+
+        for field, value in (
+            ("question_type", question_input.type),
+            ("passing_criteria", question_input.passing_criteria),
+            ("allow_skip", question_input.allow_skip),
+        ):
+            if getattr(question, field) != value:
+                setattr(question, field, value)
+                changed = True
+                question_changed = True
 
         (
             options_changed,
@@ -2132,6 +2164,8 @@ async def clone_lecture_slide_deck_snapshot(
             slide_offset_ms=question.slide_offset_ms,
             stop_offset_ms=question.stop_offset_ms,
             question_type=question.question_type,
+            passing_criteria=question.passing_criteria,
+            allow_skip=question.allow_skip,
             question_text=question.question_text,
             intro_text=question.intro_text,
             intro_narration_id=await clone_narration_id(question.intro_narration),

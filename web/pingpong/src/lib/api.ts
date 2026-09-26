@@ -1791,7 +1791,7 @@ export type LectureVideoSummary = {
 	error_message?: string | null;
 };
 
-export type LectureVideoQuestionType = 'single_select';
+export type LectureVideoQuestionType = 'single_select' | 'open_ended';
 
 export type LectureVideoManifestOption = {
 	option_text: string;
@@ -1801,6 +1801,8 @@ export type LectureVideoManifestOption = {
 };
 
 export type LectureVideoManifestQuestion = {
+	passing_criteria?: string | null;
+	allow_skip?: boolean;
 	type: LectureVideoQuestionType;
 	question_text: string;
 	intro_text: string;
@@ -1943,6 +1945,8 @@ export type InteractiveLessonOptionPrompt = {
 };
 
 export type InteractiveLessonQuestionPrompt = {
+	passing_criteria?: string | null;
+	allow_skip?: boolean;
 	id: number;
 	type: string;
 	question_text: string;
@@ -1958,7 +1962,7 @@ export type InteractiveLessonQuestionMarker = {
 };
 
 export type InteractiveLessonContinuation = {
-	option_id: number;
+	option_id: number | null;
 	correct_option_id: number | null;
 	post_answer_text: string | null;
 	post_answer_narration_id: number | null;
@@ -1975,6 +1979,8 @@ export type InteractiveLessonSessionController = {
 };
 
 export type InteractiveLessonSession = {
+	check_attempt_id?: number | null;
+	check_outcome?: string | null;
 	state: InteractiveLessonSessionState;
 	lesson_chat_available: boolean;
 	playback_rate_min: number;
@@ -2024,7 +2030,8 @@ export type InteractiveLessonQuestionPresentedRequest = InteractiveLessonInterac
 export type InteractiveLessonAnswerSubmittedRequest = InteractiveLessonInteractionRequestBase & {
 	type: 'answer_submitted';
 	question_id: number;
-	option_id: number;
+	option_id?: number | null;
+	skip?: boolean;
 };
 
 export type InteractiveLessonResumedRequest = InteractiveLessonInteractionRequestBase & {
@@ -2148,7 +2155,7 @@ export type LectureSlidePageNotes = {
 	narration_text?: string | null;
 };
 
-export type LectureSlideQuestionType = 'single_select';
+export type LectureSlideQuestionType = 'single_select' | 'open_ended';
 export type LectureSlideQuestionDraftMode = 'complete' | 'partial' | 'marker';
 
 export type LectureSlideQuestionOption = {
@@ -2170,6 +2177,8 @@ export type LectureSlideQuestionOptionInput = {
 };
 
 export type LectureSlideQuestion = {
+	passing_criteria?: string | null;
+	allow_skip?: boolean;
 	id: number;
 	position: number;
 	slide_position: number;
@@ -2182,6 +2191,9 @@ export type LectureSlideQuestion = {
 };
 
 export type LectureSlideQuestionInput = {
+	type?: LectureSlideQuestionType;
+	passing_criteria?: string | null;
+	allow_skip?: boolean;
 	id?: number | null;
 	mode?: LectureSlideQuestionDraftMode;
 	slide_position: number;
@@ -2218,6 +2230,8 @@ export type LectureVideoOptionPrompt = {
 };
 
 export type LectureVideoQuestionPrompt = {
+	passing_criteria?: string | null;
+	allow_skip?: boolean;
 	id: number;
 	type: LectureVideoQuestionType;
 	question_text: string;
@@ -2233,7 +2247,7 @@ export type LectureVideoQuestionMarker = {
 };
 
 export type LectureVideoContinuation = {
-	option_id: number;
+	option_id: number | null;
 	correct_option_id: number | null;
 	post_answer_text: string | null;
 	post_answer_narration_id: number | null;
@@ -2250,6 +2264,8 @@ export type LectureVideoSessionController = {
 };
 
 export type LectureVideoSession = {
+	check_attempt_id?: number | null;
+	check_outcome?: string | null;
 	state: LectureVideoSessionState;
 	lecture_video_chat_available: boolean;
 	playback_rate_min: number;
@@ -2299,7 +2315,8 @@ export type LectureVideoQuestionPresentedRequest = LectureVideoInteractionReques
 export type LectureVideoAnswerSubmittedRequest = LectureVideoInteractionRequestBase & {
 	type: 'answer_submitted';
 	question_id: number;
-	option_id: number;
+	option_id?: number | null;
+	skip?: boolean;
 };
 
 export type LectureVideoResumedRequest = LectureVideoInteractionRequestBase & {
@@ -2354,6 +2371,7 @@ export type LessonInteractionHistoryItem = {
 	offset_ms: number | null;
 	from_offset_ms: number | null;
 	to_offset_ms: number | null;
+	check_outcome?: string | null;
 	created: string;
 };
 

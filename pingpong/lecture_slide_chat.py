@@ -28,6 +28,7 @@ _V5_CONTEXT_ADAPTER = TypeAdapter(schemas.LectureSlideContextV5)
 class LectureSlideChatTurnPreparation:
     prepended_messages: list[models.Message]
     user_output_index: int
+    check_instructions: str = ""
     user_assistant_messages_only: bool = True
     include_developer_messages: bool = True
     user_message_metadata: dict[str, Any] | None = None

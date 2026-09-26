@@ -1,5 +1,7 @@
 <script module lang="ts">
 	export type LectureVideoViewHandle = {
+		refreshCheckSession: () => Promise<void>;
+		skipCheck: () => Promise<boolean>;
 		pauseForChatSubmit: () => Promise<void>;
 		continueWatchingAfterChat: () => Promise<boolean>;
 		getPlaybackPositionMs: () => number;
@@ -11,7 +13,7 @@
 	import { beforeNavigate } from '$app/navigation';
 	import type { Snippet } from 'svelte';
 	import { createEventDispatcher } from 'svelte';
-	import { onMount } from 'svelte';
+	import { onMount, tick } from 'svelte';
 	import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 	import { prefersReducedMotion } from 'svelte/motion';
 	import { slide } from 'svelte/transition';
@@ -38,7 +40,7 @@
 	import LectureVideoQuestionGallery from './LectureVideoQuestionGallery.svelte';
 	import LectureVideoCompletedView from './LectureVideoCompletedView.svelte';
 
-	type QuestionMarkerState = 'upcoming' | 'answered' | 'correct' | 'incorrect';
+	type QuestionMarkerState = 'upcoming' | 'answered' | 'correct' | 'incorrect' | 'skipped';
 	type QuestionPresentationRollbackState = {
 		questionId: number;
 		sessionState: LessonSessionState;
@@ -129,6 +131,7 @@
 		playbackresumed: void;
 		narrationplaybackstarted: void;
 		lessonupdated: void;
+		checkclick: number;
 	}>();
 
 	// --- Session state ---
@@ -148,6 +151,7 @@
 			postAnswerText: string | null;
 		}
 	>();
+	let checkOutcomes = new SvelteMap<number, string>();
 	let allQuestions: { id: number; position: number; questionText: string; stopOffsetMs: number }[] =
 		$state([]);
 	let sessionQuestionMarkers: LessonQuestionMarker[] = $state([]);
@@ -244,7 +248,11 @@
 	let controllerAcquireGeneration = 0;
 	let activePageRecoveryTimer: ReturnType<typeof setTimeout> | null = null;
 	let initErrorCanRefresh = $derived(showRefreshAction && initError?.action === 'refresh');
-	let narrationVolume = $derived(playerVolume * LECTURE_NARRATION_VOLUME_SCALE);
+	let narrationVolume = $derived(
+		((currentQuestion as LessonQuestionPrompt | null)?.type === 'open_ended'
+			? Math.max(playerVolume, 0.5)
+			: playerVolume) * LECTURE_NARRATION_VOLUME_SCALE
+	);
 	let safePlayerMediaAspectRatio = $derived(playerMediaAspectRatio ?? DEFAULT_MEDIA_ASPECT_RATIO);
 	let playerFrameStyle = $derived(
 		`--lecture-media-aspect-ratio: ${safePlayerMediaAspectRatio}; --lecture-player-frame-chrome: ${PLAYER_FRAME_CHROME_WIDTH}; --lecture-subtitle-height: ${Math.max(0, subtitleHeight - 12)}px;`
@@ -311,14 +319,19 @@
 			.sort((a, b) => a.offsetMs - b.offsetMs)
 			.map(({ id, offsetMs }) => {
 				const answer = answeredQuestions.get(id);
+				const checkOutcome = checkOutcomes.get(id);
 				const state: QuestionMarkerState =
-					answer == null
-						? 'upcoming'
-						: answer.correctOptionId == null
-							? 'answered'
-							: answer.selectedOptionId === answer.correctOptionId
-								? 'correct'
-								: 'incorrect';
+					checkOutcome === 'passed'
+						? 'correct'
+						: checkOutcome === 'skipped'
+							? 'skipped'
+							: answer == null
+								? 'upcoming'
+								: answer.correctOptionId == null
+									? 'answered'
+									: answer.selectedOptionId === answer.correctOptionId
+										? 'correct'
+										: 'incorrect';
 				return {
 					id,
 					offsetMs,
@@ -338,7 +351,11 @@
 			durationMsOverride <= 0 ||
 			furthestOffsetMs >= durationMsOverride - COMPLETED_SEEK_TOLERANCE_MS
 	);
-	let visibleCurrentQuestion = $derived(hasQuestionPrompt ? currentQuestion : null);
+	let visibleCurrentQuestion = $derived(
+		hasQuestionPrompt && (currentQuestion as LessonQuestionPrompt | null)?.type !== 'open_ended'
+			? (currentQuestion as LessonQuestionPrompt | null)
+			: null
+	);
 	let visualQuestionBoundaryMs = $derived.by(() => {
 		const question: LessonQuestionPrompt | null = currentQuestion;
 		return lessonMode === 'lecture_slides' && questionPlaybackLocked && question
@@ -633,6 +650,7 @@
 		showQuestionGallery = false;
 		currentContinuation = null;
 		answeredQuestions.clear();
+		checkOutcomes.clear();
 		allQuestions = [];
 		sessionQuestionMarkers = [];
 		currentTimeMs = 0;
@@ -718,6 +736,7 @@
 	}
 
 	function maybeAutoContinueAfterPostAnswer() {
+		if (currentQuestion?.type === 'open_ended') return;
 		void requestContinue();
 	}
 
@@ -1438,6 +1457,13 @@
 			if (
 				item.event_type === 'answer_submitted' &&
 				item.question_id != null &&
+				item.check_outcome
+			) {
+				checkOutcomes.set(item.question_id, item.check_outcome);
+			}
+			if (
+				item.event_type === 'answer_submitted' &&
+				item.question_id != null &&
 				item.option_id != null
 			) {
 				const postAnswerText =
@@ -1497,7 +1523,11 @@
 	function applySession(session: LessonSession) {
 		sessionState = session.state;
 		stateVersion = session.state_version;
+		if (session.check_outcome && session.current_question?.type === 'open_ended')
+			checkOutcomes.set(session.current_question.id, session.check_outcome);
 		currentQuestion = session.current_question;
+		if (currentQuestion?.type === 'open_ended' && session.state === 'awaiting_answer')
+			activeMobilePanel = 'chat';
 		currentContinuation = session.current_continuation;
 		sessionQuestionMarkers = session.question_markers ?? [];
 		if (session.controller.has_control) {
@@ -1526,6 +1556,47 @@
 		trackQuestion(session.current_question);
 		trackQuestion(session.current_continuation?.next_question ?? null);
 		dispatch('sessionchange', session);
+	}
+
+	export async function refreshCheckSession() {
+		if (controllerSessionId) await refreshLectureVideoSession(controllerSessionId);
+	}
+
+	export async function skipCheck(): Promise<boolean> {
+		if (!controllerSessionId || !currentQuestion || sessionState !== 'awaiting_answer')
+			return false;
+		if (!currentQuestion.allow_skip) {
+			await handleSkipQuestion();
+			return false;
+		}
+		answerSubmissionInFlight = true;
+		try {
+			const expanded = await postLessonInteraction({
+				type: 'answer_submitted',
+				controller_session_id: controllerSessionId,
+				expected_state_version: stateVersion,
+				idempotency_key: crypto.randomUUID(),
+				question_id: currentQuestion.id,
+				skip: true
+			});
+			if (failClosedOnConflict(expanded)) return false;
+			if (expanded.error) {
+				failClosedControl(
+					expanded.error.detail || 'We could not skip this check. Refresh the lesson to continue.',
+					{ action: actionForErrorResponse(expanded.$status, expanded.error.detail) }
+				);
+				return false;
+			}
+			return !!applyResponseSession(
+				expanded,
+				'We could not skip this check. Refresh the lesson to continue.'
+			);
+		} catch (error) {
+			failClosedControl(error instanceof Error ? error.message : String(error));
+			return false;
+		} finally {
+			answerSubmissionInFlight = false;
+		}
 	}
 
 	export async function pauseForChatSubmit() {
@@ -2053,6 +2124,24 @@
 		}
 
 		// Play intro narration if available
+		if (currentQuestion.type === 'open_ended') {
+			const question = currentQuestion;
+			playerDisabled = true;
+			introNarrationPending = true;
+			void postQuestionPresented(rollbackState).then(() => {
+				if (sessionState !== 'awaiting_answer') return;
+				if (question.intro_narration_id) {
+					void playNarration(question.intro_narration_id, () => {
+						playerDisabled = false;
+						introNarrationPending = false;
+					});
+				} else {
+					playerDisabled = false;
+					introNarrationPending = false;
+				}
+			});
+			return;
+		}
 		if (currentQuestion.intro_narration_id) {
 			playerDisabled = true;
 			introNarrationPending = true;
@@ -2173,7 +2262,7 @@
 			// Record answer immediately so the marker updates
 			if (continuationAtAnswer) {
 				answeredQuestions.set(questionAtAnswer.id, {
-					selectedOptionId: continuationAtAnswer.option_id,
+					selectedOptionId: continuationAtAnswer.option_id ?? optionId,
 					correctOptionId: continuationAtAnswer.correct_option_id,
 					options: questionAtAnswer.options,
 					postAnswerText: continuationAtAnswer.post_answer_text
@@ -2248,7 +2337,7 @@
 		}
 
 		// Ensure answered question is recorded (may already be set from handleSelectOption)
-		if (!answeredQuestions.has(currentQuestion.id)) {
+		if (!answeredQuestions.has(currentQuestion.id) && currentContinuation.option_id != null) {
 			answeredQuestions.set(currentQuestion.id, {
 				selectedOptionId: currentContinuation.option_id,
 				correctOptionId: currentContinuation.correct_option_id,
@@ -2338,7 +2427,24 @@
 		return false;
 	}
 
+	function isCheckQuestion(questionId: number) {
+		return (
+			checkOutcomes.has(questionId) ||
+			(currentQuestion?.id === questionId && currentQuestion.type === 'open_ended')
+		);
+	}
+
+	async function scrollToCheckInChat(questionId: number) {
+		activeMobilePanel = 'chat';
+		await tick();
+		dispatch('checkclick', questionId);
+	}
+
 	function handleQuestionClick(markerId: number) {
+		if (isCheckQuestion(markerId)) {
+			void scrollToCheckInChat(markerId);
+			return;
+		}
 		const question: LessonQuestionPrompt | null = currentQuestion;
 		if (!answeredQuestions.has(markerId) && !(hasQuestionPrompt && markerId === question?.id))
 			return;
@@ -2605,7 +2711,7 @@
 						>
 							<LectureVideoQuestionGallery
 								{allQuestions}
-								currentQuestionId={currentQuestion?.id ?? null}
+								currentQuestionId={visibleCurrentQuestion?.id ?? null}
 								currentQuestion={visibleCurrentQuestion}
 								{currentContinuation}
 								{sessionState}
@@ -2667,7 +2773,7 @@
 							{:else}
 								<LectureVideoQuestionGallery
 									{allQuestions}
-									currentQuestionId={currentQuestion?.id ?? null}
+									currentQuestionId={visibleCurrentQuestion?.id ?? null}
 									currentQuestion={visibleCurrentQuestion}
 									{currentContinuation}
 									{sessionState}

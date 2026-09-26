@@ -4,6 +4,7 @@
 		CaptionSolid,
 		CheckOutline,
 		CloseOutline,
+		ArrowRightOutline,
 		CogOutline,
 		CompressOutline,
 		ExpandOutline,
@@ -42,7 +43,7 @@
 		return Math.min(Math.max(value, min), max);
 	}
 
-	type QuestionMarkerState = 'upcoming' | 'answered' | 'correct' | 'incorrect';
+	type QuestionMarkerState = 'upcoming' | 'answered' | 'correct' | 'incorrect' | 'skipped';
 	type KeyboardActionIndicator =
 		'play' | 'pause' | 'mute' | 'unmute' | 'skipForward' | 'skipBackward';
 
@@ -85,6 +86,8 @@
 				return 'bg-rose-400/90';
 			case 'answered':
 				return 'bg-slate-300/90';
+			case 'skipped':
+				return 'bg-slate-300/90';
 			default:
 				return 'bg-amber-300/90';
 		}
@@ -104,6 +107,8 @@
 				return 'answered incorrectly';
 			case 'answered':
 				return 'answered';
+			case 'skipped':
+				return 'skipped';
 			default:
 				return 'upcoming';
 		}
@@ -1979,6 +1984,11 @@
 									class="absolute inset-0 rotate-45 rounded-sm border border-slate-500 bg-slate-300"
 								></div>
 								<CheckOutline class="relative z-10 size-2 text-slate-700" />
+							{:else if state === 'skipped'}
+								<div
+									class="absolute inset-0 rotate-45 rounded-sm border border-slate-500 bg-slate-400"
+								></div>
+								<ArrowRightOutline class="relative z-10 size-2 text-white" />
 							{:else}
 								<div
 									class="absolute inset-0 rotate-45 rounded-sm border border-amber-600 bg-amber-400"

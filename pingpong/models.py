@@ -2839,6 +2839,8 @@ class LectureVideoQuestion(Base):
     )
     position = Column(Integer, nullable=False)
     question_type = Column(SQLEnum(schemas.LectureVideoQuestionType), nullable=False)
+    passing_criteria = Column(String, nullable=True)
+    allow_skip = Column(Boolean, nullable=False, server_default=false())
     question_text = Column(String, nullable=False)
     intro_text = Column(String, nullable=False)
     stop_offset_ms = Column(Integer, nullable=False)
@@ -4325,6 +4327,8 @@ class LectureSlideQuestion(Base):
     slide_offset_ms = Column(Integer, nullable=True)
     stop_offset_ms = Column(Integer, nullable=True)
     question_type = Column(SQLEnum(schemas.LectureSlideQuestionType), nullable=False)
+    passing_criteria = Column(String, nullable=True)
+    allow_skip = Column(Boolean, nullable=False, server_default=false())
     question_text = Column(String, nullable=False)
     intro_text = Column(String, nullable=False)
     intro_narration_id = Column(
@@ -4455,6 +4459,8 @@ class LectureSlideThreadState(Base):
         nullable=False,
         server_default=schemas.InteractiveLessonSessionState.PLAYING.name,
     )
+    check_attempt_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    check_outcome: Mapped[str | None] = mapped_column(String, nullable=True)
     current_question_id: Mapped[int | None] = mapped_column(
         Integer,
         ForeignKey("lecture_slide_questions.id", ondelete="SET NULL"),
@@ -4866,6 +4872,8 @@ class LectureVideoThreadState(Base):
         nullable=False,
         server_default=schemas.LectureVideoSessionState.PLAYING.name,
     )
+    check_attempt_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    check_outcome: Mapped[str | None] = mapped_column(String, nullable=True)
     current_question_id: Mapped[int | None] = mapped_column(
         Integer,
         ForeignKey("lecture_video_questions.id", ondelete="SET NULL"),

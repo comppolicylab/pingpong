@@ -446,6 +446,32 @@
 	$: chatCodeInterpreterAcceptedFiles = allowUserFileUploads ? codeInterpreterAcceptedFiles : null;
 	$: chatInputDisabled =
 		!canSubmit || groupArchived || assistantDeleted || !!$navigating || !canViewAssistant;
+	$: checkSession =
+		data.threadInteractionMode === 'lecture_slides'
+			? effectiveLectureSlideSession
+			: effectiveLectureVideoSession;
+	$: activeCheck =
+		checkSession?.current_question?.type === 'open_ended' &&
+		checkSession?.state === 'awaiting_answer';
+	$: checkAwaitingContinue =
+		checkSession?.current_question?.type === 'open_ended' &&
+		checkSession?.state === 'awaiting_post_answer_resume';
+	$: threadMgr.setCheckAttemptId(activeCheck ? (checkSession?.check_attempt_id ?? null) : null);
+	let lastCheckAttemptId: number | null = null;
+	$: if (checkSession?.check_attempt_id && checkSession.check_attempt_id !== lastCheckAttemptId) {
+		lastCheckAttemptId = checkSession.check_attempt_id;
+		void threadMgr.refreshMessages();
+	}
+	const refreshCheck = async () => {
+		await (lectureVideoViewRef ?? lectureSlideViewRef)?.refreshCheckSession();
+		await threadMgr.refreshMessages();
+	};
+	const skipCheck = async () => {
+		const view = lectureVideoViewRef ?? lectureSlideViewRef;
+		const recorded = await view?.skipCheck();
+		await threadMgr.refreshMessages();
+		if (recorded) await view?.continueWatchingAfterChat();
+	};
 	$: lectureChatCanSubmit =
 		canSubmit &&
 		!groupArchived &&
@@ -748,6 +774,18 @@
 		await threadMgr.fetchMore();
 	};
 
+	// Page back through the chat until the check's opening message is loaded, then scroll to it.
+	const scrollToLessonCheck = async (event: CustomEvent<number>) => {
+		const elementId = `lesson-check-${event.detail}`;
+		while (!document.getElementById(elementId) && get(canFetchMore)) {
+			const loadedCount = get(threadMgr.messages).length;
+			await fetchMoreMessages();
+			await tick();
+			if (get(threadMgr.messages).length === loadedCount) break;
+		}
+		document.getElementById(elementId)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+	};
+
 	// Fetch the entire thread so the print view includes every message/tool call.
 	const loadEntireThreadForPrint = async () => {
 		while (get(canFetchMore)) {
@@ -883,6 +921,7 @@
 				? { lecture_video_playback_position_ms: lectureVideoPlaybackPositionMs }
 				: {})
 		});
+		if (activeCheck || checkAwaitingContinue) await refreshCheck();
 	};
 
 	const handleLectureSlideChatSubmit = async (message: ChatInputMessage) => {
@@ -899,6 +938,7 @@
 				? { lecture_video_playback_position_ms: lectureSlidePlaybackPositionMs }
 				: {})
 		});
+		if (activeCheck || checkAwaitingContinue) await refreshCheck();
 	};
 
 	const handleLectureSessionChange = (
@@ -1793,6 +1833,7 @@
 				on:playbackresumed={handleLecturePlaybackResumed}
 				on:narrationplaybackstarted={handleLectureNarrationPlaybackStarted}
 				on:lessonupdated={handleLectureVideoLessonUpdated}
+				on:checkclick={scrollToLessonCheck}
 			>
 				{#snippet statusAction()}
 					{#if !isAnonymousSession}
@@ -1812,6 +1853,11 @@
 				{#snippet chat(lectureVideoAtEnd = false)}
 					{#if threadLectureChatAvailable}
 						<LectureVideoChatPanel
+							{activeCheck}
+							{checkAwaitingContinue}
+							allowSkip={!!checkSession?.current_question?.allow_skip ||
+								!!checkSession?.timeline_bypass_enabled}
+							onskipcheck={skipCheck}
 							languageCode={expandedThreadData.data?.thread?.lecture_language_code}
 							{classId}
 							{threadId}
@@ -1827,7 +1873,7 @@
 							disabled={lectureChatInputDisabled || effectiveLectureVideoMismatch}
 							waiting={$waiting}
 							submitting={$submitting}
-							ttsMuted={$ttsMuted}
+							ttsMuted={activeCheck ? false : $ttsMuted}
 							ttsPlaying={$ttsPlaying}
 							ttsAvailable={lectureVideoTtsAvailable}
 							{threadManagerError}
@@ -1887,6 +1933,7 @@
 				on:playbackresumed={handleLecturePlaybackResumed}
 				on:narrationplaybackstarted={handleLectureNarrationPlaybackStarted}
 				on:lessonupdated={handleLectureSlideLessonUpdated}
+				on:checkclick={scrollToLessonCheck}
 			>
 				{#snippet statusAction()}
 					{#if !isAnonymousSession}
@@ -1992,6 +2039,11 @@
 				{#snippet chat(lectureSlideAtEnd = false)}
 					{#if threadLectureSlideChatAvailable}
 						<LectureVideoChatPanel
+							{activeCheck}
+							{checkAwaitingContinue}
+							allowSkip={!!checkSession?.current_question?.allow_skip ||
+								!!checkSession?.timeline_bypass_enabled}
+							onskipcheck={skipCheck}
 							languageCode={expandedThreadData.data?.thread?.lecture_language_code}
 							{classId}
 							{threadId}
@@ -2010,7 +2062,7 @@
 								!threadLectureSlideChatAvailable}
 							waiting={$waiting}
 							submitting={$submitting}
-							ttsMuted={$ttsMuted}
+							ttsMuted={activeCheck ? false : $ttsMuted}
 							ttsPlaying={$ttsPlaying}
 							ttsAvailable={lectureSlideTtsAvailable}
 							{threadManagerError}

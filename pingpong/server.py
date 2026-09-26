@@ -51,6 +51,7 @@ from sqlalchemy.sql import delete, func, select, update
 import pingpong.metrics as metrics
 import pingpong.models as models
 import pingpong.schemas as schemas
+from pingpong import lesson_checks
 from pingpong.ai_models import (
     ADMIN_ONLY_MODELS,
     AZURE_UNAVAILABLE_MODELS,
@@ -5105,6 +5106,18 @@ async def get_thread(
                 else "in_progress",
                 run_id=str(message.run_id) if message.run_id else None,
                 output_index=message.output_index,
+                metadata={
+                    key: value
+                    for key, value in (message.message_metadata or {}).items()
+                    if key
+                    in {
+                        "check_attempt_id",
+                        "check_question",
+                        "check_question_id",
+                        "check_question_number",
+                        "check_outcome",
+                    }
+                },
             )
             attachments: list[Attachment] = []
             attachments_dict: dict[str, list[dict[str, str]]] = {}
@@ -5248,9 +5261,15 @@ async def get_thread(
 
             if int(message.user_id) in current_user_ids:
                 is_current_user = True
-                _message.metadata = {"is_current_user": True}
+                _message.metadata = {
+                    **(_message.metadata or {}),
+                    "is_current_user": True,
+                }
             else:
-                _message.metadata = {"is_current_user": False}
+                _message.metadata = {
+                    **(_message.metadata or {}),
+                    "is_current_user": False,
+                }
 
             if str(message.user_id) not in users:
                 if is_current_user:
@@ -6751,6 +6770,7 @@ async def _get_lesson_history(
                 offset_ms=interaction.offset_ms,
                 from_offset_ms=interaction.from_offset_ms,
                 to_offset_ms=interaction.to_offset_ms,
+                check_outcome=lesson_checks.outcome_for_interaction(interaction),
                 created=interaction.created,
             )
             for interaction in interactions
@@ -7774,6 +7794,18 @@ async def list_thread_messages(
                 else "in_progress",
                 run_id=str(message.run_id) if message.run_id else None,
                 output_index=message.output_index,
+                metadata={
+                    key: value
+                    for key, value in (message.message_metadata or {}).items()
+                    if key
+                    in {
+                        "check_attempt_id",
+                        "check_question",
+                        "check_question_id",
+                        "check_question_number",
+                        "check_outcome",
+                    }
+                },
             )
             attachments: list[Attachment] = []
             attachments_dict: dict[str, list[dict[str, str]]] = {}
@@ -7917,9 +7949,15 @@ async def list_thread_messages(
 
             if int(message.user_id) in current_user_ids:
                 is_current_user = True
-                _message.metadata = {"is_current_user": True}
+                _message.metadata = {
+                    **(_message.metadata or {}),
+                    "is_current_user": True,
+                }
             else:
-                _message.metadata = {"is_current_user": False}
+                _message.metadata = {
+                    **(_message.metadata or {}),
+                    "is_current_user": False,
+                }
 
             if str(message.user_id) not in users:
                 if is_current_user:
@@ -9966,13 +10004,21 @@ async def send_message(
                     ),
                 )
 
+            check_attempt_id = (
+                await lesson_checks.prepare_check(
+                    request.state["db"], thread, lecture_chat_prep
+                )
+                if lecture_chat_prep is not None
+                else None
+            )
+
             # Resolve TTS credentials for lecture chat audio streaming.
             # Skip entirely when the client explicitly opted out of speech.
             tts_voice_id: str | None = None
             tts_api_key: str | None = None
             tts_voice_settings: dict[str, Any] | None = None
             tts_model_id = schemas.ElevenLabsTTSModel.FLASH_V2_5.value
-            if data.generate_speech is not False and (
+            if (check_attempt_id is not None or data.generate_speech is not False) and (
                 (
                     thread.interaction_mode == schemas.InteractionMode.LECTURE_VIDEO
                     and thread.lecture_video_id
@@ -10098,8 +10144,16 @@ async def send_message(
                 reasoning_effort=asst.reasoning_effort,
                 temperature=asst.temperature,
                 tools_available=thread.tools_available,
-                instructions=_build_run_instructions(
-                    thread, asst, request.state["session"].user.id
+                instructions=(
+                    _build_run_instructions(
+                        thread, asst, request.state["session"].user.id
+                    )
+                    or ""
+                )
+                + (
+                    "\n" + lecture_chat_prep.check_instructions
+                    if lecture_chat_prep is not None
+                    else ""
                 ),
                 verbosity=asst.verbosity,
                 messages=run_messages,
@@ -10172,6 +10226,11 @@ async def send_message(
                 ),
                 omit_message_ids=_is_lecture_lesson_mode(thread.interaction_mode),
             )
+            if check_attempt_id is not None:
+                stream = _stream_lesson_check(
+                    stream, run_to_complete.id, check_attempt_id
+                )
+
         else:
             raise HTTPException(
                 status_code=400,
@@ -11526,6 +11585,8 @@ async def get_assistant_lecture_slide_config(
                 slide_offset_ms=question.slide_offset_ms,
                 stop_offset_ms=question.stop_offset_ms,
                 type=question.question_type,
+                passing_criteria=question.passing_criteria,
+                allow_skip=question.allow_skip,
                 question_text=question.question_text,
                 intro_text=combine_manual_tts_pronunciation_text(
                     question.intro_text,
@@ -11571,6 +11632,9 @@ async def get_assistant_lecture_slide_config(
             schemas.LectureSlideQuestionInput(
                 id=question.id,
                 mode=schemas.LectureSlideQuestionDraftMode.COMPLETE,
+                type=question.question_type,
+                passing_criteria=question.passing_criteria,
+                allow_skip=question.allow_skip,
                 slide_position=question.slide_position,
                 question_text=question.question_text,
                 intro_text=combine_manual_tts_pronunciation_text(
@@ -17212,3 +17276,12 @@ except Exception:
 async def health():
     """Health check."""
     return {"status": "ok"}
+
+
+async def _stream_lesson_check(stream, run_id: int, attempt_id: int):
+    async for chunk in stream:
+        if chunk == b'{"type":"done"}\n':
+            async with config.db.driver.async_session() as session:
+                await lesson_checks.complete_run(session, run_id, attempt_id)
+                await session.commit()
+        yield chunk

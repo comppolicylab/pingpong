@@ -791,6 +791,7 @@ def _manual_slide_questions_from_context(
         )
         for question in question_inputs
         if question.mode == schemas.LectureSlideQuestionDraftMode.COMPLETE
+        and question.type != schemas.LectureSlideQuestionType.OPEN_ENDED
     ]
 
 
@@ -5509,28 +5510,28 @@ async def _persist_slide_manifest(
             or run.lease_token != lease_token
         ):
             return
-        manual_questions = _manual_slide_questions_from_context(deck.context_data)
-        manual_question_positions = {
-            question.slide_position for question in manual_questions
-        }
-        manifest_questions = [
-            *manual_questions,
-            *[
-                question
-                for question in manifest.questions
-                if question.slide_position not in manual_question_positions
-            ],
+        manual_inputs = [
+            question
+            for question in _manual_slide_question_inputs_from_context(
+                deck.context_data
+            )
+            if question.mode == schemas.LectureSlideQuestionDraftMode.COMPLETE
         ]
-
+        manual_positions = {question.slide_position for question in manual_inputs}
         await lecture_slide_service.apply_lecture_slide_question_drafts(
             session,
             deck,
-            [
-                _generated_slide_question_to_input(question)
-                for question in sorted(
-                    manifest_questions, key=lambda item: item.slide_position
-                )
-            ],
+            sorted(
+                [
+                    *manual_inputs,
+                    *[
+                        _generated_slide_question_to_input(question)
+                        for question in manifest.questions
+                        if question.slide_position not in manual_positions
+                    ],
+                ],
+                key=lambda question: question.slide_position,
+            ),
         )
 
         try:

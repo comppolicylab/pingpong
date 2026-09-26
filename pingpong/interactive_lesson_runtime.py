@@ -132,6 +132,8 @@ class LessonQuestionType(Protocol):
 
 
 class LessonQuestion(Protocol):
+    passing_criteria: str | None
+    allow_skip: bool
     id: int
     position: int
     question_type: LessonQuestionType | str
@@ -145,6 +147,8 @@ class LessonQuestion(Protocol):
 
 
 class LessonState(Protocol):
+    check_attempt_id: int | None
+    check_outcome: str | None
     thread_id: int
     thread: models.Thread
     state: LessonStateValue
@@ -216,6 +220,7 @@ def _question_prompt(
         id=question.id,
         type=_question_type_value(question.question_type),
         question_text=question.question_text,
+        allow_skip=getattr(question, "allow_skip", False),
         intro_text=question.intro_text,
         stop_offset_ms=question.stop_offset_ms,
         intro_narration_id=_narration_id(question.intro_narration),
@@ -327,6 +332,8 @@ async def _reset_question_queue_for_offset(
         ),
         None,
     )
+    state.check_attempt_id = None
+    state.check_outcome = None
     state.active_option_id = None
     state.active_option = None
     state.current_question_id = next_question.id if next_question is not None else None
@@ -337,14 +344,21 @@ def _build_continuation(
     thread: models.Thread, state: LessonState, *, adapter: InteractiveLessonAdapter
 ) -> schemas.InteractiveLessonContinuation | None:
     state_enum = _state_enum(adapter)
-    if (
-        state.state != state_enum.AWAITING_POST_ANSWER_RESUME
-        or state.active_option is None
-    ):
+    if state.state != state_enum.AWAITING_POST_ANSWER_RESUME:
         return None
 
     current_question = _get_current_question(thread, state, adapter=adapter)
     next_question = _get_next_question(thread, current_question, adapter=adapter)
+
+    if (
+        current_question is not None
+        and _question_type_value(current_question.question_type) == "open_ended"
+    ):
+        return schemas.InteractiveLessonContinuation(
+            resume_offset_ms=current_question.stop_offset_ms,
+            next_question=_question_prompt(next_question) if next_question else None,
+            complete=next_question is None,
+        )
 
     correct_option_id: int | None = None
     if current_question is not None and adapter.get_asset(thread) is not None:
@@ -399,6 +413,8 @@ def build_interactive_lesson_session(
 
     return schemas.InteractiveLessonSession(
         state=schemas.InteractiveLessonSessionState(state.state.value),
+        check_attempt_id=getattr(state, "check_attempt_id", None),
+        check_outcome=getattr(state, "check_outcome", None),
         lesson_chat_available=bool(
             asset is not None and adapter.lesson_chat_available(asset)
         ),
@@ -916,7 +932,7 @@ async def renew_control(
 
 
 def _find_option_for_question(
-    question: LessonQuestion, option_id: int
+    question: LessonQuestion, option_id: int | None
 ) -> LessonQuestionOption | None:
     for option in question.options:
         if option.id == option_id:
@@ -965,6 +981,10 @@ async def _handle_question_presented(
             )
 
     state.state = state_enum.AWAITING_ANSWER
+    if _question_type_value(current_question.question_type) == "open_ended":
+        from pingpong.lesson_checks import start_check
+
+        await start_check(session, state, current_question, actor_user_id)
     _set_last_known_offset_ms(state, request.offset_ms)
     await _append_interaction(
         session,
@@ -998,6 +1018,23 @@ async def _handle_answer_submitted(
         raise _conflict(
             detail=MSG_QUESTION_ALREADY_CLOSED,
         )
+
+    if _question_type_value(current_question.question_type) == "open_ended":
+        if not request.skip or not current_question.allow_skip:
+            raise InteractiveLessonValidationError(
+                "This check must be passed in chat before continuing."
+            )
+        from pingpong.lesson_checks import finish_check
+
+        await finish_check(
+            session,
+            state,
+            adapter=adapter,
+            outcome="skipped",
+            actor_user_id=actor_user_id,
+            idempotency_key=request.idempotency_key,
+        )
+        return
 
     option = _find_option_for_question(current_question, request.option_id)
     if option is None:
@@ -1056,9 +1093,12 @@ async def _handle_resumed(
 
     current_question = _get_current_question(state.thread, state, adapter=adapter)
     active_option = _adapted_option(current_question, state.active_option)
-    if (
-        state.state != state_enum.AWAITING_POST_ANSWER_RESUME
-        or active_option is None
+    if state.state != state_enum.AWAITING_POST_ANSWER_RESUME or (
+        request.offset_ms != current_question.stop_offset_ms
+        if current_question is not None
+        and _question_type_value(current_question.question_type) == "open_ended"
+        and state.check_outcome in {"passed", "skipped"}
+        else active_option is None
         or request.offset_ms != active_option.continue_offset_ms
     ):
         raise _conflict(
@@ -1067,6 +1107,8 @@ async def _handle_resumed(
 
     next_question = _get_next_question(state.thread, current_question, adapter=adapter)
     _set_last_known_offset_ms(state, request.offset_ms)
+    state.check_attempt_id = None
+    state.check_outcome = None
     state.active_option_id = None
     state.active_option = None
     if next_question is None:
