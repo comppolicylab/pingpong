@@ -56,7 +56,6 @@
 	export let classOptions: { id: number; name: string; term: string }[] = [];
 	export let currentClassId: number;
 	export let lectureMediaRefreshing = false;
-	export let lectureMediaRefreshIn: number | null = null;
 	export let onRefreshLectureMedia: (() => void) | null = null;
 
 	let sharedAssistantModalOpen = false;
@@ -631,11 +630,6 @@
 						</button>
 					{/if}
 				</span>
-				{#if lectureMediaRefreshing}
-					<span class="text-gray-500">Refreshing…</span>
-				{:else if lectureMediaRefreshIn !== null && (assistant.lecture_video.status === 'uploaded' || assistant.lecture_video.status === 'processing')}
-					<span class="text-gray-500 tabular-nums">Refresh in {lectureMediaRefreshIn}s</span>
-				{/if}
 			</div>
 			{#if assistant.lecture_video.error_message}
 				<div class="text-red-700">{assistant.lecture_video.error_message}</div>
@@ -668,11 +662,6 @@
 						</button>
 					{/if}
 				</span>
-				{#if lectureMediaRefreshing}
-					<span class="text-gray-500">Refreshing…</span>
-				{:else if lectureMediaRefreshIn !== null && (assistant.lecture_slide_deck.status === 'uploaded' || assistant.lecture_slide_deck.status === 'processing')}
-					<span class="text-gray-500 tabular-nums">Refresh in {lectureMediaRefreshIn}s</span>
-				{/if}
 				<span class="text-gray-500">{assistant.lecture_slide_deck.slide_count} slides</span>
 			</div>
 			{#if assistant.lecture_slide_deck.error_message}
