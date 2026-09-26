@@ -3897,7 +3897,7 @@
 
 	const removeLectureSlideMedia = async (position: number) => {
 		const page = lectureSlidePageDrafts.find((item) => item.position === position);
-		if (!page || page.content_kind === 'slide') return;
+		if (!page || lectureSlidePageDrafts.length <= 1) return;
 		if (
 			page.media_stored_object_id != null &&
 			lectureSlideUploadedMediaIds.has(page.media_stored_object_id)
@@ -5015,16 +5015,29 @@
 			<div class="grid min-h-0 flex-1 border-y border-gray-200 lg:contents">
 				<div class="flex min-h-[420px] overflow-hidden bg-gray-50 lg:border-r lg:border-gray-200">
 					{#if selectedLectureSlidePage?.content_kind === 'slide' && lectureSlideSourceUrl}
-						<PdfPageViewer
-							sourceUrl={lectureSlideSourceUrl}
-							pageNumber={(selectedLectureSlidePage.source_page_number ?? 0) + 1}
-							slideLabel={selectedLectureSlideLabel}
-							previousDisabled={selectedLectureSlideIndex <= 0}
-							nextDisabled={selectedLectureSlideIndex < 0 ||
-								selectedLectureSlideIndex >= lectureSlidePages.length - 1}
-							onPrevious={() => goToAdjacentLectureSlide(-1)}
-							onNext={() => goToAdjacentLectureSlide(1)}
-						/>
+						<div class="relative flex h-full w-full">
+							<PdfPageViewer
+								sourceUrl={lectureSlideSourceUrl}
+								pageNumber={(selectedLectureSlidePage.source_page_number ?? 0) + 1}
+								slideLabel={selectedLectureSlideLabel}
+								previousDisabled={selectedLectureSlideIndex <= 0}
+								nextDisabled={selectedLectureSlideIndex < 0 ||
+									selectedLectureSlideIndex >= lectureSlidePages.length - 1}
+								onPrevious={() => goToAdjacentLectureSlide(-1)}
+								onNext={() => goToAdjacentLectureSlide(1)}
+							/>
+							{#if !preventEdits && lectureSlidePages.length > 1}
+								<Button
+									type="button"
+									color="red"
+									size="xs"
+									class="absolute top-3 right-3"
+									onclick={() => removeLectureSlideMedia(selectedLectureSlidePage?.position ?? 0)}
+								>
+									Remove slide
+								</Button>
+							{/if}
+						</div>
 					{:else if selectedLectureSlidePage?.media_url}
 						<div class="relative flex h-full w-full items-center justify-center bg-black">
 							{#if selectedLectureSlidePage.content_kind === 'video'}
