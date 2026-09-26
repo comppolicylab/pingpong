@@ -2,6 +2,7 @@
 	let {
 		src,
 		onready = () => {},
+		onerror = () => {},
 		offsetMs,
 		startOffsetMs,
 		endOffsetMs,
@@ -10,6 +11,7 @@
 	}: {
 		src: string;
 		onready?: () => void;
+		onerror?: () => void;
 		offsetMs: number;
 		startOffsetMs: number;
 		endOffsetMs: number;
@@ -18,6 +20,16 @@
 	} = $props();
 
 	let video: HTMLVideoElement | null = $state(null);
+
+	let ready = false;
+
+	function checkReady() {
+		// A paused/hidden video may not deliver a compositor frame callback.
+		// loadeddata/seeked with HAVE_CURRENT_DATA confirms a renderable frame.
+		if (!video || ready || video.seeking || video.readyState < 2) return;
+		ready = true;
+		onready();
+	}
 
 	$effect(() => {
 		if (!video) return;
@@ -38,8 +50,9 @@
 </script>
 
 <video
-	onloadeddata={onready}
-	onerror={onready}
+	onloadeddata={checkReady}
+	onseeked={checkReady}
+	{onerror}
 	bind:this={video}
 	{src}
 	muted
