@@ -512,11 +512,13 @@
 		questionPendingControls && maxSeekOffsetMs == null && !allowFullSeek
 	);
 	let captionsAvailable = $derived(Boolean(captionsSrc));
+	let captionsShown = $derived(captionsAvailable && captionsEnabled);
 	let customCaptionsVisible = $derived(
-		startedPlaybackOnce && captionsAvailable && captionsEnabled && subtitleText == null
+		startedPlaybackOnce && captionsShown && subtitleText == null
 	);
+	// Intro/outro narration text is spoken audio, so it follows the captions toggle too.
 	let subtitlesVisible = $derived(
-		subtitleText != null || (customCaptionsVisible && !subtitlesCollapsed)
+		(captionsShown && subtitleText != null) || (customCaptionsVisible && !subtitlesCollapsed)
 	);
 	$effect(() => {
 		if (!subtitlesVisible) {
@@ -2365,11 +2367,11 @@
 								{timeReadoutText}
 							</button>
 						</div>
-						{#if !questionControlsLocked || isFullscreenSupported}
+						{#if !questionControlsLocked || isFullscreenSupported || captionsAvailable}
 							<div
 								class="relative ml-auto flex shrink-0 items-center gap-1 rounded-full bg-black/30 p-1"
 							>
-								{#if captionsAvailable && !questionControlsLocked}
+								{#if captionsAvailable}
 									<button
 										class="flex h-8 w-8 items-center justify-center rounded-full text-white transition-colors duration-200 hover:bg-white/10 {captionsEnabled
 											? 'bg-white/15'
@@ -2514,7 +2516,7 @@
 		bind:clientHeight={subtitleHeight}
 		onintrostart={() => (subtitlesExpanded = false)}
 		onintroend={() => (subtitlesExpanded = true)}
-		class="-mb-3 flex h-[calc(2lh+0.5rem)] flex-col overflow-y-auto px-3 py-1 text-center text-sm leading-[1.4] font-medium text-slate-700 sm:text-base"
+		class="-mb-3 flex min-h-[calc(2lh+0.5rem)] flex-col px-3 py-1 text-center text-sm leading-[1.4] font-medium text-slate-700 sm:text-base"
 		transition:slide={{ duration: prefersReducedMotion.current ? 0 : 250 }}
 	>
 		<div class="m-auto w-full max-w-[64rem] shrink-0">
