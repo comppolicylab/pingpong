@@ -44,6 +44,7 @@
 		field: 'stability' | 'similarity_boost' | 'style' | 'speed',
 		value: number
 	) => {
+		if (Number.isNaN(value)) return;
 		profile = { ...profile, [field]: value };
 	};
 </script>
@@ -112,7 +113,7 @@
 				step="0.05"
 				value={profile.stability}
 				{disabled}
-				oninput={(event) => updateNumber('stability', Number(event.currentTarget.value))}
+				oninput={(event) => updateNumber('stability', event.currentTarget.valueAsNumber)}
 			/>
 		</div>
 		<div>
@@ -125,7 +126,7 @@
 				step="0.05"
 				value={profile.similarity_boost}
 				{disabled}
-				oninput={(event) => updateNumber('similarity_boost', Number(event.currentTarget.value))}
+				oninput={(event) => updateNumber('similarity_boost', event.currentTarget.valueAsNumber)}
 			/>
 		</div>
 		<div>
@@ -138,7 +139,7 @@
 				step="0.05"
 				value={profile.speed}
 				{disabled}
-				oninput={(event) => updateNumber('speed', Number(event.currentTarget.value))}
+				oninput={(event) => updateNumber('speed', event.currentTarget.valueAsNumber)}
 			/>
 		</div>
 		<div>
@@ -151,7 +152,7 @@
 				step="0.05"
 				value={profile.style}
 				{disabled}
-				oninput={(event) => updateNumber('style', Number(event.currentTarget.value))}
+				oninput={(event) => updateNumber('style', event.currentTarget.valueAsNumber)}
 			/>
 		</div>
 	</div>
