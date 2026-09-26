@@ -2409,6 +2409,11 @@
 		webSearchToolSelect = initialTools.includes('web_search');
 		hasSetWebSearchToolSelect = true;
 	}
+	let hasDefaultedLectureWebSearch = false;
+	$: if (data.isCreating && isLectureMode && !hasDefaultedLectureWebSearch) {
+		webSearchToolSelect = true;
+		hasDefaultedLectureWebSearch = true;
+	}
 	let mcpServerToolSelect = false;
 	let hasSetMCPServerToolSelect = false;
 	$: if (initialTools !== undefined && initialTools !== null && !hasSetMCPServerToolSelect) {
@@ -3314,7 +3319,6 @@
 			.filter((file) => !isLectureSlideMode || !selectedLectureSlideContextIds.has(file.id))
 			.map((file) => file.file_object_id);
 		if (
-			includeTooling &&
 			webSearchToolSelect &&
 			supportsWebSearch &&
 			!lowestReasoningDisablesTools &&
@@ -3344,7 +3348,7 @@
 					? selectedModel
 					: assistant?.model || selectedModel
 				: selectedModel,
-			tools: includeTooling ? tools : [],
+			tools,
 			code_interpreter_file_ids:
 				includeTooling &&
 				supportsCodeInterpreter &&
@@ -6294,46 +6298,47 @@
 					</div>
 				{/if}
 			</div>
-			<div class="col-span-2 mb-4">
-				<Label for="tools">Tools</Label>
-				<Helper>Select tools available to the assistant when generating a response.</Helper>
-			</div>
-			{#if lowestReasoningToolsWarning}
-				<div class="col-span-2 mb-3">
-					<div
-						class="flex flex-row items-center justify-between gap-x-4 rounded-lg border border-amber-400 bg-gradient-to-b from-amber-50 to-amber-100 p-3 text-amber-800"
-					>
-						<div class="flex flex-row items-center gap-x-3">
-							<LightbulbSolid size="md" class="shrink-0" />
-							<div class="flex flex-col text-xs">
-								<span class="font-bold">Tool reliability may be reduced</span>
-								<span
-									>The current <span class="font-mono">none</span> reasoning effort prioritizes speed,
-									which can impact the reliability of tool calls. You can adjust this setting in Advanced
-									Options.</span
-								>
-							</div>
+		{/if}
+		<div class="col-span-2 mb-4">
+			<Label for="tools">Tools</Label>
+			<Helper>Select tools available to the assistant when generating a response.</Helper>
+		</div>
+		{#if lowestReasoningToolsWarning}
+			<div class="col-span-2 mb-3">
+				<div
+					class="flex flex-row items-center justify-between gap-x-4 rounded-lg border border-amber-400 bg-gradient-to-b from-amber-50 to-amber-100 p-3 text-amber-800"
+				>
+					<div class="flex flex-row items-center gap-x-3">
+						<LightbulbSolid size="md" class="shrink-0" />
+						<div class="flex flex-col text-xs">
+							<span class="font-bold">Tool reliability may be reduced</span>
+							<span
+								>The current <span class="font-mono">none</span> reasoning effort prioritizes speed, which
+								can impact the reliability of tool calls. You can adjust this setting in Advanced Options.</span
+							>
 						</div>
-						<Button
-							size="xs"
-							color="light"
-							class="shrink-0 border-amber-400 bg-white/60 px-3 py-0.5 text-amber-900 hover:bg-white"
-							disabled={preventEdits}
-							onclick={async () => {
-								if (!advancedOptionsOpen) {
-									advancedOptionsOpen = true;
-									await tick();
-									await new Promise((resolve) => setTimeout(resolve, 150));
-								}
-								const el = document.getElementById('reasoning-effort');
-								if (el) {
-									el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-								}
-							}}>Adjust</Button
-						>
 					</div>
+					<Button
+						size="xs"
+						color="light"
+						class="shrink-0 border-amber-400 bg-white/60 px-3 py-0.5 text-amber-900 hover:bg-white"
+						disabled={preventEdits}
+						onclick={async () => {
+							if (!advancedOptionsOpen) {
+								advancedOptionsOpen = true;
+								await tick();
+								await new Promise((resolve) => setTimeout(resolve, 150));
+							}
+							const el = document.getElementById('reasoning-effort');
+							if (el) {
+								el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+							}
+						}}>Adjust</Button
+					>
 				</div>
-			{/if}
+			</div>
+		{/if}
+		{#if !isLectureMode}
 			{#if !supportsFileSearch}
 				<div class="col-span-2 mb-3">
 					<div class="flex flex-col gap-y-1">
@@ -6420,67 +6425,69 @@
 					<Helper>{codeInterpreterMetadata.description}</Helper>
 				{/if}
 			</div>
-			{#if !data?.enforceClassicAssistants}
-				<div class="col-span-2 mb-4">
-					{#if (data.isCreating && createClassicAssistant) || (!data.isCreating && assistantVersion !== 3)}
-						<div class="col-span-2 mb-3">
-							<div class="flex flex-col gap-y-1">
-								<Badge
-									class="flex max-w-fit shrink-0 flex-row items-center gap-x-2 rounded-lg border border-gray-400 bg-gradient-to-b from-gray-100 to-gray-200 px-2 py-0.5 text-xs text-gray-800 normal-case"
-									><CloseOutline size="sm" />
-									<div>No Web Search capabilities in Classic Assistants</div>
-								</Badge>
-								<Helper
-									>Classic Assistants do not support Web Search capabilities. To use Web Search,
-									create a Next-Gen Assistant.</Helper
-								>
-							</div>
-						</div>
-					{:else if !supportsWebSearch}
+		{/if}
+		{#if !data?.enforceClassicAssistants}
+			<div class="col-span-2 mb-4">
+				{#if (data.isCreating && createClassicAssistant) || (!data.isCreating && assistantVersion !== 3)}
+					<div class="col-span-2 mb-3">
 						<div class="flex flex-col gap-y-1">
 							<Badge
 								class="flex max-w-fit shrink-0 flex-row items-center gap-x-2 rounded-lg border border-gray-400 bg-gradient-to-b from-gray-100 to-gray-200 px-2 py-0.5 text-xs text-gray-800 normal-case"
 								><CloseOutline size="sm" />
-								<div>No Web Search capabilities</div>
+								<div>No Web Search capabilities in Classic Assistants</div>
 							</Badge>
 							<Helper
-								>This model does not support Web Search capabilities. To use Web Search, select a
-								different model.</Helper
+								>Classic Assistants do not support Web Search capabilities. To use Web Search,
+								create a Next-Gen Assistant.</Helper
 							>
 						</div>
-					{:else if supportsWebSearch && lowestReasoningDisablesTools}
-						<div class="col-span-2 mb-3">
-							<div class="flex flex-col gap-y-1">
-								<Badge
-									class="flex max-w-fit shrink-0 flex-row items-center gap-x-2 rounded-lg border border-gray-400 bg-gradient-to-b from-gray-100 to-gray-200 px-2 py-0.5 text-xs text-gray-800 normal-case"
-									><CloseOutline size="sm" />
-									<div>
-										No Web Search capabilities in {lowestReasoningEffortLabel} reasoning effort
-									</div>
-								</Badge>
-								<Helper
-									>{lowestReasoningEffortLabel} reasoning effort does not support Web Search capabilities.
-									To use Web Search, select a higher reasoning effort level.</Helper
-								>
-							</div>
-						</div>
-					{:else}
-						<Checkbox
-							id={webSearchMetadata.value}
-							name={webSearchMetadata.value}
-							disabled={preventEdits || !supportsWebSearch}
-							checked={supportsWebSearch && (webSearchToolSelect || false)}
-							onchange={() => {
-								webSearchToolSelect = !webSearchToolSelect;
-							}}
-							><div class="flex flex-wrap gap-1.5">
-								<div>{webSearchMetadata.name}</div>
-							</div></Checkbox
+					</div>
+				{:else if !supportsWebSearch}
+					<div class="flex flex-col gap-y-1">
+						<Badge
+							class="flex max-w-fit shrink-0 flex-row items-center gap-x-2 rounded-lg border border-gray-400 bg-gradient-to-b from-gray-100 to-gray-200 px-2 py-0.5 text-xs text-gray-800 normal-case"
+							><CloseOutline size="sm" />
+							<div>No Web Search capabilities</div>
+						</Badge>
+						<Helper
+							>This model does not support Web Search capabilities. To use Web Search, select a
+							different model.</Helper
 						>
-						<Helper>{webSearchMetadata.description}</Helper>
-					{/if}
-				</div>
-			{/if}
+					</div>
+				{:else if supportsWebSearch && lowestReasoningDisablesTools}
+					<div class="col-span-2 mb-3">
+						<div class="flex flex-col gap-y-1">
+							<Badge
+								class="flex max-w-fit shrink-0 flex-row items-center gap-x-2 rounded-lg border border-gray-400 bg-gradient-to-b from-gray-100 to-gray-200 px-2 py-0.5 text-xs text-gray-800 normal-case"
+								><CloseOutline size="sm" />
+								<div>
+									No Web Search capabilities in {lowestReasoningEffortLabel} reasoning effort
+								</div>
+							</Badge>
+							<Helper
+								>{lowestReasoningEffortLabel} reasoning effort does not support Web Search capabilities.
+								To use Web Search, select a higher reasoning effort level.</Helper
+							>
+						</div>
+					</div>
+				{:else}
+					<Checkbox
+						id={webSearchMetadata.value}
+						name={webSearchMetadata.value}
+						disabled={preventEdits || !supportsWebSearch}
+						checked={supportsWebSearch && (webSearchToolSelect || false)}
+						onchange={() => {
+							webSearchToolSelect = !webSearchToolSelect;
+						}}
+						><div class="flex flex-wrap gap-1.5">
+							<div>{webSearchMetadata.name}</div>
+						</div></Checkbox
+					>
+					<Helper>{webSearchMetadata.description}</Helper>
+				{/if}
+			</div>
+		{/if}
+		{#if !isLectureMode}
 			{#if !data?.enforceClassicAssistants}
 				<div class="col-span-2 mb-4">
 					{#if (data.isCreating && createClassicAssistant) || (!data.isCreating && assistantVersion !== 3)}
