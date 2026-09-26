@@ -2154,7 +2154,11 @@ async def _prepare_translation_feedback(
         if prepared_result is None:
             return False
         prepared = prepared_result
-    for item in pending:
+    persistence_lock = asyncio.Lock()
+
+    async def synthesize_item(
+        item: models.LectureSlideTranslationNarration,
+    ) -> bool | None:
         assert api_key is not None and voice_id is not None
         synthesis = await _await_with_translation_lease_heartbeat(
             run_id,
@@ -2169,7 +2173,7 @@ async def _prepare_translation_feedback(
             ),
         )
         if synthesis is None:
-            return False
+            return None
         duration_ms = audio_duration_ms(synthesis.audio, synthesis.content_type)
         key, length = await _store_audio(
             generate_slide_narration_store_key(),
@@ -2177,7 +2181,7 @@ async def _prepare_translation_feedback(
             synthesis.audio,
         )
         try:
-            async with config.db.driver.async_session() as session:
+            async with persistence_lock, config.db.driver.async_session() as session:
                 run = await models.LectureSlideTranslationRun.get_by_id(session, run_id)
                 row = await session.get(
                     models.LectureSlideTranslationNarration, item.id
@@ -2189,7 +2193,7 @@ async def _prepare_translation_feedback(
                     or run.lease_token != lease_token
                 ):
                     await _delete_audio_key_quietly(key)
-                    return False
+                    return None
                 audio = models.LectureSlideNarrationStoredObject(
                     key=key,
                     content_type=synthesis.content_type,
@@ -2200,9 +2204,14 @@ async def _prepare_translation_feedback(
                 await session.flush()
                 row.stored_object_id = audio.id
                 await session.commit()
-        except Exception:
+        except BaseException:
             await _delete_audio_key_quietly(key)
             raise
+        return True
+
+    results = await _map_tts_job(pending, synthesize_item)
+    if any(result is None for result in results):
+        return False
     return await _ensure_translation_run_can_continue(run_id, lease_token)
 
 
@@ -2270,7 +2279,10 @@ async def _synthesize_translation_audio(
             page_id: narration_tts_text or narration_text
             for page_id, narration_text, narration_tts_text in pending_pages
         }
-    for page_id, narration_text, narration_tts_text in pending_pages:
+    persistence_lock = asyncio.Lock()
+
+    async def synthesize_page(item: tuple[int, str, str | None]) -> bool | None:
+        page_id, narration_text, narration_tts_text = item
         assert api_key is not None
         assert voice_id is not None
         speech_text = prepared_speech_texts[page_id]
@@ -2295,7 +2307,7 @@ async def _synthesize_translation_audio(
             ),
         )
         if synthesis is None:
-            return False
+            return None
         duration_ms = audio_duration_ms(synthesis.audio, synthesis.content_type)
         display_timings = _display_word_timings(
             synthesis.words,
@@ -2308,7 +2320,7 @@ async def _synthesize_translation_audio(
             synthesis.audio,
         )
         try:
-            async with config.db.driver.async_session() as session:
+            async with persistence_lock, config.db.driver.async_session() as session:
                 run = await models.LectureSlideTranslationRun.get_by_id(session, run_id)
                 page = await session.get(models.LectureSlideTranslationPage, page_id)
                 if (
@@ -2318,7 +2330,7 @@ async def _synthesize_translation_audio(
                     or run.lease_token != lease_token
                 ):
                     await _delete_audio_key_quietly(store_key)
-                    return False
+                    return None
                 stored_object = models.LectureSlideNarrationStoredObject(
                     key=store_key,
                     content_type=synthesis.content_type,
@@ -2343,9 +2355,14 @@ async def _synthesize_translation_audio(
                 )
                 session.add(run)
                 await session.commit()
-        except Exception:
+        except BaseException:
             await _delete_audio_key_quietly(store_key)
             raise
+        return True
+
+    results = await _map_tts_job(pending_pages, synthesize_page)
+    if any(result is None for result in results):
+        return False
     return await _ensure_translation_run_can_continue(run_id, lease_token)
 
 
