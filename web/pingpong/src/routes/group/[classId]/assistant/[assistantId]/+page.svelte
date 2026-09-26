@@ -785,7 +785,7 @@
 	const currentElevenLabsConfig = (): api.ElevenLabsConfig => ({
 		version: 1,
 		narration: { ...narrationProfile },
-		knowledge_check: { ...knowledgeCheckProfile },
+		knowledge_check: { ...(isLectureSlideMode ? narrationProfile : knowledgeCheckProfile) },
 		live_chat: { ...liveChatProfile }
 	});
 	const profileForComponent = (component: ElevenLabsComponent) =>
@@ -1372,7 +1372,8 @@
 	$: narrationProfileChanged =
 		JSON.stringify(narrationProfile) !== JSON.stringify(savedElevenLabsConfig.narration);
 	$: knowledgeCheckProfileChanged =
-		JSON.stringify(knowledgeCheckProfile) !== JSON.stringify(savedElevenLabsConfig.knowledge_check);
+		JSON.stringify(isLectureSlideMode ? narrationProfile : knowledgeCheckProfile) !==
+		JSON.stringify(savedElevenLabsConfig.knowledge_check);
 	$: liveChatProfileChanged =
 		JSON.stringify(liveChatProfile) !== JSON.stringify(savedElevenLabsConfig.live_chat);
 	$: generationPromptChanged =
@@ -7197,8 +7198,8 @@
 								{#if isLectureSlideMode}
 									<ElevenLabsProfileSettings
 										id="elevenlabs-narration"
-										title="Slide narration and translations"
-										description="Used for original slide narration and every translated narration track. The selected model determines which translation languages are available."
+										title="Slide narration, translations, and knowledge checks"
+										description="Used for original slide narration, every translated narration track, and spoken knowledge checks. The selected model determines which translation languages are available."
 										bind:profile={narrationProfile}
 										disabled={preventEdits}
 										previewing={validatingVoiceComponent === 'narration'}
@@ -7217,29 +7218,30 @@
 										).error}
 										onPreview={() => validateLectureVideoVoice('narration')}
 									/>
+								{:else}
+									<ElevenLabsProfileSettings
+										id="elevenlabs-knowledge-check"
+										title="Knowledge checks"
+										description="Used for spoken question introductions and answer feedback."
+										bind:profile={knowledgeCheckProfile}
+										disabled={preventEdits}
+										previewing={validatingVoiceComponent === 'knowledge_check'}
+										previewDisabled={validatingVoiceId || voiceId.trim().length === 0}
+										sampleText={currentComponentVoiceSample(
+											componentVoiceSamples.knowledge_check,
+											knowledgeCheckProfile
+										).text}
+										sampleAudioSrc={currentComponentVoiceSample(
+											componentVoiceSamples.knowledge_check,
+											knowledgeCheckProfile
+										).audioSrc}
+										previewError={currentComponentVoiceSample(
+											componentVoiceSamples.knowledge_check,
+											knowledgeCheckProfile
+										).error}
+										onPreview={() => validateLectureVideoVoice('knowledge_check')}
+									/>
 								{/if}
-								<ElevenLabsProfileSettings
-									id="elevenlabs-knowledge-check"
-									title="Knowledge checks"
-									description="Used for spoken question introductions and answer feedback."
-									bind:profile={knowledgeCheckProfile}
-									disabled={preventEdits}
-									previewing={validatingVoiceComponent === 'knowledge_check'}
-									previewDisabled={validatingVoiceId || voiceId.trim().length === 0}
-									sampleText={currentComponentVoiceSample(
-										componentVoiceSamples.knowledge_check,
-										knowledgeCheckProfile
-									).text}
-									sampleAudioSrc={currentComponentVoiceSample(
-										componentVoiceSamples.knowledge_check,
-										knowledgeCheckProfile
-									).audioSrc}
-									previewError={currentComponentVoiceSample(
-										componentVoiceSamples.knowledge_check,
-										knowledgeCheckProfile
-									).error}
-									onPreview={() => validateLectureVideoVoice('knowledge_check')}
-								/>
 								<ElevenLabsProfileSettings
 									id="elevenlabs-live-chat"
 									title="Spoken live chat"
