@@ -15350,7 +15350,7 @@ async def update_assistant(
             if (
                 regenerate_audio_requested
                 or voice_changed
-                or knowledge_check_profile_changed
+                or narration_profile_changed
             ):
                 await lecture_slide_service.reset_lecture_slide_question_narrations(
                     request.state["db"], target_lecture_slide_deck.id

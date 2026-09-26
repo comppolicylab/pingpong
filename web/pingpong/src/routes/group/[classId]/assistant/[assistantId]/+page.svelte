@@ -785,13 +785,7 @@
 	const currentElevenLabsConfig = (): api.ElevenLabsConfig => ({
 		version: 1,
 		narration: { ...narrationProfile },
-		knowledge_check: {
-			...(!isLectureSlideMode
-				? knowledgeCheckProfile
-				: narrationProfileChanged
-					? narrationProfile
-					: savedElevenLabsConfig.knowledge_check)
-		},
+		knowledge_check: { ...knowledgeCheckProfile },
 		live_chat: { ...liveChatProfile }
 	});
 	const profileForComponent = (component: ElevenLabsComponent) =>
@@ -1378,7 +1372,6 @@
 	$: narrationProfileChanged =
 		JSON.stringify(narrationProfile) !== JSON.stringify(savedElevenLabsConfig.narration);
 	$: knowledgeCheckProfileChanged =
-		!isLectureSlideMode &&
 		JSON.stringify(knowledgeCheckProfile) !== JSON.stringify(savedElevenLabsConfig.knowledge_check);
 	$: liveChatProfileChanged =
 		JSON.stringify(liveChatProfile) !== JSON.stringify(savedElevenLabsConfig.live_chat);
