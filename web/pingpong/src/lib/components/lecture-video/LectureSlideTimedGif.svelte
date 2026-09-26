@@ -11,6 +11,7 @@
 		src,
 		fallbackSrc = null,
 		onready = () => {},
+		onerror = () => {},
 		offsetMs,
 		startOffsetMs,
 		endOffsetMs,
@@ -21,6 +22,7 @@
 		src: string;
 		fallbackSrc?: string | null;
 		onready?: () => void;
+		onerror?: () => void;
 		offsetMs: number;
 		startOffsetMs: number;
 		endOffsetMs: number;
@@ -155,7 +157,7 @@
 				if (!cancelled) {
 					console.error('Could not decode lecture slide GIF', error);
 					loadFailed = true;
-					onready();
+					onerror();
 				}
 			}
 		})();

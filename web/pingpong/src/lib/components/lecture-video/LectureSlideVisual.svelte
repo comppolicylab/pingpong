@@ -1,67 +1,102 @@
-<script lang="ts">
+<script lang="ts" generics="T">
 	import { untrack, type Snippet } from 'svelte';
 
 	let {
 		contentKey,
+		contentData,
 		children
 	}: {
 		contentKey: string;
-		children: Snippet<[() => void]>;
+		contentData: T;
+		children: Snippet<[T, () => void, () => void, boolean]>;
 	} = $props();
 
-	let content: HTMLDivElement;
-	let retainedFrame: HTMLCanvasElement;
-	let ready = $state(false);
+	type Layer = { id: number; key: string; data: T };
+	let layers: Layer[] = $state.raw([]);
+	let displayedId = $state<number | null>(null);
+	let failed = $state(false);
+	let retry = $state(0);
+	let nextId = 0;
+	let lastRetry = 0;
 
-	$effect.pre(() => {
-		// Capture before Svelte removes the outgoing media. Keep the same retained
-		// frame if a second navigation happens before the incoming media is ready.
-		void contentKey;
+	$effect(() => {
+		const key = contentKey;
+		const data = contentData;
+		const attempt = retry;
 		untrack(() => {
-			if (ready && content && retainedFrame) {
-				const source = content.querySelector('video, canvas, img');
-				const width =
-					source instanceof HTMLVideoElement
-						? source.videoWidth
-						: source instanceof HTMLImageElement
-							? source.naturalWidth
-							: source instanceof HTMLCanvasElement
-								? source.width
-								: 0;
-				const height =
-					source instanceof HTMLVideoElement
-						? source.videoHeight
-						: source instanceof HTMLImageElement
-							? source.naturalHeight
-							: source instanceof HTMLCanvasElement
-								? source.height
-								: 0;
-				if (source && width && height) {
-					retainedFrame.width = width;
-					retainedFrame.height = height;
-					retainedFrame.getContext('2d')?.drawImage(source as CanvasImageSource, 0, 0);
-				}
+			const pending =
+				attempt === lastRetry
+					? layers
+							.slice()
+							.reverse()
+							.find((layer) => layer.key === key)
+					: undefined;
+			lastRetry = attempt;
+			if (pending) {
+				if (pending.id === displayedId && layers.length > 1) failed = false;
+				layers = layers
+					.filter((layer) => layer.id === displayedId || layer.id === pending.id)
+					.map((layer) => (layer === pending ? { ...layer, data } : layer));
+				return;
 			}
-			ready = false;
+			failed = false;
+			// Keep the actual outgoing DOM mounted, including its decoded image/frame.
+			layers = [...layers.filter((layer) => layer.id === displayedId), { id: ++nextId, key, data }];
 		});
 	});
 
-	function markReady(key: string) {
-		if (key === contentKey) ready = true;
+	function markReady(id: number, key: string) {
+		untrack(() => {
+			if (key !== contentKey || id === displayedId || !layers.some((layer) => layer.id === id))
+				return;
+			displayedId = id;
+			layers = layers.filter((layer) => layer.id === id);
+			failed = false;
+		});
+	}
+
+	function markFailed(id: number, key: string) {
+		untrack(() => {
+			if (key === contentKey && layers.some((layer) => layer.id === id)) failed = true;
+		});
+	}
+
+	function retryLoad() {
+		layers = layers.filter((layer) => layer.id === displayedId);
+		failed = false;
+		retry += 1;
 	}
 </script>
 
 <div class="relative h-full w-full">
-	<canvas
-		bind:this={retainedFrame}
-		aria-hidden="true"
-		class="absolute inset-0 h-full w-full object-contain"
-		class:invisible={ready}
-	></canvas>
-	<div bind:this={content} class="relative h-full w-full" class:invisible={!ready}>
-		{#key contentKey}
-			{@const key = contentKey}
-			{@render children(() => markReady(key))}
-		{/key}
-	</div>
+	{#each layers as layer (layer.id)}
+		<div
+			class="absolute inset-0 h-full w-full"
+			class:invisible={layer.id !== displayedId}
+			aria-hidden={layer.id !== displayedId}
+		>
+			{@render children(
+				layer.data,
+				() => markReady(layer.id, layer.key),
+				() => markFailed(layer.id, layer.key),
+				layer.key === contentKey && layer.id === layers[layers.length - 1]?.id
+			)}
+		</div>
+	{/each}
+	{#if failed}
+		<div
+			role="status"
+			class="absolute inset-x-0 bottom-4 flex items-center justify-center gap-3 bg-black/80 p-3 text-sm text-white"
+		>
+			<span>Unable to load slide.</span>
+			<button
+				type="button"
+				class="underline"
+				onclick={(event) => {
+					event.stopPropagation();
+					retryLoad();
+				}}>Retry</button
+			>
+		</div>
+	{/if}
 </div>

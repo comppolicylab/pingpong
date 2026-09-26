@@ -87,6 +87,8 @@
 		getLectureSlideDisplayOffsetMs,
 		getLectureSlidePageIndexAtOffset
 	} from '$lib/utils/lecture-video';
+	import { preloadLectureSlideImage } from '$lib/utils/lecture-slide-image';
+	import LectureSlideImage from '$lib/components/lecture-video/LectureSlideImage.svelte';
 	import { preloadLectureSlideGif } from '$lib/utils/lecture-slide-gif';
 	import LectureSlideTimedGif from '$lib/components/lecture-video/LectureSlideTimedGif.svelte';
 	import LectureSlideVisual from '$lib/components/lecture-video/LectureSlideVisual.svelte';
@@ -253,6 +255,13 @@
 				preloadLectureSlideGif(api.withMediaAuthQuery(page.media_url));
 			}
 		}
+		for (const page of lectureSlidePages.slice(pageIndex + 1, pageIndex + 3)) {
+			if (page.content_kind === 'video' || page.content_kind === 'gif') continue;
+			const url = page.media_url
+				? api.withMediaAuthQuery(page.media_url)
+				: lectureSlidePageImageUrl(page);
+			if (url) preloadLectureSlideImage(url);
+		}
 		return visiblePage;
 	}
 	function lectureSlidePageImageUrl(page: api.LectureSlidePage): string | null {
@@ -265,15 +274,6 @@
 	}
 	function lectureSlidePageIndex(page: api.LectureSlidePage): number {
 		return lectureSlidePages.findIndex((item: api.LectureSlidePage) => item.id === page.id);
-	}
-	function handleLectureSlideImageLoad(event: Event, expectedImageUrl: string) {
-		const image = event.currentTarget as HTMLImageElement;
-
-		if (!image.isConnected || image.getAttribute('src') !== expectedImageUrl) return;
-
-		if (image.naturalWidth > 0 && image.naturalHeight > 0) {
-			lectureSlideMediaAspectRatio = image.naturalWidth / image.naturalHeight;
-		}
 	}
 	let runtimeLectureVideoAssistantMismatch = false;
 	let runtimeLectureVideoAssistantMismatchKey: string | null = null;
@@ -1966,48 +1966,55 @@
 					<div class="flex h-full w-full items-center justify-center bg-black">
 						{#if visiblePage}
 							<LectureSlideVisual
+								contentData={{ visiblePage, visiblePageIndex, slideImageUrl, displayOffsetMs }}
 								contentKey={`${classId}:${threadId}:${visiblePage.id}:${visiblePage.media_url ?? slideImageUrl}`}
 							>
-								{#snippet children(onready)}
+								{#snippet children(
+									{ visiblePage, visiblePageIndex, slideImageUrl, displayOffsetMs },
+									onready,
+									onerror,
+									active
+								)}
 									{#if visiblePage.content_kind === 'video' && visiblePage.media_url && visiblePage.start_offset_ms != null && visiblePage.end_offset_ms != null}
 										<LectureSlideTimedVideo
 											{onready}
+											{onerror}
 											src={api.withMediaAuthQuery(visiblePage.media_url)}
 											offsetMs={displayOffsetMs}
 											startOffsetMs={visiblePage.start_offset_ms}
 											endOffsetMs={visiblePage.end_offset_ms}
 											{timelineMedia}
-											paused={playbackPaused}
+											paused={!active || playbackPaused}
 										/>
 									{:else if visiblePage.content_kind === 'gif' && visiblePage.media_url && visiblePage.start_offset_ms != null && visiblePage.end_offset_ms != null}
 										<LectureSlideTimedGif
 											{onready}
+											{onerror}
 											src={api.withMediaAuthQuery(visiblePage.media_url)}
 											offsetMs={displayOffsetMs}
 											startOffsetMs={visiblePage.start_offset_ms}
 											endOffsetMs={visiblePage.end_offset_ms}
 											{timelineMedia}
 											{timelineMediaBaseOffsetMs}
-											paused={playbackPaused}
+											paused={!active || playbackPaused}
 										/>
 									{:else if visiblePage.media_url}
-										<img
+										<LectureSlideImage
 											src={api.withMediaAuthQuery(visiblePage.media_url)}
-											onload={onready}
-											onerror={onready}
+											{onready}
+											{onerror}
 											alt={`${visiblePage.content_kind} ${visiblePageIndex + 1}`}
-											class="h-full w-full object-contain"
 										/>
 									{:else if slideImageUrl}
-										<img
+										<LectureSlideImage
 											src={slideImageUrl}
 											alt={`Slide ${visiblePageIndex + 1}`}
-											class="h-full w-full object-contain"
-											onload={(event) => {
-												handleLectureSlideImageLoad(event, slideImageUrl);
+											onready={(image) => {
+												if (active)
+													lectureSlideMediaAspectRatio = image.naturalWidth / image.naturalHeight;
 												onready();
 											}}
-											onerror={onready}
+											{onerror}
 										/>
 									{:else}
 										<div
