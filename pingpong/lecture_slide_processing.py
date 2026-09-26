@@ -5628,9 +5628,7 @@ async def _synthesize_knowledge_check_audio(
         assistant = await models.Assistant.get_by_lecture_slide_deck_id(
             session, deck.id
         )
-        knowledge_profile = (
-            profile_for(assistant, "narration") if assistant else None
-        )
+        knowledge_profile = profile_for(assistant, "narration") if assistant else None
         voice_id = deck.voice_id
         class_id = deck.class_id
         narration_items: list[tuple[int, str, str, str]] = []

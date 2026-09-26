@@ -15347,11 +15347,7 @@ async def update_assistant(
                 await lecture_slide_service.clear_lecture_slide_page_narrations(
                     request.state["db"], target_lecture_slide_deck.id
                 )
-            if (
-                regenerate_audio_requested
-                or voice_changed
-                or narration_profile_changed
-            ):
+            if regenerate_audio_requested or voice_changed or narration_profile_changed:
                 await lecture_slide_service.reset_lecture_slide_question_narrations(
                     request.state["db"], target_lecture_slide_deck.id
                 )
