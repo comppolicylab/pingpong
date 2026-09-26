@@ -53,6 +53,7 @@
 	const COMPLETED_SEEK_TOLERANCE_MS = 2_000;
 	const QUESTION_BOUNDARY_STALL_RETRY_MS = 16;
 	const DEFAULT_MEDIA_ASPECT_RATIO = 16 / 9;
+	const AUDIO_START_HOLD_MS = 500;
 	const PLAYER_FRAME_CHROME_WIDTH = '1.625rem';
 	type InitErrorAction = 'refresh' | null;
 	type InitErrorState = {
@@ -212,6 +213,7 @@
 	// (e.g. auto-pause at question timestamps).
 	let suppressPauseInteraction = false;
 	let suppressPlayInteraction = false;
+	let cancelAudioStartHold: (() => void) | null = null;
 	let ignorePauseEventUntilMs = 0;
 	let playbackInteractionInFlight = false;
 	let playbackSessionRefreshController: AbortController | null = null;
@@ -1092,6 +1094,21 @@
 		}
 	}
 
+	function holdAudioStart(): Promise<boolean> {
+		cancelAudioStartHold?.();
+		return new Promise((resolve) => {
+			const timeout = setTimeout(() => {
+				cancelAudioStartHold = null;
+				resolve(true);
+			}, AUDIO_START_HOLD_MS);
+			cancelAudioStartHold = () => {
+				clearTimeout(timeout);
+				cancelAudioStartHold = null;
+				resolve(false);
+			};
+		});
+	}
+
 	async function tryPlayVideo({
 		suppressInteractionPost = false,
 		queueRetryOnFailure = false
@@ -1108,6 +1125,15 @@
 		}
 
 		try {
+			if (mediaKind === 'audio' && currentTimeMs === 0) {
+				const held = await holdAudioStart();
+				if (!held || !videoElement) {
+					if (suppressInteractionPost) {
+						suppressPlayInteraction = false;
+					}
+					return false;
+				}
+			}
 			await videoElement.play();
 			clearPendingVideoRetry();
 			return true;
@@ -1242,6 +1268,7 @@
 		postPause: boolean;
 		releaseControl: boolean;
 	}) {
+		cancelAudioStartHold?.();
 		if (sessionCleanupInFlight) return;
 
 		const cleanupSessionId = controllerSessionId;
