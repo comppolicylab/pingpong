@@ -999,10 +999,17 @@ async def apply_lecture_slide_content_items(
         # out here also narrows the optional schema field for static type checking.
         assert item.source_page_number is not None
         requested_source_pages.append(item.source_page_number)
-    if sorted(requested_source_pages) != list(range(source_page_count)):
+    if len(requested_source_pages) != len(set(requested_source_pages)) or any(
+        page_number >= source_page_count for page_number in requested_source_pages
+    ):
         raise HTTPException(
             status_code=400,
-            detail="Lecture slide content must include every PDF page exactly once.",
+            detail="Lecture slide content must include each PDF page at most once.",
+        )
+    if not requested_items:
+        raise HTTPException(
+            status_code=400,
+            detail="Lecture slide content must include at least one item.",
         )
 
     requested_media_ids = [
