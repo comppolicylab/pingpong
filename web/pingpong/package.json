@@ -69,7 +69,7 @@
 		"katex": "^0.18.7",
 		"marked": "^18.0.14",
 		"marked-highlight": "^2.2.4",
-		"mermaid": "^11.17.2",
+		"mermaid": "^12.0.0",
 		"pdfjs-dist": "^6.3.289",
 		"svelte-copy": "^2.0.0",
 		"tldts": "^7.4.14"
