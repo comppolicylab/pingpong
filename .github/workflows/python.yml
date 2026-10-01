@@ -15,7 +15,18 @@ jobs:
       contents: read
     timeout-minutes: 30
     runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7.4-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     env:
+      LOGIN_EXCHANGE_TEST_REDIS_URL: redis://localhost:6379/0
       wd: ./
     steps:
       - name: Check out code
