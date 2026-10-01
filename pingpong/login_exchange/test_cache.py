@@ -1,3 +1,4 @@
+import asyncio
 import ssl
 from unittest.mock import AsyncMock, MagicMock
 from urllib.parse import parse_qs, urlsplit
@@ -183,3 +184,35 @@ async def test_pool_reuse_rotation_and_shutdown(config, monkeypatch):
     first.aclose.assert_awaited_once()
     await cache.close_redis_clients()
     replacement.aclose.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("error_type", [RuntimeError, asyncio.CancelledError])
+async def test_rotation_close_failure_cleans_replacement(
+    config, monkeypatch, error_type
+):
+    settings = LoginExchangeSettings(
+        redis_url="redis://localhost:6379/0",
+        target_origin="https://target.example",
+        source_origins=[],
+    )
+    monkeypatch.setattr(config.auth, "login_exchange", settings)
+    clients = [AsyncMock(), AsyncMock(), AsyncMock()]
+    monkeypatch.setattr(cache, "create_redis_client", AsyncMock(side_effect=clients))
+    clock = [0]
+    monkeypatch.setattr(cache, "monotonic", lambda: clock[0])
+    async with cache.redis_client():
+        pass
+    clients[0].aclose.side_effect = error_type("close failed")
+    clock[0] = cache.POOL_MAX_AGE
+    try:
+        with pytest.raises(error_type, match="close failed"):
+            async with cache.redis_client():
+                pytest.fail("Rotation failure should prevent checkout")
+        clients[1].aclose.assert_awaited_once()
+        async with cache.redis_client() as recovered:
+            assert recovered is clients[2]
+        clients[0].aclose.assert_awaited_once()
+    finally:
+        await cache.close_redis_clients()
+    clients[2].aclose.assert_awaited_once()

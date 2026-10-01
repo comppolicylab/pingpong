@@ -96,7 +96,12 @@ async def redis_client():
             if entry is not None:
                 entry.retired = True
                 if not entry.users:
-                    await entry.client.aclose()
+                    try:
+                        await entry.client.aclose()
+                    except BaseException:
+                        pool.entry = None
+                        await client.aclose()
+                        raise
             entry = _PoolEntry(client, settings.model_copy(deep=True), monotonic())
             pool.entry = entry
         entry.users += 1

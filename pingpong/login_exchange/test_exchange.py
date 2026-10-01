@@ -394,13 +394,13 @@ async def test_exchange_rejects_deleted_user(real_redis, saml_app, monkeypatch):
 async def test_lifespan_closes_pools_on_error(monkeypatch):
     close = AsyncMock()
     monkeypatch.setattr(integration, "close_redis_clients", close)
-    try:
+
+    async def fail_during_lifespan():
+        raise RuntimeError("shutdown")
+
+    with pytest.raises(RuntimeError, match="shutdown"):
         async with integration.lifespan():
-            raise RuntimeError("shutdown")
-    except RuntimeError as exc:
-        assert str(exc) == "shutdown"
-    else:
-        pytest.fail("Expected the lifespan shutdown error")
+            await fail_during_lifespan()
     close.assert_awaited_once()
 
 
