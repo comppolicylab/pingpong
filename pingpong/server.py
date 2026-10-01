@@ -230,6 +230,7 @@ from .permission import (
 from .runs import get_placeholder_ci_calls
 from .saml import get_saml2_attrs, get_saml2_client, get_saml2_settings
 from .login_exchange import integration as saml_login_exchange
+from .login_exchange.exchange import consume_grant, session_redirect
 from .state_types import AppState, StateRequest, StateWebSocket
 from .template import email_template as message_template
 from .time import convert_seconds
@@ -1134,6 +1135,17 @@ async def login_sso_saml_acs(provider: str, request: StateRequest):
         return response
     next_url = saml_client.redirect_to(url)
     return redirect_with_session(next_url, user.id, nowfn=get_now_fn(request))
+
+
+@v1.post("/login/sso/exchange")
+async def login_sso_exchange(request: StateRequest):
+    if config.auth.login_exchange is None:
+        raise HTTPException(404, "Login exchange is not configured")
+    grant = await consume_grant(request)
+    user = await models.User.get_by_id(request.state["db"], grant.user_id)
+    if user is None:
+        raise HTTPException(400, "Invalid login exchange user")
+    return session_redirect(grant.destination, user.id, nowfn=get_now_fn(request))
 
 
 @v1.get("/login/sso")
@@ -17280,7 +17292,6 @@ async def handle_exception(request: StateRequest, exc: Exception):
         )
 
 
-v1.include_router(saml_login_exchange.router)
 app.mount("/api/v1", v1)
 
 try:

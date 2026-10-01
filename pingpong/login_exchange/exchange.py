@@ -181,8 +181,7 @@ async def finish_saml_login(
         )
         response.headers.update(NO_STORE)
         return response
-    if target_origin != exchange_target_origin():
-        raise HTTPException(400, "Unsupported login destination host")
+    # Other configured source aliases hand off to the canonical target host.
     code = await issue_grant(user_id, destination)
     nonce = secrets.token_urlsafe(24)
     action = exchange_target_origin() + EXCHANGE_PATH
@@ -196,6 +195,7 @@ async def finish_saml_login(
         "</body></html>",
         headers={
             **NO_STORE,
+            "Referrer-Policy": "strict-origin",
             "Content-Security-Policy": (
                 f"default-src 'none'; script-src 'nonce-{nonce}'; "
                 f"form-action {exchange_target_origin()}; base-uri 'none'; "

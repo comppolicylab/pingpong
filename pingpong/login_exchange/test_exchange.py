@@ -177,6 +177,7 @@ async def test_wrong_host_and_origin_do_not_consume_code(real_redis):
     for request in (
         post_request(OLD, code),
         post_request(code=code, origin="https://evil.test"),
+        post_request(code=code, origin="null"),
     ):
         with pytest.raises(HTTPException):
             await exchange.consume_grant(request)
@@ -249,7 +250,7 @@ def saml_app(exchange_config, monkeypatch, now):
     )
     app.add_api_route("/api/v1/login/sso", server.login_sso, methods=["GET"])
     app.add_api_route(
-        exchange.EXCHANGE_PATH, integration.login_sso_exchange, methods=["POST"]
+        exchange.EXCHANGE_PATH, server.login_sso_exchange, methods=["POST"]
     )
     return app, saml
 
@@ -284,6 +285,7 @@ async def test_saml_callback_and_exchange_on_two_hosts(real_redis, saml_app, pro
         assert response.status_code == 200
         assert "set-cookie" not in response.headers
         assert response.headers["cache-control"] == "no-store"
+        assert response.headers["referrer-policy"] == "strict-origin"
         assert "default-src 'none'" in response.headers["content-security-policy"]
         assert f'action="{NEW}{exchange.EXCHANGE_PATH}"' in response.text
         code = re.search(r'name="code" value="([^"]+)"', response.text)[1]
@@ -375,7 +377,9 @@ async def test_hks_login_preserves_existing_host_without_redis(saml_app, monkeyp
 async def test_exchange_rejects_deleted_user(real_redis, saml_app, monkeypatch):
     app, _ = saml_app
     monkeypatch.setattr(
-        integration.models.User, "get_by_id", AsyncMock(return_value=None)
+        importlib.import_module("pingpong.server").models.User,
+        "get_by_id",
+        AsyncMock(return_value=None),
     )
     code = await exchange.issue_grant(42, "/")
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app)) as client:
@@ -390,7 +394,44 @@ async def test_exchange_rejects_deleted_user(real_redis, saml_app, monkeypatch):
 async def test_lifespan_closes_pools_on_error(monkeypatch):
     close = AsyncMock()
     monkeypatch.setattr(integration, "close_redis_clients", close)
-    with pytest.raises(RuntimeError, match="shutdown"):
+    try:
         async with integration.lifespan():
             raise RuntimeError("shutdown")
+    except RuntimeError as exc:
+        assert str(exc) == "shutdown"
+    else:
+        pytest.fail("Expected the lifespan shutdown error")
     close.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("callback_origin", [OLD, NEW])
+async def test_source_alias_login_reaches_target(
+    real_redis, saml_app, exchange_config, callback_origin
+):
+    alias = "http://alias.pingpong.test:5173"
+    exchange_config.auth.login_exchange.source_origins.append(alias)
+    app, saml = saml_app
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app)) as client:
+        response = await client.get(
+            alias + "/api/v1/login/sso?provider=harvardkey&redirect=/group/1%3Fx%3D2"
+        )
+        assert response.status_code == 307
+        saml._request_data["post_data"]["RelayState"] = saml.login_calls[-1]
+        response = await client.post(
+            callback_origin + "/api/v1/login/sso/saml/acs?provider=harvardkey"
+        )
+        assert response.status_code == 200
+        assert response.headers["referrer-policy"] == "strict-origin"
+        code = re.search(r'name="code" value="([^"]+)"', response.text)[1]
+        response = await client.post(
+            NEW + exchange.EXCHANGE_PATH,
+            data={"code": code},
+            headers={"Origin": callback_origin},
+        )
+        assert response.status_code == 303
+        assert response.headers["location"] == NEW + "/group/1?x=2"
+        assert any(
+            c.name == "session" and c.domain == "pingpong.test"
+            for c in client.cookies.jar
+        )
