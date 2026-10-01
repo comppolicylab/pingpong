@@ -17,6 +17,7 @@ from pingpong.audio_store import LocalAudioStore, S3AudioStore
 from pingpong.video_store import LocalVideoStore, S3VideoStore
 from pingpong.log_filters import IgnoreHealthEndpoint
 from .authz import OpenFgaAuthzDriver
+from .login_exchange.settings import LoginExchangeSettings
 from .email import AzureEmailSender, GmailEmailSender, MockEmailSender, SmtpEmailSender
 from .lti import AWSLTIKeyStore, LocalLTIKeyStore, LTIKeyManager
 from .support import SupportSettings, NoSupportSettings
@@ -166,6 +167,7 @@ class AuthSettings(BaseSettings):
     autopromote_on_login: bool = Field(False)
     secret_keys: list[SecretKey]
     authn_methods: list[AuthnSettings]
+    login_exchange: LoginExchangeSettings | None = None
 
 
 DbSettings = Union[PostgresSettings, SqliteSettings]

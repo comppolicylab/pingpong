@@ -44,6 +44,7 @@ dependencies = [
     "python-glowplug~=0.3.13",
     "python3-saml ~= 1.16.0",
     "pytz~=2026.3",
+    "redis~=8.1.0",
     "requests~=2.34.2",
     "sentry-sdk~=2.69.2",
     "sqlalchemy [asyncio] ~= 2.0.46",

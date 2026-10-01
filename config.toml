@@ -96,6 +96,22 @@ database = "pingpong"
 [auth]
 # Secrets used to secure the app.
 
+# [auth.login_exchange]
+# public_url remains the established application host.
+# Only target_origin uses the opt-in hostname;
+# source_origins lists accepted SAML login/callback aliases.
+# redis_url = "redis://localhost:6379/0"
+# For ElastiCache IAM authentication, use the TLS endpoint URL and also set the
+# cache identity needed to sign short-lived connection tokens.
+# redis_url = "rediss://pingpong-login-exchange.example.serverless.use1.cache.amazonaws.com:6379"
+# cache_name = "pingpong-login-exchange"
+# elasticache_user = "pingpong-login-exchange"
+# region = "us-east-1"
+# target_origin = "http://pingpong.test:5173"
+# source_origins = ["http://hks.pingpong.test:5173"]
+# ttl_seconds = 60
+# max_connections = 10
+
 [[auth.authn_methods]]
 # Supported authentication methods.
 # Configs for magic links and SSO go here.

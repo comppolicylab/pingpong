@@ -229,6 +229,7 @@ from .permission import (
 )
 from .runs import get_placeholder_ci_calls
 from .saml import get_saml2_attrs, get_saml2_client, get_saml2_settings
+from .login_exchange import integration as saml_login_exchange
 from .state_types import AppState, StateRequest, StateWebSocket
 from .template import email_template as message_template
 from .time import convert_seconds
@@ -1055,6 +1056,7 @@ async def manage_authz(data: schemas.ManageAuthzRequest, request: StateRequest):
 @v1.post("/login/sso/saml/acs", response_model=schemas.GenericStatus)
 async def login_sso_saml_acs(provider: str, request: StateRequest):
     """SAML login assertion consumer service."""
+    saml_login_exchange.validate_callback_host(request)
     try:
         sso_config = get_saml2_settings(provider)
     except ValueError:
@@ -1125,6 +1127,11 @@ async def login_sso_saml_acs(provider: str, request: StateRequest):
         url = saml_client._request_data["get_data"]["RelayState"]
     elif "RelayState" in saml_client._request_data["post_data"]:
         url = saml_client._request_data["post_data"]["RelayState"]
+    response = await saml_login_exchange.finish_login(
+        request, user.id, url, nowfn=get_now_fn(request)
+    )
+    if response is not None:
+        return response
     next_url = saml_client.redirect_to(url)
     return redirect_with_session(next_url, user.id, nowfn=get_now_fn(request))
 
@@ -1140,7 +1147,8 @@ async def login_sso(provider: str, request: StateRequest):
     if sso_config.protocol == "saml":
         saml_client = await get_saml2_client(sso_config, request)
         dest = request.query_params.get("redirect", "/")
-        return RedirectResponse(saml_client.login(dest))
+        relay_state = saml_login_exchange.prepare_relay_state(request, dest)
+        return RedirectResponse(saml_client.login(relay_state))
     else:
         raise HTTPException(
             status_code=501, detail=f"SSO protocol {sso_config.protocol} not supported"
@@ -17244,7 +17252,8 @@ async def lifespan(app: FastAPI):
             logger.info("Configuring authorization ...")
             await config.authz.driver.init()
 
-            yield
+            async with saml_login_exchange.lifespan():
+                yield
 
 
 app = FastAPI(
@@ -17271,6 +17280,7 @@ async def handle_exception(request: StateRequest, exc: Exception):
         )
 
 
+v1.include_router(saml_login_exchange.router)
 app.mount("/api/v1", v1)
 
 try:
