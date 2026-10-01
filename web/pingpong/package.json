@@ -58,20 +58,20 @@
 	},
 	"type": "module",
 	"dependencies": {
-		"@sentry/sveltekit": "^10.75.1",
+		"@sentry/sveltekit": "^10.75.3",
 		"@zerodevx/svelte-toast": "^0.9.6",
 		"dayjs": "^1.11.23",
 		"dotenv": "^17.4.2",
 		"flowbite-svelte-icons": "^3.1.0",
 		"gifuct-js": "^2.1.2",
 		"highlight.js": "^11.12.0",
-		"isomorphic-dompurify": "^4.1.0",
-		"katex": "^0.18.7",
+		"isomorphic-dompurify": "^4.3.0",
+		"katex": "^0.18.9",
 		"marked": "^18.0.14",
 		"marked-highlight": "^2.2.4",
 		"mermaid": "^11.17.2",
 		"pdfjs-dist": "^6.3.289",
 		"svelte-copy": "^2.0.0",
-		"tldts": "^7.4.14"
+		"tldts": "^7.4.15"
 	}
 }
