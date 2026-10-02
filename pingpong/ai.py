@@ -3928,6 +3928,7 @@ async def run_response(
     *,
     run: models.Run,
     class_id: str,
+    interaction_mode: InteractionMode = InteractionMode.CHAT,
     file_names: dict[str, str] = {},
     assistant_vector_store_id: str | None = None,
     thread_vector_store_id: str | None = None,
@@ -4249,9 +4250,17 @@ async def run_response(
                     instructions=run.instructions,
                     model=run.model,
                     service_tier=(
-                        "priority"
-                        if not isinstance(cli, openai.AsyncAzureOpenAI)
-                        else openai.omit
+                        openai.omit
+                        if isinstance(cli, openai.AsyncAzureOpenAI)
+                        else (
+                            "priority"
+                            if interaction_mode
+                            in {
+                                InteractionMode.LECTURE_VIDEO,
+                                InteractionMode.LECTURE_SLIDES,
+                            }
+                            else "default"
+                        )
                     ),
                     moderation={"model": "omni-moderation-latest"},
                     parallel_tool_calls=True,
