@@ -65,13 +65,13 @@
 		"flowbite-svelte-icons": "^3.1.0",
 		"gifuct-js": "^2.1.2",
 		"highlight.js": "^11.12.0",
-		"isomorphic-dompurify": "^4.1.0",
-		"katex": "^0.18.7",
+		"isomorphic-dompurify": "^4.4.0",
+		"katex": "^0.19.0",
 		"marked": "^18.0.14",
 		"marked-highlight": "^2.2.4",
-		"mermaid": "^12.0.0",
+		"mermaid": "^12.1.0",
 		"pdfjs-dist": "^6.3.289",
 		"svelte-copy": "^2.0.0",
-		"tldts": "^7.4.14"
+		"tldts": "^7.4.16"
 	}
 }
