@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { lectureChatBreakOffset } from '$lib/utils/lecture-chat-break';
 	import {
 		CaptionOutline,
 		CaptionSolid,
@@ -625,10 +626,16 @@
 		return null;
 	}
 
+	export function getChatBreakOffset(positionMs: number): number | null {
+		const cues = Array.from(getCaptionTextTrack()?.cues ?? []);
+		return lectureChatBreakOffset(positionMs, cues);
+	}
+
 	function syncCaptionTrackMode() {
 		const track = getCaptionTextTrack();
 		if (!track) return;
-		track.mode = captionsAvailable && captionsEnabled ? 'hidden' : 'disabled';
+		// Load timing cues even when visible captions are turned off.
+		track.mode = captionsAvailable ? 'hidden' : 'disabled';
 		track.oncuechange = syncActiveCaptionLines;
 		syncActiveCaptionLines();
 	}

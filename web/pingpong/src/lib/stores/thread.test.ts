@@ -363,6 +363,64 @@ describe('ThreadManager', () => {
 		expect(player.setVolume).toHaveBeenCalled();
 	});
 
+	it.each([false, true])(
+		'buffers lecture reply audio until the break (interrupted: %s)',
+		async (interrupted) => {
+			let releaseBreak!: () => void;
+			const playbackReady = new Promise<void>((resolve) => {
+				releaseBreak = resolve;
+			});
+			const player = makeFakePlayer(() => Promise.resolve(true as const));
+			ttsMocks.createPlayer.mockReturnValue(player);
+			vi.spyOn(api, 'postMessage').mockResolvedValue(
+				makeChunks([
+					{
+						type: 'message_created',
+						role: 'assistant',
+						message: makeAssistantMessage('msg_break')
+					} as unknown as api.ThreadStreamChunk,
+					textDelta('Visible before the break'),
+					{ type: 'audio_started' } as api.ThreadStreamChunk,
+					{ type: 'audio_delta', audio: 'AAAA' } as api.ThreadStreamChunk,
+					{ type: 'audio_done' } as api.ThreadStreamChunk,
+					{ type: 'done' } as api.ThreadStreamChunk
+				])
+			);
+			const manager = new ThreadManager(
+				vi.fn() as unknown as Fetcher,
+				1,
+				181,
+				makeThreadData('lecture_video'),
+				'lecture_video'
+			);
+			await manager.postMessage(
+				123,
+				'Hi',
+				vi.fn(),
+				undefined,
+				undefined,
+				undefined,
+				undefined,
+				undefined,
+				undefined,
+				500,
+				playbackReady
+			);
+			expect(ttsMocks.createPlayer).not.toHaveBeenCalled();
+			expect(get(manager.ttsPlaying)).toBe(false);
+			expect(JSON.stringify(get(manager.messages))).toContain('Visible before the break');
+			if (interrupted) await manager.interruptTts();
+			releaseBreak();
+			if (interrupted) {
+				await Promise.resolve();
+				expect(ttsMocks.createPlayer).not.toHaveBeenCalled();
+			} else {
+				await vi.waitFor(() => expect(player.add16BitPCM).toHaveBeenCalledTimes(1));
+				expect(player.finish).toHaveBeenCalledTimes(1);
+			}
+		}
+	);
+
 	it('disposes a player that finishes connecting after interruption', async () => {
 		let resolveConnect!: (value: true) => void;
 		const player = makeFakePlayer(

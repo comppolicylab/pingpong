@@ -98,6 +98,7 @@
 
 	type ThreadPostMessage = ChatInputMessage & {
 		lecture_video_playback_position_ms?: number;
+		ttsPlaybackReady?: Promise<void>;
 	};
 
 	function formatLectureVideoTitle(filename: string | null | undefined): string | null {
@@ -874,6 +875,7 @@
 		visionFileImageDescriptions,
 		optimisticVisionFiles,
 		lecture_video_playback_position_ms,
+		ttsPlaybackReady,
 		callback
 	}: ThreadPostMessage) => {
 		try {
@@ -887,7 +889,8 @@
 				visionFileImageDescriptions,
 				optimisticVisionFiles,
 				currentMessageAttachments,
-				lecture_video_playback_position_ms
+				lecture_video_playback_position_ms,
+				ttsPlaybackReady
 			);
 		} catch (e) {
 			callback({
@@ -914,9 +917,10 @@
 		}
 		const lectureVideoPlaybackPositionMs = lectureVideoViewRef?.getPlaybackPositionMs();
 		lectureChatContinuePromptDismissedByPlayback = false;
-		void lectureVideoViewRef?.pauseForChatSubmit();
+		const ttsPlaybackReady = lectureVideoViewRef?.pauseForChatSubmit();
 		await postMessage({
 			...message,
+			ttsPlaybackReady,
 			...(lectureVideoPlaybackPositionMs !== undefined
 				? { lecture_video_playback_position_ms: lectureVideoPlaybackPositionMs }
 				: {})
@@ -931,9 +935,10 @@
 		}
 		const lectureSlidePlaybackPositionMs = lectureSlideViewRef?.getPlaybackPositionMs();
 		lectureChatContinuePromptDismissedByPlayback = false;
-		void lectureSlideViewRef?.pauseForChatSubmit();
+		const ttsPlaybackReady = lectureSlideViewRef?.pauseForChatSubmit();
 		await postMessage({
 			...message,
+			ttsPlaybackReady,
 			...(lectureSlidePlaybackPositionMs !== undefined
 				? { lecture_video_playback_position_ms: lectureSlidePlaybackPositionMs }
 				: {})

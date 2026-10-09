@@ -22,7 +22,8 @@ const TTS_SAMPLE_RATE = 24000;
  * policies block the context, and the chunk stream must keep flowing.
  */
 const TTS_CONNECT_TIMEOUT_MS = 2000;
-const MAX_PENDING_TTS_AUDIO_CHARS = 256 * 1024;
+// Allow a full spoken reply to arrive while waiting for a lecture break.
+const MAX_PENDING_TTS_AUDIO_CHARS = 8 * 1024 * 1024;
 
 /**
  * Audio chunks received while the TTS player is still connecting.
@@ -258,6 +259,7 @@ export class ThreadManager {
 	// Invalidates an in-flight TTS player setup when the response is
 	// interrupted or superseded before the player finishes connecting.
 	#ttsGeneration = 0;
+	#ttsPlaybackReady: Promise<void> = Promise.resolve();
 
 	/**
 	 * Whether TTS audio is currently playing/streaming.
@@ -813,7 +815,8 @@ export class ThreadManager {
 		vision_image_descriptions?: api.ImageProxy[],
 		optimisticVisionFiles?: api.OptimisticVisionFile[],
 		attachments?: api.ServerFile[],
-		lecture_video_playback_position_ms?: number
+		lecture_video_playback_position_ms?: number,
+		ttsPlaybackReady: Promise<void> = Promise.resolve()
 	) {
 		if (!message) {
 			callback({
@@ -963,6 +966,7 @@ export class ThreadManager {
 		}));
 
 		await interruptTtsPromise;
+		this.#ttsPlaybackReady = ttsPlaybackReady;
 
 		const chunks = await api.postMessage(this.#fetcher, this.classId, this.threadId, {
 			message,
@@ -1243,14 +1247,21 @@ export class ThreadManager {
 		}
 		const pending: PendingTtsAudio = { deltas: [], done: false, bufferedChars: 0, dropped: false };
 		this.#ttsPendingAudio = pending;
-		void this.#startTtsPlayer(generation, pending);
+		void this.#startTtsPlayer(generation, pending, this.#ttsPlaybackReady);
 	}
 
-	async #startTtsPlayer(generation: number, pending: PendingTtsAudio) {
+	async #startTtsPlayer(
+		generation: number,
+		pending: PendingTtsAudio,
+		playbackReady: Promise<void>
+	) {
 		let player: WavStreamPlayer | null = null;
 		let connectPromise: Promise<true> | null = null;
 		let timeoutId: ReturnType<typeof setTimeout> | null = null;
 		try {
+			// Keep receiving text and audio while the lecture reaches a natural break.
+			await playbackReady;
+			if (generation !== this.#ttsGeneration) return;
 			player = new WavStreamPlayer({
 				sampleRate: TTS_SAMPLE_RATE,
 				context: getSharedAudioContext(TTS_SAMPLE_RATE) ?? undefined,

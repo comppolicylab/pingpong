@@ -9,6 +9,7 @@
 </script>
 
 <script lang="ts">
+	import { lectureChatBreakOffset } from '$lib/utils/lecture-chat-break';
 	import { browser } from '$app/environment';
 	import { beforeNavigate } from '$app/navigation';
 	import type { Snippet } from 'svelte';
@@ -78,6 +79,7 @@
 	};
 	type LectureVideoPlayerHandle = {
 		setPlaybackPosition: (offsetMs: number) => void;
+		getChatBreakOffset: (positionMs: number) => number | null;
 	};
 
 	let {
@@ -1287,6 +1289,7 @@
 		postPause: boolean;
 		releaseControl: boolean;
 	}) {
+		cancelChatPause?.();
 		cancelAudioStartHold?.();
 		if (sessionCleanupInFlight) return;
 
@@ -1623,22 +1626,52 @@
 		}
 	}
 
+	let cancelChatPause: (() => void) | null = null;
+	let chatPauseOffsetMs: number | null = null;
+
 	export async function pauseForChatSubmit() {
+		cancelChatPause?.();
 		abortNarrationPlaybackForChatSubmit();
+		if (!canParticipate || playbackLocked || !playbackInteractionAllowed) return;
+		if (paused || videoElement?.paused) return;
 
-		if (!canParticipate || playbackLocked || !playbackInteractionAllowed) {
-			return;
+		const candidates = [
+			playerComponent?.getChatBreakOffset(currentTimeMs),
+			lectureChatBreakOffset(
+				currentTimeMs,
+				[],
+				audioSegments.map((segment) => segment.endOffsetMs)
+			)
+		].filter((offset): offset is number => offset != null);
+		const offset = candidates.length ? Math.min(...candidates) : null;
+		if (offset != null) {
+			chatPauseOffsetMs = offset;
+			const cancelled = await new Promise<boolean>((resolve) => {
+				const started = Date.now();
+				const finish = (cancelled: boolean) => {
+					clearInterval(timer);
+					cancelChatPause = null;
+					chatPauseOffsetMs = null;
+					resolve(cancelled);
+				};
+				const timer = setInterval(() => {
+					if (
+						paused ||
+						videoElement?.paused ||
+						(usesAudioSegmentBoundaries
+							? currentTimeMs
+							: (videoElement?.currentTime ?? 0) * 1000) >= offset ||
+						Date.now() - started >= 30_000
+					) {
+						finish(false);
+					}
+				}, 25);
+				cancelChatPause = () => finish(true);
+			});
+			if (cancelled) return;
 		}
-
-		if (paused || videoElement?.paused) {
-			return;
-		}
-
 		videoElement?.pause();
-
-		if (!(await ensureControllerSession())) {
-			return;
-		}
+		await ensureControllerSession();
 	}
 
 	export function getPlaybackPositionMs(): number {
@@ -1872,6 +1905,10 @@
 			question.stop_offset_ms === offsetMs
 		) {
 			presentCurrentQuestion(true);
+			return true;
+		}
+		if (chatPauseOffsetMs != null && offsetMs >= chatPauseOffsetMs) {
+			videoElement?.pause();
 			return true;
 		}
 		return false;
