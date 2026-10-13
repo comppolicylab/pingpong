@@ -1683,6 +1683,9 @@
 			return false;
 		}
 
+		// Continuing supersedes a chat pause that may still be waiting for a break.
+		cancelChatPause?.();
+
 		if (sessionState === 'awaiting_post_answer_resume') {
 			return requestContinue();
 		}
