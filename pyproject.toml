@@ -45,6 +45,7 @@ dependencies = [
     "python3-saml ~= 1.16.0",
     "pytz~=2026.4",
     "redis~=8.1.0",
+    "regex~=2026.5.9",
     "requests~=2.34.2",
     "sentry-sdk~=2.71.0",
     "sqlalchemy [asyncio] ~= 2.0.46",

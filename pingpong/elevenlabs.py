@@ -22,6 +22,7 @@ from elevenlabs.errors import (
 )
 
 from pingpong import schemas
+from pingpong.caption_text import caption_token_spans
 from pingpong.class_credential_validation import (
     ClassCredentialValidationSSLError,
     ClassCredentialValidationUnavailableError,
@@ -65,6 +66,7 @@ class ElevenLabsSpeechWordTiming:
     word: str
     start_ms: int
     end_ms: int
+    join_left: bool = False
 
 
 @dataclass(frozen=True)
@@ -543,40 +545,26 @@ def _timing_words_from_alignment(
     starts = list(getattr(alignment, "character_start_times_seconds", []) or [])
     ends = list(getattr(alignment, "character_end_times_seconds", []) or [])
     count = min(len(characters), len(starts), len(ends))
+    # Map text offsets back to provider entries (an entry may contain >1 char).
+    text = "".join(str(character) for character in characters[:count])
+    source_indices = [index for index in range(count) for _ in str(characters[index])]
     words: list[ElevenLabsSpeechWordTiming] = []
-    current_chars: list[str] = []
-    current_start: float | None = None
-    current_end: float | None = None
-
-    def flush_word() -> None:
-        nonlocal current_chars, current_start, current_end
-        word = "".join(current_chars).strip()
-        if word and current_start is not None and current_end is not None:
-            words.append(
-                ElevenLabsSpeechWordTiming(
-                    word=word,
-                    start_ms=_seconds_to_ms(current_start),
-                    end_ms=_seconds_to_ms(current_end),
-                )
-            )
-        current_chars = []
-        current_start = None
-        current_end = None
-
-    for index in range(count):
-        character = str(characters[index])
-        if character.isspace():
-            flush_word()
-            continue
-        if current_start is None:
-            current_start = float(starts[index] if starts[index] is not None else 0)
-        current_chars.append(character)
-        current_end = float(
-            ends[index]
-            if ends[index] is not None
-            else (starts[index] if starts[index] is not None else 0)
+    previous_end = -1
+    for start, end in caption_token_spans(text):
+        first, last = source_indices[start], source_indices[end - 1]
+        start_seconds = float(starts[first] or 0)
+        end_seconds = float(
+            ends[last] if ends[last] is not None else (starts[last] or 0)
         )
-    flush_word()
+        words.append(
+            ElevenLabsSpeechWordTiming(
+                word=text[start:end],
+                start_ms=_seconds_to_ms(start_seconds),
+                end_ms=max(_seconds_to_ms(start_seconds), _seconds_to_ms(end_seconds)),
+                join_left=start == previous_end,
+            )
+        )
+        previous_end = end
     return words
 
 

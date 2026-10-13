@@ -1010,6 +1010,7 @@ class LectureVideoManifestV2(LectureVideoManifestBase):
 
 
 class LectureVideoManifestWordV3(BaseModel):
+    join_left: bool = Field(default=False, exclude_if=lambda value: not value)
     id: str = Field(..., min_length=1)
     word: str = Field(..., min_length=1)
     start_offset_ms: int = Field(..., ge=0)
