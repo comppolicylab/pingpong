@@ -53,3 +53,25 @@ export function audioPlaylistSegmentIndexAtOffset(
 	);
 	return segmentIndex >= 0 ? segmentIndex : segments.length - 1;
 }
+
+/** Prepare a pending seek or advance an ended clip before native playback resumes. */
+export async function playAudioPlaylistSegment({
+	media,
+	segments,
+	segmentIndex,
+	pendingSeek,
+	loadSegment
+}: {
+	media: Pick<HTMLMediaElement, 'ended' | 'play'>;
+	segments: AudioPlaylistSegment[];
+	segmentIndex: number;
+	pendingSeek: boolean;
+	loadSegment: (segmentIndex: number) => Promise<void>;
+}): Promise<void> {
+	if (pendingSeek) {
+		await loadSegment(segmentIndex);
+	} else if (media.ended && segmentIndex >= 0 && segmentIndex + 1 < segments.length) {
+		await loadSegment(segmentIndex + 1);
+	}
+	await media.play();
+}

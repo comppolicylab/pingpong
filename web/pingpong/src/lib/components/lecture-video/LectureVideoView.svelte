@@ -79,6 +79,7 @@
 	};
 	type LectureVideoPlayerHandle = {
 		setPlaybackPosition: (offsetMs: number) => void;
+		play: () => Promise<void>;
 		getChatBreakOffset: (positionMs: number) => number | null;
 	};
 
@@ -1155,7 +1156,11 @@
 					return false;
 				}
 			}
-			await videoElement.play();
+			if (playerComponent) {
+				await playerComponent.play();
+			} else {
+				await videoElement.play();
+			}
 			clearPendingVideoRetry();
 			return true;
 		} catch {
