@@ -1,6 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
 	audioPlaylistSegmentIndexAtOffset,
+	playAudioPlaylistSegment,
 	isAudioPlaylistSegmentEndPause,
 	isCompleteAudioPlaylist,
 	shouldForwardDeferredAudioPlaylistPause,
@@ -43,5 +44,91 @@ describe('audio playlist timeline', () => {
 		expect(shouldForwardDeferredAudioPlaylistPause(false, true)).toBe(false);
 		expect(shouldForwardDeferredAudioPlaylistPause(true, true)).toBe(true);
 		expect(shouldForwardDeferredAudioPlaylistPause(false, false)).toBe(true);
+	});
+});
+
+describe('audio playlist resume', () => {
+	it('resumes a boundary-paused clip on the next segment without replaying narration', async () => {
+		let activeIndex = 0;
+		let localOffsetMs = segments[0].durationMs;
+		const media = {
+			ended: true,
+			play: vi.fn(async () => {
+				// Native play restarts an ended clip if no new source was selected.
+				if (media.ended) localOffsetMs = 0;
+			})
+		};
+		const loadSegment = vi.fn(async (index: number) => {
+			expect(media.play).not.toHaveBeenCalled();
+			activeIndex = index;
+			localOffsetMs = 0;
+			media.ended = false;
+		});
+		await playAudioPlaylistSegment({
+			media,
+			segments,
+			segmentIndex: activeIndex,
+			pendingSeek: false,
+			loadSegment
+		});
+		expect(loadSegment).toHaveBeenCalledWith(1);
+		expect(media.play).toHaveBeenCalledTimes(1);
+		expect(segments[activeIndex].src).toBe('/two.ogg');
+		expect(segments[activeIndex].startOffsetMs + localOffsetMs).toBe(1000);
+	});
+
+	it('does not advance a mid-segment pause', async () => {
+		const media = { ended: false, play: vi.fn().mockResolvedValue(undefined) };
+		const loadSegment = vi.fn();
+		await playAudioPlaylistSegment({
+			media,
+			segments,
+			segmentIndex: 0,
+			pendingSeek: false,
+			loadSegment
+		});
+		expect(loadSegment).not.toHaveBeenCalled();
+		expect(media.play).toHaveBeenCalledTimes(1);
+	});
+
+	it('honors a queued seek or restart instead of advancing the old ended clip', async () => {
+		const media = { ended: true, play: vi.fn().mockResolvedValue(undefined) };
+		const loadSegment = vi.fn().mockResolvedValue(undefined);
+		await playAudioPlaylistSegment({
+			media,
+			segments,
+			segmentIndex: 0,
+			pendingSeek: true,
+			loadSegment
+		});
+		expect(loadSegment).toHaveBeenCalledWith(0);
+		expect(media.play).toHaveBeenCalledTimes(1);
+	});
+
+	it('does not select a nonexistent segment at the end of the playlist', async () => {
+		const media = { ended: true, play: vi.fn().mockResolvedValue(undefined) };
+		const loadSegment = vi.fn();
+		await playAudioPlaylistSegment({
+			media,
+			segments,
+			segmentIndex: 1,
+			pendingSeek: false,
+			loadSegment
+		});
+		expect(loadSegment).not.toHaveBeenCalled();
+	});
+
+	it('propagates playback failures so chat continuation can be retried', async () => {
+		const media = { ended: true, play: vi.fn().mockRejectedValue(new Error('Playback blocked')) };
+		const loadSegment = vi.fn().mockResolvedValue(undefined);
+		await expect(
+			playAudioPlaylistSegment({
+				media,
+				segments,
+				segmentIndex: 0,
+				pendingSeek: false,
+				loadSegment
+			})
+		).rejects.toThrow('Playback blocked');
 	});
 });

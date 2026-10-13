@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { lectureChatBreakOffset } from '$lib/utils/lecture-chat-break';
 	import {
 		CaptionOutline,
 		CaptionSolid,
@@ -21,13 +22,14 @@
 	import LectureVideoControlButton from '$lib/components/lecture-video/LectureVideoControlButton.svelte';
 	import {
 		audioPlaylistSegmentIndexAtOffset,
+		playAudioPlaylistSegment,
 		isAudioPlaylistSegmentEndPause,
 		shouldForwardDeferredAudioPlaylistPause,
 		type AudioPlaylistSegment
 	} from '$lib/utils/audio-playlist';
 	import SkipForwardIcon from '$lib/assets/icons/SkipForwardIcon.svelte';
 	import SkipBackwardIcon from '$lib/assets/icons/SkipBackwardIcon.svelte';
-	import type { Snippet } from 'svelte';
+	import { tick, type Snippet } from 'svelte';
 	import { fade, fly, slide } from 'svelte/transition';
 	import { prefersReducedMotion, Tween } from 'svelte/motion';
 	import { cubicOut } from 'svelte/easing';
@@ -625,10 +627,16 @@
 		return null;
 	}
 
+	export function getChatBreakOffset(positionMs: number): number | null {
+		const cues = Array.from(getCaptionTextTrack()?.cues ?? []);
+		return lectureChatBreakOffset(positionMs, cues);
+	}
+
 	function syncCaptionTrackMode() {
 		const track = getCaptionTextTrack();
 		if (!track) return;
-		track.mode = captionsAvailable && captionsEnabled ? 'hidden' : 'disabled';
+		// Load timing cues even when visible captions are turned off.
+		track.mode = captionsAvailable ? 'hidden' : 'disabled';
 		track.oncuechange = syncActiveCaptionLines;
 		syncActiveCaptionLines();
 	}
@@ -921,7 +929,7 @@
 			if (endedPlayback) {
 				setMainVideoCurrentTime(0);
 			}
-			void videoElement.play().catch(() => {});
+			void play().catch(() => {});
 		});
 		setActionHandler('pause', () => {
 			if (!videoElement || videoElement.paused) return;
@@ -985,6 +993,25 @@
 		suppressSegmentPauseEvent = !videoElement.paused;
 		suppressSegmentPlayEvent = resumePlayback;
 		activeAudioSegmentIndex = segmentIndex;
+	}
+
+	export async function play(): Promise<void> {
+		const media = videoElement;
+		if (!media) throw new Error('The lecture player is unavailable.');
+		await playAudioPlaylistSegment({
+			media,
+			segments: hasAudioPlaylist ? audioSegments : [],
+			segmentIndex: activeAudioSegmentIndex,
+			pendingSeek: hasAudioPlaylist && pendingSegmentLocalOffsetMs != null,
+			loadSegment: async (segmentIndex) => {
+				if (segmentIndex !== activeAudioSegmentIndex) {
+					switchAudioSegment(segmentIndex, 0);
+				}
+				// Apply the selected source before play() can restart the ended clip.
+				await tick();
+				media.load();
+			}
+		});
 	}
 
 	export function setPlaybackPosition(offsetMs: number) {
@@ -1221,11 +1248,11 @@
 		if (disabled || questionControlsLocked || !videoElement) return;
 		if (endedPlayback) {
 			setMainVideoCurrentTime(0);
-			void videoElement.play().catch(() => {});
+			void play().catch(() => {});
 			return;
 		}
 		if (videoElement.paused) {
-			void videoElement.play().catch(() => {});
+			void play().catch(() => {});
 			return;
 		}
 		videoElement.pause();
@@ -1315,7 +1342,7 @@
 			return;
 		}
 		if (disabled || !videoElement) return;
-		void videoElement.play().catch(() => {});
+		void play().catch(() => {});
 	}
 
 	function getSeekDetails(clientX: number, track: HTMLDivElement) {
