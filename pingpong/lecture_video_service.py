@@ -15,6 +15,7 @@ import uuid_utils as uuid
 import pingpong.models as models
 import pingpong.schemas as schemas
 from .authz import AuthzClient, Relation
+from .caption_text import SENTENCE_ENDINGS, caption_display_length
 from .config import config
 from .say_transform import (
     combine_manual_tts_pronunciation_text,
@@ -437,6 +438,7 @@ def _join_caption_words(
             continue
         if (
             not text
+            or word.join_left
             or cleaned in no_space_before
             or text[-1] in no_space_after
             or cleaned.startswith("'")
@@ -513,7 +515,9 @@ def _caption_cues_from_words(
             current_text = _join_caption_words(current)
             gap_ms = word.start_offset_ms - current[-1].end_offset_ms
             duration_ms = word.end_offset_ms - current[0].start_offset_ms
-            next_text_length = len(current_text) + len(word.word.strip()) + 1
+            next_text_length = caption_display_length(
+                _join_caption_words([*current, word])
+            )
             next_split_offset_ms = _first_split_offset_between(
                 normalized_split_offsets_ms,
                 start_offset_ms=current[0].start_offset_ms,
@@ -525,7 +529,7 @@ def _caption_cues_from_words(
                 or gap_ms > _CAPTION_MAX_GAP_MS
                 or duration_ms > _CAPTION_MAX_CUE_DURATION_MS
                 or next_text_length > _CAPTION_MAX_CUE_CHARS
-                or current_text.endswith((".", "?", "!"))
+                or current_text.endswith(SENTENCE_ENDINGS)
             )
             if should_start_new_cue:
                 cues.append(

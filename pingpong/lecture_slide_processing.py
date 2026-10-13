@@ -45,6 +45,7 @@ import pingpong.schemas as schemas
 from pingpong import lecture_slide_service
 from pingpong import lecture_video_processing
 from pingpong.ai import get_openai_client_by_class_id
+from pingpong.caption_text import caption_token_spans
 from pingpong.class_credential_validation import (
     ClassCredentialValidationSSLError,
     ClassCredentialValidationUnavailableError,
@@ -882,7 +883,8 @@ def _display_word_timings(
     """Restore display spellings while retaining ElevenLabs timing boundaries."""
     if display_text == speech_text or not timings:
         return tuple(timings)
-    display_words = display_text.split()
+    display_spans = caption_token_spans(display_text)
+    display_words = [display_text[start:end] for start, end in display_spans]
     if not display_words:
         return ()
     mapped: list[ElevenLabsSpeechWordTiming] = []
@@ -895,6 +897,10 @@ def _display_word_timings(
         mapped.extend(
             ElevenLabsSpeechWordTiming(
                 word=display_words[i + offset],
+                join_left=(
+                    i + offset > 0
+                    and display_spans[i + offset][0] == display_spans[i + offset - 1][1]
+                ),
                 start_ms=start_ms + duration_ms * offset // count,
                 end_ms=start_ms + duration_ms * (offset + 1) // count,
             )
@@ -1951,6 +1957,7 @@ async def _persist_translation_page_rows(
                     word_timings = [
                         {
                             "word": word.word,
+                            **({"join_left": True} if word.join_left else {}),
                             "start_ms": word.start_offset_ms - page.start_offset_ms,
                             "end_ms": word.end_offset_ms - page.start_offset_ms,
                         }
@@ -2344,6 +2351,7 @@ async def _synthesize_translation_audio(
                 page.word_timings = [
                     {
                         "word": word.word,
+                        **({"join_left": True} if word.join_left else {}),
                         "start_ms": word.start_ms,
                         "end_ms": word.end_ms,
                     }
@@ -2424,6 +2432,7 @@ async def _persist_translation_composite_artifacts(
                     schemas.LectureVideoManifestWordV3(
                         id=f"translated-slide-{page.position}-word-{word_index}",
                         word=str(raw_word["word"]),
+                        join_left=bool(raw_word.get("join_left", False)),
                         start_offset_ms=current_offset_ms + int(raw_word["start_ms"]),
                         end_offset_ms=current_offset_ms + int(raw_word["end_ms"]),
                     )
@@ -4000,6 +4009,7 @@ async def _prepare_inserted_video_audio(
     word_timings = tuple(
         ElevenLabsSpeechWordTiming(
             word=word.word,
+            join_left=word.join_left,
             start_ms=word.start_offset_ms,
             end_ms=word.end_offset_ms,
         )
@@ -4109,6 +4119,7 @@ async def _persist_slide_audio_timings(
                         schemas.LectureVideoManifestWordV3(
                             id=f"slide-{page_artifact.page_position}-word-{word_index}",
                             word=word.word,
+                            join_left=word.join_left,
                             start_offset_ms=word_start_offset_ms,
                             end_offset_ms=word_end_offset_ms,
                         )
@@ -4321,6 +4332,7 @@ def _word_token_estimate(word: schemas.LectureVideoManifestWordV3) -> int:
             {
                 "id": word.id,
                 "word": word.word,
+                **({"join_left": True} if word.join_left else {}),
                 "start": word.start_offset_ms / 1000,
                 "end": word.end_offset_ms / 1000,
             }

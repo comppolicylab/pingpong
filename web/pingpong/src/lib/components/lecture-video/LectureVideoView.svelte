@@ -184,7 +184,7 @@
 	let layoutElement: HTMLDivElement | null = $state(null);
 	let questionPanelPercent = $state(40);
 	let resizingQuestions = $state(false);
-	let subtitleHeight = $state(0);
+	let captionsVisible = $state(false);
 	let subtitlesExpanded = $state(false);
 	let resizeStartY = 0;
 	let resizeStartPercent = 40;
@@ -257,7 +257,7 @@
 	);
 	let safePlayerMediaAspectRatio = $derived(playerMediaAspectRatio ?? DEFAULT_MEDIA_ASPECT_RATIO);
 	let playerFrameStyle = $derived(
-		`--lecture-media-aspect-ratio: ${safePlayerMediaAspectRatio}; --lecture-player-frame-chrome: ${PLAYER_FRAME_CHROME_WIDTH}; --lecture-subtitle-height: ${Math.max(0, subtitleHeight - 12)}px;`
+		`--lecture-media-aspect-ratio: ${safePlayerMediaAspectRatio}; --lecture-player-frame-chrome: ${PLAYER_FRAME_CHROME_WIDTH}; --lecture-subtitle-height: ${captionsVisible ? '4.5rem' : '0px'};`
 	);
 	function shouldShowContinuePrompt(): boolean {
 		return (
@@ -2600,7 +2600,7 @@
 					<div class="lecture-video-stage [container-type:size] min-h-0 flex-1">
 						{#if lessonUpdated}
 							<div
-								class="mx-auto flex min-h-0 w-full max-w-[calc((100cqh_-_var(--lecture-player-frame-chrome)_-_var(--lecture-subtitle-height))_*_var(--lecture-media-aspect-ratio)_+_var(--lecture-player-frame-chrome))] shrink-0 items-center justify-center overflow-hidden rounded-3xl border border-slate-200 bg-slate-50 p-6 text-center shadow-sm"
+								class="mx-auto flex min-h-0 w-full max-w-[calc(max(8rem,100cqh_-_var(--lecture-player-frame-chrome)_-_var(--lecture-subtitle-height))_*_var(--lecture-media-aspect-ratio)_+_var(--lecture-player-frame-chrome))] shrink-0 items-center justify-center overflow-hidden rounded-3xl border border-slate-200 bg-slate-50 p-6 text-center shadow-sm"
 								style={playerFrameStyle}
 							>
 								<div class="text-sm leading-6 text-slate-600">
@@ -2610,7 +2610,7 @@
 							</div>
 						{:else}
 							<div
-								class="mx-auto min-h-0 w-full max-w-[calc((100cqh_-_var(--lecture-player-frame-chrome)_-_var(--lecture-subtitle-height))_*_var(--lecture-media-aspect-ratio)_+_var(--lecture-player-frame-chrome))] shrink-0 overflow-hidden rounded-3xl border border-slate-200 bg-white p-3 shadow-xl"
+								class="mx-auto min-h-0 w-full max-w-[calc(max(8rem,100cqh_-_var(--lecture-player-frame-chrome)_-_var(--lecture-subtitle-height))_*_var(--lecture-media-aspect-ratio)_+_var(--lecture-player-frame-chrome))] shrink-0 overflow-hidden rounded-3xl border border-slate-200 bg-white p-3 shadow-xl"
 								style={playerFrameStyle}
 							>
 								<LectureVideoPlayer
@@ -2633,7 +2633,7 @@
 										? currentContinuation?.post_answer_text || null
 										: subtitleText}
 									bind:subtitlesExpanded
-									bind:subtitleHeight
+									bind:captionsVisible
 									subtitlesCollapsed={hasQuestionPrompt && !introNarrationPending}
 									disabled={playerInteractionDisabled}
 									{activeQuestionIds}

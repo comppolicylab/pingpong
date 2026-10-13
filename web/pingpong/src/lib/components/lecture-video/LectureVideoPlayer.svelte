@@ -122,7 +122,7 @@
 		questionMarkers = [],
 		subtitleText = null,
 		subtitlesCollapsed = false,
-		subtitleHeight = $bindable(0),
+		captionsVisible = $bindable(false),
 		subtitlesExpanded = $bindable(false),
 		disabled = false,
 		manualPlaybackPrompt = false,
@@ -166,7 +166,7 @@
 		questionMarkers?: QuestionMarker[];
 		subtitleText?: string | null;
 		subtitlesCollapsed?: boolean;
-		subtitleHeight?: number;
+		captionsVisible?: boolean;
 		subtitlesExpanded?: boolean;
 		disabled?: boolean;
 		manualPlaybackPrompt?: boolean;
@@ -521,8 +521,8 @@
 		(captionsShown && subtitleText != null) || (customCaptionsVisible && !subtitlesCollapsed)
 	);
 	$effect(() => {
+		captionsVisible = subtitlesVisible;
 		if (!subtitlesVisible) {
-			subtitleHeight = 0;
 			subtitlesExpanded = false;
 		}
 	});
@@ -2512,11 +2512,14 @@
 </div>
 
 {#if subtitlesVisible}
+	<!-- svelte-ignore a11y_no_noninteractive_tabindex (Allow keyboard scrolling of long captions.) -->
 	<div
-		bind:clientHeight={subtitleHeight}
 		onintrostart={() => (subtitlesExpanded = false)}
 		onintroend={() => (subtitlesExpanded = true)}
-		class="-mb-3 flex min-h-[calc(2lh+0.5rem)] flex-col px-3 py-1 text-center text-sm leading-[1.4] font-medium text-slate-700 sm:text-base"
+		class="-mb-3 flex h-[calc(3lh+0.5rem)] flex-col overflow-y-auto px-3 py-1 text-center text-sm leading-[1.4] font-medium text-slate-700 sm:text-base"
+		tabindex={0}
+		role="region"
+		aria-label="Lecture captions"
 		transition:slide={{ duration: prefersReducedMotion.current ? 0 : 250 }}
 	>
 		<div class="m-auto w-full max-w-[64rem] shrink-0">
