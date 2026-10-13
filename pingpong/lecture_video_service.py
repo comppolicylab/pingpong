@@ -343,18 +343,16 @@ def lecture_video_manifest_from_model(
                 options=options,
             )
         )
-    base_manifest = schemas.LectureVideoManifestV1(questions=questions)
-
     if not lecture_video.manifest_data:
-        return base_manifest
+        return schemas.LectureVideoManifestV1(questions=questions)
 
     manifest_context = _hydrate_stored_manifest_context(lecture_video)
     if manifest_context is None:
-        return base_manifest
+        return schemas.LectureVideoManifestV1(questions=questions)
 
     if manifest_context.version == 4:
         return schemas.LectureVideoManifestV4(
-            questions=base_manifest.questions,
+            questions=questions,
             word_level_transcription=manifest_context.word_level_transcription,
             summary_checkpoints=manifest_context.summary_checkpoints,
             moment_contexts=manifest_context.moment_contexts,
@@ -362,13 +360,13 @@ def lecture_video_manifest_from_model(
 
     if manifest_context.version == 3:
         return schemas.LectureVideoManifestV3(
-            questions=base_manifest.questions,
+            questions=questions,
             word_level_transcription=manifest_context.word_level_transcription,
             video_descriptions=manifest_context.video_descriptions,
         )
 
     return schemas.LectureVideoManifestV2(
-        questions=base_manifest.questions,
+        questions=questions,
         word_level_transcription=_v3_manifest_words_to_v2(
             manifest_context.word_level_transcription
         ),

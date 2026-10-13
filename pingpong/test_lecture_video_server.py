@@ -8036,6 +8036,49 @@ async def test_get_assistant_lecture_video_config_returns_v3_manifest_and_chat_m
 @with_user(123)
 @with_institution(11, "Test Institution")
 @with_authz(grants=[("user:123", "can_edit", "assistant:1")])
+@pytest.mark.parametrize(
+    "manifest_factory",
+    [lecture_video_manifest_v2, lecture_video_manifest_v3, lecture_video_manifest_v4],
+    ids=["v2", "v3", "v4"],
+)
+@pytest.mark.parametrize("allow_skip", [False, True])
+async def test_get_assistant_lecture_video_config_round_trips_open_ended_questions(
+    api, db, institution, valid_user_token, manifest_factory, allow_skip
+):
+    manifest = manifest_factory()
+    manifest["questions"].append(
+        {
+            "type": "open_ended",
+            "question_text": "Explain why latency matters.",
+            "intro_text": "Explain why latency matters.",
+            "passing_criteria": "Explain how latency affects response time.",
+            "allow_skip": allow_skip,
+            "stop_offset_ms": 2000,
+            "options": [],
+        }
+    )
+    expected_manifest = schemas.validate_lecture_video_manifest(manifest).model_dump(
+        mode="json"
+    )
+
+    async with db.async_session() as session:
+        class_, _lecture_video, _assistant = await create_ready_lecture_video_assistant(
+            session, institution, manifest=manifest
+        )
+
+    response = api.get(
+        f"/api/v1/class/{class_.id}/assistant/1/lecture-video/config",
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["lecture_video_manifest"] == expected_manifest
+    assert response.json()["lecture_video_chat_available"] is True
+
+
+@with_user(123)
+@with_institution(11, "Test Institution")
+@with_authz(grants=[("user:123", "can_edit", "assistant:1")])
 async def test_get_assistant_lecture_video_config_returns_409_for_invalid_stored_manifest(
     api, db, institution, valid_user_token
 ):
