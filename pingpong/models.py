@@ -9239,6 +9239,7 @@ class Run(Base):
     error_message = Column(String, nullable=True)
     incomplete_reason = Column(String, nullable=True)
     moderation = Column(JSON, nullable=True)
+    usage = Column(JSON, nullable=True)
 
     tool_calls = relationship(
         "ToolCall",
@@ -9427,6 +9428,7 @@ class Run(Base):
         incomplete_reason: str | None,
         moderation: dict[str, Any] | None | _UnsetType = _UNSET,
         completed: bool = True,
+        usage: dict[str, Any] | None | _UnsetType = _UNSET,
     ) -> None:
         values: dict[str, Any] = {
             "status": status,
@@ -9437,6 +9439,8 @@ class Run(Base):
         }
         if moderation is not _UNSET:
             values["moderation"] = moderation
+        if usage is not _UNSET:
+            values["usage"] = usage
 
         stmt = update(Run).where(Run.id == id).values(**values)
         await session.execute(stmt)
