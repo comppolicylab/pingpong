@@ -2016,12 +2016,12 @@ def lecture_video_validator_create_assistant(self):
     } and (
         (self.code_interpreter_file_ids and len(self.code_interpreter_file_ids) > 0)
         or (self.file_search_file_ids and len(self.file_search_file_ids) > 0)
-        or (self.tools and len(self.tools) > 0)
+        or any(tool["type"] != "web_search" for tool in (self.tools or []))
         or (len(self.mcp_servers) > 0)
     ):
         raise ValueError(
-            "Lecture lesson assistants cannot be created with tools. "
-            "Please remove all tools or select a different interaction mode."
+            "Lecture lesson assistants only support the Web Search tool. "
+            "Please remove other tools and their files or select a different interaction mode."
         )
     if (
         self.interaction_mode
@@ -2147,12 +2147,12 @@ def lecture_video_validator_update_assistant(self):
     } and (
         (self.code_interpreter_file_ids and len(self.code_interpreter_file_ids) > 0)
         or (self.file_search_file_ids and len(self.file_search_file_ids) > 0)
-        or (self.tools and len(self.tools) > 0)
+        or any(tool["type"] != "web_search" for tool in (self.tools or []))
         or (self.mcp_servers and len(self.mcp_servers) > 0)
     ):
         raise ValueError(
-            "Lecture lesson assistants cannot be updated with tools. "
-            "Please remove all tools or select a different interaction mode."
+            "Lecture lesson assistants only support the Web Search tool. "
+            "Please remove other tools and their files or select a different interaction mode."
         )
     if (
         self.interaction_mode
