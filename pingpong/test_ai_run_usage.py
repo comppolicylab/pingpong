@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from unittest.mock import AsyncMock
+
 import pytest
 from openai.types.responses import (
     Response,
@@ -11,6 +13,7 @@ from openai.types.responses import (
 
 from pingpong import models, schemas
 from pingpong.ai import BufferedResponseStreamHandler
+from pingpong.authz import AuthzClient
 
 pytestmark = pytest.mark.asyncio
 
@@ -18,7 +21,7 @@ pytestmark = pytest.mark.asyncio
 def make_handler(run_id: int) -> BufferedResponseStreamHandler:
     return BufferedResponseStreamHandler(
         session=None,
-        auth=None,
+        auth=AsyncMock(spec=AuthzClient),
         cli=None,
         run_id=run_id,
         run_status=schemas.RunStatus.IN_PROGRESS,
