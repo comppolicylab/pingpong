@@ -3638,6 +3638,7 @@ class BufferedResponseStreamHandler:
         response_moderation: dict[str, Any] | None | _UnsetType = _UNSET,
         send_error_message_only_if_active: bool = False,
         restore_to_pending_if_queued: bool = False,
+        response_usage: dict[str, Any] | None | _UnsetType = _UNSET,
     ):
         logger.info(f"Starting to clean up run: {self.run_id}")
 
@@ -3663,6 +3664,8 @@ class BufferedResponseStreamHandler:
                     kwargs: dict[str, Any] = {}
                     if moderation is not _UNSET:
                         kwargs["moderation"] = moderation
+                    if response_usage is not _UNSET:
+                        kwargs["usage"] = response_usage
                     await models.Run.mark_as_status(
                         session_,
                         self.run_id,
@@ -3791,6 +3794,8 @@ class BufferedResponseStreamHandler:
                     await self.on_mcp_tool_call_done(item)
 
         cleanup_kwargs: dict[str, Any] = {}
+        if (usage := getattr(data.response, "usage", None)) is not None:
+            cleanup_kwargs["response_usage"] = _openai_model_to_json(usage)
         if data.response.moderation is not None:
             cleanup_kwargs["response_moderation"] = _openai_model_to_json(
                 data.response.moderation
