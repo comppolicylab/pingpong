@@ -1,6 +1,7 @@
 import asyncio
 import base64
 import importlib
+import inspect
 import logging
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -146,6 +147,222 @@ def buffering_recorder(thread_id=1, session=None):
     recorder = RealtimeRecorder(SimpleNamespace(), "synthetic.webm", thread_id, session)
     recorder.ffmpeg = SimpleNamespace()
     return recorder
+
+
+@with_user(123)
+async def test_session_saves_late_transcripts_after_browser_disconnect(db, user):
+    disconnect = asyncio.Event()
+    browser_disconnected = asyncio.Event()
+    provider_waiting = asyncio.Event()
+    finish_transcript = asyncio.Event()
+    provider_cancelled = asyncio.Event()
+
+    class DelayedTranscriptStream:
+        async def __aiter__(self):
+            try:
+                yield SimpleNamespace(
+                    type="conversation.item.added",
+                    previous_item_id=None,
+                    item=SimpleNamespace(id="question", type="message", role="user"),
+                )
+                yield SimpleNamespace(
+                    type="conversation.item.added",
+                    previous_item_id="question",
+                    item=SimpleNamespace(id="reply", type="message", role="assistant"),
+                )
+                yield SimpleNamespace(
+                    type="response.output_audio_transcript.done",
+                    item_id="reply",
+                    transcript="answer",
+                )
+                provider_waiting.set()
+                await finish_transcript.wait()
+                yield SimpleNamespace(
+                    type="conversation.item.input_audio_transcription.completed",
+                    item_id="question",
+                    transcript="question",
+                )
+            except asyncio.CancelledError:
+                provider_cancelled.set()
+                raise
+
+    async with db.async_session() as session:
+        thread = models.Thread(
+            version=3, user_message_ct=0, tools_available="[]", display_user_info=False
+        )
+        session.add(thread)
+        await session.flush()
+        thread_id = thread.id
+        websocket = DummyWebSocket()
+        websocket.state["db"] = session
+        websocket.state["session"] = SimpleNamespace(user=user)
+        websocket.state["thread"] = thread
+        websocket.state["openai_client"] = None
+        websocket.state["realtime_connection"] = DelayedTranscriptStream()
+
+        async def receive():
+            await disconnect.wait()
+            browser_disconnected.set()
+            raise WebSocketDisconnect(code=1000)
+
+        websocket.receive = receive
+        handler = inspect.unwrap(realtime_module.browser_realtime_websocket)
+        task = asyncio.create_task(handler(websocket, "1", str(thread_id)))
+        try:
+            await asyncio.wait_for(provider_waiting.wait(), timeout=1)
+            disconnect.set()
+            await asyncio.wait_for(browser_disconnected.wait(), timeout=1)
+            with pytest.raises(TimeoutError):
+                await asyncio.wait_for(asyncio.shield(task), timeout=0.02)
+            assert not provider_cancelled.is_set()
+            finish_transcript.set()
+            await asyncio.wait_for(task, timeout=1)
+            await session.commit()
+        finally:
+            finish_transcript.set()
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+    async with db.async_session() as session:
+        messages = (
+            await session.scalars(
+                select(models.Message)
+                .where(models.Message.thread_id == thread_id)
+                .order_by(models.Message.output_index)
+                .options(selectinload(models.Message.content))
+            )
+        ).all()
+        assert [message.message_id for message in messages] == ["question", "reply"]
+        assert [message.content[0].text for message in messages] == [
+            "question",
+            "answer",
+        ]
+
+
+@pytest.mark.parametrize(
+    "ending", ["provider", "disconnect_timeout", "cancel", "provider_error"]
+)
+@pytest.mark.parametrize("recording", [False, True])
+async def test_realtime_session_owns_tasks_and_cleans_browser_last(
+    monkeypatch, caplog, ending, recording
+):
+    browser_ready = asyncio.Event()
+    disconnect = asyncio.Event()
+    provider_ready = asyncio.Event()
+    finish_provider = asyncio.Event()
+    recorder_ready = asyncio.Event()
+    children = []
+    cleanup = []
+
+    async def browser(*args):
+        children.append(asyncio.current_task())
+        browser_ready.set()
+        try:
+            await disconnect.wait()
+        finally:
+            cleanup.append("browser")
+
+    async def provider(*args):
+        children.append(asyncio.current_task())
+        provider_ready.set()
+        try:
+            await finish_provider.wait()
+            if ending == "provider_error":
+                raise RuntimeError("synthetic provider failure")
+        finally:
+            cleanup.append("provider")
+
+    async def save_recording(*args, **kwargs):
+        children.append(asyncio.current_task())
+        recorder_ready.set()
+        try:
+            await asyncio.Future()
+        finally:
+            cleanup.append("recorder")
+
+    process_queue = realtime_module.process_queue_tasks
+
+    async def writer(*args):
+        children.append(asyncio.current_task())
+        try:
+            await process_queue(*args)
+        finally:
+            cleanup.append("writer")
+
+    monkeypatch.setattr(realtime_module, "handle_browser_messages", browser)
+    monkeypatch.setattr(realtime_module, "handle_openai_events", provider)
+    monkeypatch.setattr(realtime_module, "process_queue_tasks", writer)
+    monkeypatch.setattr(
+        realtime_module.RealtimeRecorder,
+        "create",
+        AsyncMock(return_value=SimpleNamespace(handle_saving_buffer=save_recording)),
+    )
+    monkeypatch.setattr(
+        realtime_module, "BROWSER_DISCONNECT_DRAIN_SECONDS", 0.02, raising=False
+    )
+    websocket = DummyWebSocket()
+    websocket.state["thread"] = SimpleNamespace(
+        id=1, thread_id=None, display_user_info=recording
+    )
+    websocket.state["realtime_connection"] = None
+    websocket.state["openai_client"] = None
+    websocket.state["db"] = None
+    handler = inspect.unwrap(realtime_module.browser_realtime_websocket)
+    task = asyncio.create_task(handler(websocket, "1", "1"))
+    try:
+        await asyncio.wait_for(browser_ready.wait(), timeout=1)
+        await asyncio.wait_for(provider_ready.wait(), timeout=1)
+        if recording:
+            await asyncio.wait_for(recorder_ready.wait(), timeout=1)
+        if ending == "disconnect_timeout":
+            disconnect.set()
+        elif ending == "cancel":
+            task.cancel()
+        else:
+            finish_provider.set()
+        if ending == "cancel":
+            with pytest.raises(asyncio.CancelledError):
+                await asyncio.wait_for(task, timeout=1)
+        else:
+            await asyncio.wait_for(task, timeout=1)
+        assert all(child.done() for child in children)
+        if ending != "disconnect_timeout":
+            assert cleanup[-1] == "browser"
+        if recording:
+            assert cleanup.index("recorder") < cleanup.index("writer")
+        if ending == "provider_error":
+            assert "synthetic provider failure" in caplog.text
+    finally:
+        task.cancel()
+        for child in children:
+            child.cancel()
+        await asyncio.gather(task, *children, return_exceptions=True)
+
+
+async def test_realtime_cleanup_does_not_close_browser_twice():
+    websocket = DummyWebSocket()
+    websocket.application_state = WebSocketState.CONNECTED
+    websocket.state["thread"] = SimpleNamespace(
+        id=1, version=1, display_user_info=False
+    )
+    websocket.state["openai_client"] = None
+    websocket.state["realtime_connection"] = FakeRealtimeEventStream(
+        [SimpleNamespace(type="error", error=SimpleNamespace())]
+    )
+
+    async def receive():
+        await asyncio.Future()
+
+    async def close():
+        if websocket.application_state == WebSocketState.DISCONNECTED:
+            raise RuntimeError("already closed")
+        websocket.application_state = WebSocketState.DISCONNECTED
+
+    websocket.receive = receive
+    websocket.close = AsyncMock(side_effect=close)
+    handler = inspect.unwrap(realtime_module.browser_realtime_websocket)
+    await asyncio.wait_for(handler(websocket, "1", "1"), timeout=1)
+    websocket.close.assert_awaited_once()
 
 
 @with_user(123)

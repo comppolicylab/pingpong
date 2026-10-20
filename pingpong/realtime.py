@@ -48,6 +48,7 @@ openai_connection_logger = logging.getLogger("realtime_openai")
 TaskFunc = Callable[[], Awaitable[object]]
 ConversationRole = Literal["user", "assistant"]
 UNSET_PREVIOUS_ITEM_ID = "__UNSET_PREVIOUS_ITEM_ID__"
+BROWSER_DISCONNECT_DRAIN_SECONDS = 5.0
 
 
 def _serialize_realtime_error(_error) -> dict[str, str | None]:
@@ -977,7 +978,14 @@ async def handle_browser_messages(
         browser_connection_logger.debug(
             "Received task cancellation signal. Closing the browser websocket."
         )
-        await browser_connection.close()
+        try:
+            if (
+                getattr(browser_connection, "application_state", None)
+                != WebSocketState.DISCONNECTED
+            ):
+                await browser_connection.close()
+        except (WebSocketDisconnect, ClientDisconnect, OSError):
+            browser_connection_logger.debug("Browser disconnected during close.")
         raise
 
 
@@ -1334,19 +1342,23 @@ async def browser_realtime_websocket(
             session=browser_connection.state["db"],
         )
 
-    realtime_tasks: list[asyncio.Task] = []
-
-    realtime_tasks.append(
-        asyncio.create_task(
-            handle_browser_messages(
-                browser_connection,
-                realtime_connection,
-                assistant_audio_tracker,
-                realtime_recorder,
-            )
+    browser_task = asyncio.create_task(
+        handle_browser_messages(
+            browser_connection,
+            realtime_connection,
+            assistant_audio_tracker,
+            realtime_recorder,
         )
     )
-    realtime_tasks.append(
+
+    async def wait_for_browser_disconnect_drain():
+        # asyncio.wait does not cancel browser_task when this watcher is cancelled.
+        await asyncio.wait({browser_task})
+        # Realtime connections can otherwise stay open long after the browser
+        # leaves. Allow late transcripts a bounded window before cleanup.
+        await asyncio.sleep(BROWSER_DISCONNECT_DRAIN_SECONDS)
+
+    realtime_tasks: list[asyncio.Task] = [
         asyncio.create_task(
             handle_openai_events(
                 browser_connection,
@@ -1357,8 +1369,9 @@ async def browser_realtime_websocket(
                 assistant_audio_tracker,
                 realtime_recorder,
             )
-        )
-    )
+        ),
+        asyncio.create_task(wait_for_browser_disconnect_drain()),
+    ]
     openai_queue_processor = asyncio.create_task(
         process_queue_tasks(openai_task_queue, openai_connection_logger)
     )
@@ -1368,25 +1381,28 @@ async def browser_realtime_websocket(
             asyncio.create_task(realtime_recorder.handle_saving_buffer(every=10))
         )
 
-    _, pending = await asyncio.wait(
-        realtime_tasks,
-        return_when=asyncio.FIRST_COMPLETED,
-    )
-
-    for task in pending:
-        task.cancel()
-        try:
-            await task
-        except (asyncio.CancelledError, ClientDisconnect):
-            # Suppress cancellation/client disconnect exceptions: expected during shutdown/cleanup.
-            pass
-
-    # Make sure to wait for the task queue to finish processing
-    await openai_task_queue.join()
-
-    openai_queue_processor.cancel()
     try:
-        await openai_queue_processor
-    except (asyncio.CancelledError, ClientDisconnect):
-        # Suppress cancellation/client disconnect exceptions: expected during shutdown/cleanup.
-        pass
+        await asyncio.wait(realtime_tasks, return_when=asyncio.FIRST_COMPLETED)
+    finally:
+        for task in realtime_tasks:
+            task.cancel()
+        results = await asyncio.gather(*realtime_tasks, return_exceptions=True)
+        try:
+            # Stop producers first, then finish writes already queued.
+            await openai_task_queue.join()
+        finally:
+            openai_queue_processor.cancel()
+            results.extend(
+                await asyncio.gather(openai_queue_processor, return_exceptions=True)
+            )
+            # Keep the browser task alive until provider/recorder cleanup and
+            # queued transcript writes finish. Also reap it if it failed earlier.
+            browser_task.cancel()
+            results.extend(await asyncio.gather(browser_task, return_exceptions=True))
+        for result in results:
+            if isinstance(result, Exception) and not isinstance(
+                result, (ClientDisconnect, WebSocketDisconnect)
+            ):
+                openai_connection_logger.error(
+                    "Realtime session task failed during cleanup.", exc_info=result
+                )
