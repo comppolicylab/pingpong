@@ -569,111 +569,130 @@ async def add_message_to_thread(
         return
 
     if thread.version == 3:
+        session = browser_connection.state["db"]
         try:
-            existing_run_id = (
-                browser_connection.state["voice_mode_run_id"]
-                if "voice_mode_run_id" in browser_connection.state
-                else None
-            )
-            run = None
-            if existing_run_id is not None:
-                run = await Run.get_by_id(
-                    browser_connection.state["db"], int(existing_run_id)
-                )
-                if run and run.thread_id != thread.id:
-                    run = None
-
-            if run is None:
-                assistant = (
-                    browser_connection.state["assistant"]
-                    if "assistant" in browser_connection.state
+            # Keep the run, message text and user counter atomic without rolling
+            # back transcripts already written by this session.
+            async with session.begin_nested():
+                existing_run_id = (
+                    browser_connection.state["voice_mode_run_id"]
+                    if "voice_mode_run_id" in browser_connection.state
                     else None
                 )
-                conversation_instructions = (
-                    browser_connection.state["conversation_instructions"]
-                    if "conversation_instructions" in browser_connection.state
-                    else None
-                )
-                run = Run(
-                    status=schemas.RunStatus.COMPLETED,
-                    thread_id=thread.id,
-                    assistant_id=thread.assistant_id,
-                    model=getattr(assistant, "model", None),
-                    reasoning_effort=getattr(assistant, "reasoning_effort", None),
-                    verbosity=getattr(assistant, "verbosity", None),
-                    temperature=getattr(assistant, "temperature", None),
-                    tools_available=thread.tools_available,
-                    creator_id=browser_connection.state["session"].user.id,
-                    instructions=conversation_instructions or thread.instructions,
-                    completed=func.now(),
-                )
-                browser_connection.state["db"].add(run)
-                await browser_connection.state["db"].flush()
-                await browser_connection.state["db"].refresh(run)
-                browser_connection.state["voice_mode_run_id"] = run.id
-
-            try:
-                output_index_int = (
-                    int(output_index) if output_index is not None else None
-                )
-            except (TypeError, ValueError):
-                output_index_int = None
-
-            if output_index_int is None:
-                output_index_int = (
-                    await Thread.get_max_output_sequence(
-                        browser_connection.state["db"], thread.id
+                run = None
+                if existing_run_id is not None:
+                    run = await Run.get_by_id(
+                        browser_connection.state["db"], int(existing_run_id)
                     )
-                    + 1
-                )
+                    if run and run.thread_id != thread.id:
+                        run = None
 
-            message = await Message.create(
-                browser_connection.state["db"],
-                {
-                    "message_id": item_id,
-                    "message_status": schemas.MessageStatus.INCOMPLETE
-                    if transcription_failed
-                    else schemas.MessageStatus.COMPLETED,
-                    "message_metadata": {"voice_transcription_failed": True}
-                    if transcription_failed
-                    else None,
-                    "run_id": run.id,
-                    "thread_id": thread.id,
-                    "assistant_id": thread.assistant_id
-                    if not is_user_message
-                    else None,
-                    "output_index": output_index_int,
-                    "role": (
-                        schemas.MessageRole.USER
-                        if is_user_message
-                        else schemas.MessageRole.ASSISTANT
-                    ),
-                    "user_id": (
-                        browser_connection.state["session"].user.id
-                        if is_user_message
+                if run is None:
+                    assistant = (
+                        browser_connection.state["assistant"]
+                        if "assistant" in browser_connection.state
                         else None
-                    ),
-                    "completed": func.now(),
-                },
-            )
-            await MessagePart.create(
-                browser_connection.state["db"],
-                {
-                    "message_id": message.id,
-                    "part_index": 0,
-                    "type": (
-                        schemas.MessagePartType.INPUT_TEXT
-                        if is_user_message
-                        else schemas.MessagePartType.OUTPUT_TEXT
-                    ),
-                    "text": transcript_text,
-                },
-            )
+                    )
+                    conversation_instructions = (
+                        browser_connection.state["conversation_instructions"]
+                        if "conversation_instructions" in browser_connection.state
+                        else None
+                    )
+                    run = Run(
+                        status=schemas.RunStatus.COMPLETED,
+                        thread_id=thread.id,
+                        assistant_id=thread.assistant_id,
+                        model=getattr(assistant, "model", None),
+                        reasoning_effort=getattr(assistant, "reasoning_effort", None),
+                        verbosity=getattr(assistant, "verbosity", None),
+                        temperature=getattr(assistant, "temperature", None),
+                        tools_available=thread.tools_available,
+                        creator_id=browser_connection.state["session"].user.id,
+                        instructions=conversation_instructions or thread.instructions,
+                        completed=func.now(),
+                    )
+                    browser_connection.state["db"].add(run)
+                    await browser_connection.state["db"].flush()
+                    await browser_connection.state["db"].refresh(run)
+
+                try:
+                    output_index_int = (
+                        int(output_index) if output_index is not None else None
+                    )
+                except (TypeError, ValueError):
+                    output_index_int = None
+
+                if output_index_int is None:
+                    output_index_int = (
+                        await Thread.get_max_output_sequence(
+                            browser_connection.state["db"], thread.id
+                        )
+                        + 1
+                    )
+
+                message = await Message.create(
+                    browser_connection.state["db"],
+                    {
+                        "message_id": item_id,
+                        "message_status": schemas.MessageStatus.INCOMPLETE
+                        if transcription_failed
+                        else schemas.MessageStatus.COMPLETED,
+                        "message_metadata": {"voice_transcription_failed": True}
+                        if transcription_failed
+                        else None,
+                        "run_id": run.id,
+                        "thread_id": thread.id,
+                        "assistant_id": thread.assistant_id
+                        if not is_user_message
+                        else None,
+                        "output_index": output_index_int,
+                        "role": (
+                            schemas.MessageRole.USER
+                            if is_user_message
+                            else schemas.MessageRole.ASSISTANT
+                        ),
+                        "user_id": (
+                            browser_connection.state["session"].user.id
+                            if is_user_message
+                            else None
+                        ),
+                        "completed": func.now(),
+                    },
+                )
+                await MessagePart.create(
+                    browser_connection.state["db"],
+                    {
+                        "message_id": message.id,
+                        "part_index": 0,
+                        "type": (
+                            schemas.MessagePartType.INPUT_TEXT
+                            if is_user_message
+                            else schemas.MessagePartType.OUTPUT_TEXT
+                        ),
+                        "text": transcript_text,
+                    },
+                )
+                if is_user_message:
+                    thread.user_message_ct += 1
+                    thread.last_activity = func.now()
+                    session.add(thread)
+                    await session.flush()
+                    await session.refresh(thread)
+            # Publish the run ID only after its savepoint succeeds.
+            browser_connection.state["voice_mode_run_id"] = run.id
             message_saved = True
         except Exception as e:
             openai_connection_logger.exception(
                 f"Failed to save Version 3 realtime transcript: {e}, item_id={item_id}, role={role}"
             )
+            # A savepoint rollback expires modified ORM state. Reload explicitly
+            # so later queued writes do not attempt implicit async database IO.
+            try:
+                await session.refresh(thread)
+            except Exception:
+                openai_connection_logger.exception(
+                    "Failed to reload thread after realtime transcript rollback."
+                )
             return
     elif thread.version <= 2:
         try:
@@ -721,7 +740,7 @@ async def add_message_to_thread(
     if not message_saved:
         return
 
-    if is_user_message:
+    if is_user_message and thread.version <= 2:
         try:
             thread.user_message_ct += 1
             thread.last_activity = func.now()

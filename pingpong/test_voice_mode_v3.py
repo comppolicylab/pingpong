@@ -3,6 +3,7 @@ import importlib
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
+import pytest
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 from starlette.datastructures import State
@@ -12,6 +13,117 @@ from pingpong import models
 import pingpong.schemas as schemas
 from pingpong.realtime import add_message_to_thread
 from pingpong.testutil import with_authz, with_user
+
+
+@with_user(123)
+@pytest.mark.parametrize(
+    "failure_stage", ["new_run", "new_run_text", "text", "counter", "counter_flush"]
+)
+async def test_voice_transcript_failure_isolated_from_other_messages(
+    db, user, monkeypatch, failure_stage
+):
+    async with db.async_session() as session:
+        thread = models.Thread(version=3, user_message_ct=0, tools_available="[]")
+        session.add(thread)
+        await session.flush()
+        thread_id = thread.id
+        websocket = SimpleNamespace(
+            state=State(
+                {
+                    "db": session,
+                    "session": SimpleNamespace(user=SimpleNamespace(id=123)),
+                }
+            )
+        )
+        has_prior_message = failure_stage in {"text", "counter", "counter_flush"}
+        if has_prior_message:
+            await add_message_to_thread(
+                None,
+                websocket,
+                thread,
+                "prior",
+                "earlier question",
+                "user",
+                output_index="0",
+            )
+        prior_run_id = websocket.state._state.get("voice_mode_run_id")
+
+        create_part = models.MessagePart.create
+        flush = session.flush
+        refresh = session.refresh
+        injected_failure = False
+
+        async def fail_text(db_session, data):
+            # Exercise an actual failed SQL flush, which poisons an unprotected
+            # transaction until rollback, rather than just raising a Python error.
+            return await create_part(db_session, {**data, "type": None})
+
+        async def fail_refresh(instance, *args, **kwargs):
+            nonlocal injected_failure
+            await refresh(instance, *args, **kwargs)
+            if not injected_failure and (
+                (failure_stage == "new_run" and isinstance(instance, models.Run))
+                or (failure_stage == "counter" and instance is thread)
+            ):
+                injected_failure = True
+                raise RuntimeError("injected post-flush failure")
+
+        async def fail_counter_flush(*args, **kwargs):
+            if thread in session.dirty:
+                thread.prevent_user_thread_deletion = None
+            await flush(*args, **kwargs)
+
+        with monkeypatch.context() as patch:
+            if failure_stage in {"new_run_text", "text"}:
+                patch.setattr(models.MessagePart, "create", fail_text)
+            elif failure_stage == "counter_flush":
+                patch.setattr(session, "flush", fail_counter_flush)
+            else:
+                patch.setattr(session, "refresh", fail_refresh)
+            await add_message_to_thread(
+                None,
+                websocket,
+                thread,
+                "failed",
+                "failed question",
+                "user",
+                output_index="1",
+            )
+
+        assert session.is_active
+        assert websocket.state._state.get("voice_mode_run_id") == prior_run_id
+        assert thread.user_message_ct == int(has_prior_message)
+        assert len((await session.scalars(select(models.Run))).all()) == int(
+            has_prior_message
+        )
+        assert len((await session.scalars(select(models.Message))).all()) == int(
+            has_prior_message
+        )
+
+        # The same session must remain usable for later queued transcript writes
+        # and its final commit, without rolling back the earlier message.
+        await add_message_to_thread(
+            None, websocket, thread, "later", "later question", "user", output_index="2"
+        )
+        await session.commit()
+
+    async with db.async_session() as session:
+        messages = (
+            await session.scalars(
+                select(models.Message)
+                .where(models.Message.thread_id == thread_id)
+                .order_by(models.Message.output_index)
+                .options(selectinload(models.Message.content))
+            )
+        ).all()
+        assert [message.message_id for message in messages] == (
+            ["prior", "later"] if has_prior_message else ["later"]
+        )
+        assert all(len(message.content) == 1 for message in messages)
+        assert messages[-1].content[0].text == "later question"
+        assert len((await session.scalars(select(models.Run))).all()) == 1
+        saved_thread = await session.get(models.Thread, thread_id)
+        assert saved_thread.user_message_ct == len(messages)
 
 
 @with_user(123)
