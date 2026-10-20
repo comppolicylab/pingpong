@@ -407,6 +407,7 @@ class ConversationItemOrderingBuffer:
         self.queued_ready_item_ids: set[str] = set()
         self.pruned_saved_item_ids: set[str] = set()
         self.failed_transcription_item_ids: set[str] = set()
+        self.incomplete_transcription_item_ids: set[str] = set()
         self.next_conversation_order = 0
         self.next_output_index = max(0, initial_output_index)
 
@@ -605,6 +606,24 @@ class ConversationItemOrderingBuffer:
                 item.skip_persistence = True
                 self._mark_item_and_descendants_for_readiness(item.item_id)
 
+    def finalize_pending_transcriptions(self) -> None:
+        # Call only after provider/browser producers stop. Recover known turns
+        # without inventing text or repairing unknown predecessor relationships.
+        for item in list(self.items_by_id.values()):
+            if (
+                item.is_message_saved
+                or item.is_transcription_complete
+                or item.skip_persistence
+                or item.role not in {"user", "assistant"}
+                or item.previous_item_id == self._UNSET_PREVIOUS_ITEM_ID
+            ):
+                continue
+            if _has_non_empty_transcript(item.transcription_text):
+                self.incomplete_transcription_item_ids.add(item.item_id)
+            self.register_transcription(
+                item.item_id, item.transcription_text or "", item.role
+            )
+
     def _get_item(self, item_id: str) -> ConversationChainItem | None:
         return self.items_by_id.get(item_id)
 
@@ -742,6 +761,7 @@ async def add_message_to_thread(
     output_index: str | None = None,
     transcription_failed: bool = False,
     playback_outcome: VoicePlaybackOutcome | None = None,
+    transcription_incomplete: bool = False,
 ) -> bool:
     is_user_message = role == "user"
     message_saved = False
@@ -758,6 +778,8 @@ async def add_message_to_thread(
     message_metadata: dict[str, str | bool] = {}
     if transcription_failed:
         message_metadata["voice_transcription_failed"] = True
+    if transcription_incomplete:
+        message_metadata["voice_transcript_incomplete"] = True
     if not is_user_message and playback_outcome is not None:
         message_metadata["voice_playback_outcome"] = playback_outcome
 
@@ -838,7 +860,7 @@ async def add_message_to_thread(
                     {
                         "message_id": item_id,
                         "message_status": schemas.MessageStatus.INCOMPLETE
-                        if transcription_failed
+                        if transcription_failed or transcription_incomplete
                         else schemas.MessageStatus.COMPLETED,
                         "message_metadata": message_metadata or None,
                         "run_id": run.id,
@@ -902,6 +924,8 @@ async def add_message_to_thread(
             }
             if transcription_failed:
                 metadata["voice_transcription_failed"] = "true"
+            if transcription_incomplete:
+                metadata["voice_transcript_incomplete"] = "true"
             if not is_user_message and playback_outcome is not None:
                 metadata["voice_playback_outcome"] = playback_outcome
             if output_index is not None:
@@ -1041,6 +1065,8 @@ async def enqueue_ready_thread_message_tasks(
                     transcription_failed=item_id
                     in ordering_buffer.failed_transcription_item_ids,
                     playback_outcome=playback_outcome,
+                    transcription_incomplete=item_id
+                    in ordering_buffer.incomplete_transcription_item_ids,
                 )
                 if saved:
                     return
@@ -1703,8 +1729,12 @@ async def browser_realtime_websocket(
         else None
     )
 
+    cancelled = False
     try:
         await asyncio.wait(realtime_tasks, return_when=asyncio.FIRST_COMPLETED)
+    except asyncio.CancelledError:
+        cancelled = True
+        raise
     finally:
         if recorder_task is not None:
             recorder_task.cancel()
@@ -1722,6 +1752,7 @@ async def browser_realtime_websocket(
             await asyncio.wait({browser_task})
             assistant_audio_tracker.finish_playback_tracking()
             ordering_buffer.discard_unheard_assistant_transcripts()
+            ordering_buffer.finalize_pending_transcriptions()
             await enqueue_ready_thread_message_tasks(
                 ordering_buffer,
                 openai_task_queue,
@@ -1775,3 +1806,7 @@ async def browser_realtime_websocket(
                 openai_connection_logger.error(
                     "Realtime session task failed during cleanup.", exc_info=result
                 )
+        if cancelled:
+            # The DB middleware commits only on normal return. Preserve the
+            # completed voice cleanup before propagating orderly cancellation.
+            await browser_connection.state["db"].commit()
