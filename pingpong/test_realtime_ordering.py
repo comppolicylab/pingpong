@@ -178,6 +178,41 @@ def test_early_transcripts_follow_late_predecessor_metadata():
     assert _drain_ready_messages(buffer) == []
 
 
+@pytest.mark.parametrize("metadata_first", [False, True])
+@pytest.mark.parametrize("partial_text", [None, "partial question"])
+def test_failed_transcription_releases_later_messages(metadata_first, partial_text):
+    buffer = ConversationItemOrderingBuffer(logging.getLogger("ordering-test"))
+    if metadata_first:
+        buffer.register_conversation_item("question", None, "user")
+    if partial_text:
+        buffer.register_transcription_delta("question", partial_text, "user")
+    buffer.register_conversation_item("reply", "question", "assistant")
+    buffer.register_transcription("reply", "answer", "assistant")
+    assert _drain_ready_messages(buffer) == []
+
+    buffer.fail_transcription("question")
+    if not metadata_first:
+        assert _drain_ready_messages(buffer) == []
+        buffer.register_conversation_item("question", None, "user")
+    expected = [("question", partial_text, "user", "0")] if partial_text else []
+    expected.append(("reply", "answer", "assistant", str(len(expected))))
+    assert _drain_ready_messages(buffer) == expected
+    assert "question" in buffer.failed_transcription_item_ids
+    buffer.fail_transcription("question")
+    assert _drain_ready_messages(buffer) == []
+
+
+def test_late_failure_does_not_replace_completed_transcription():
+    buffer = ConversationItemOrderingBuffer(logging.getLogger("ordering-test"))
+    buffer.register_conversation_item("question", None, "user")
+    buffer.register_transcription("question", "complete question", "user")
+    buffer.fail_transcription("question")
+    assert _drain_ready_messages(buffer) == [
+        ("question", "complete question", "user", "0")
+    ]
+    assert "question" not in buffer.failed_transcription_item_ids
+
+
 def test_relevant_registration_sets_has_transcription_flag():
     buffer = ConversationItemOrderingBuffer(logging.getLogger("ordering-test"))
 

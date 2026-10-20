@@ -6,6 +6,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 from pydantic import ValidationError
+from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 from starlette.datastructures import State
 
 from pingpong import ai_models
@@ -13,6 +15,7 @@ from pingpong import models
 from pingpong import realtime as realtime_module
 from pingpong import schemas
 from pingpong import websocket as websocket_module
+from pingpong.testutil import with_user
 
 server = importlib.import_module("pingpong.server")
 
@@ -122,6 +125,116 @@ class FakeRealtimeEventStream:
     async def __aiter__(self):
         for event in self.events:
             yield event
+
+
+@with_user(123)
+@pytest.mark.parametrize("partial_text", [None, "partial question"])
+async def test_failed_transcription_does_not_block_persisting_later_reply(
+    db, user, partial_text
+):
+    async with db.async_session() as session:
+        thread = models.Thread(version=3, tools_available="[]", user_message_ct=0)
+        session.add(thread)
+        await session.flush()
+        websocket = DummyWebSocket()
+        websocket.state["db"] = session
+        websocket.state["session"] = SimpleNamespace(user=SimpleNamespace(id=123))
+        events = [
+            SimpleNamespace(
+                type="conversation.item.added",
+                previous_item_id=None,
+                item=SimpleNamespace(id="question", type="message", role="user"),
+            ),
+            SimpleNamespace(
+                type="conversation.item.added",
+                previous_item_id="question",
+                item=SimpleNamespace(id="reply", type="message", role="assistant"),
+            ),
+            SimpleNamespace(
+                type="response.output_audio_transcript.done",
+                item_id="reply",
+                transcript="answer",
+            ),
+        ]
+        if partial_text:
+            events.append(
+                SimpleNamespace(
+                    type="conversation.item.input_audio_transcription.delta",
+                    item_id="question",
+                    delta=partial_text,
+                )
+            )
+        events.append(
+            SimpleNamespace(
+                type="conversation.item.input_audio_transcription.failed",
+                item_id="question",
+            )
+        )
+        queue = asyncio.Queue()
+        await realtime_module.handle_openai_events(
+            websocket,
+            FakeRealtimeEventStream(events),
+            object(),
+            thread,
+            queue,
+            realtime_module.RealtimeAssistantAudioTracker(),
+        )
+        while not queue.empty():
+            await (await queue.get())()
+        messages = (
+            await session.scalars(
+                select(models.Message)
+                .where(models.Message.thread_id == thread.id)
+                .order_by(models.Message.output_index)
+                .options(selectinload(models.Message.content))
+            )
+        ).all()
+        assert [message.message_id for message in messages] == (
+            ["question", "reply"] if partial_text else ["reply"]
+        )
+        assert messages[-1].content[0].text == "answer"
+        assert messages[-1].message_status == schemas.MessageStatus.COMPLETED
+        if partial_text:
+            assert messages[0].content[0].text == partial_text
+            assert messages[0].message_status == schemas.MessageStatus.INCOMPLETE
+            assert messages[0].message_metadata["voice_transcription_failed"] is True
+        assert thread.user_message_ct == int(bool(partial_text))
+
+
+async def test_failed_partial_transcription_marks_classic_message_metadata():
+    websocket = DummyWebSocket()
+    websocket.state["session"] = SimpleNamespace(user=SimpleNamespace(id=123))
+    websocket.state["anonymous_share_token"] = None
+    websocket.state["anonymous_session_token"] = None
+    websocket.state["db"] = SimpleNamespace(
+        add=lambda thread: None, flush=AsyncMock(), refresh=AsyncMock()
+    )
+    create = AsyncMock()
+    client = SimpleNamespace(
+        beta=SimpleNamespace(
+            threads=SimpleNamespace(messages=SimpleNamespace(create=create))
+        )
+    )
+    thread = SimpleNamespace(version=2, thread_id="legacy-thread", user_message_ct=0)
+    await realtime_module.add_message_to_thread(
+        client,
+        websocket,
+        thread,
+        "question",
+        "partial question",
+        "user",
+        transcription_failed=True,
+    )
+    create.assert_awaited_once_with(
+        thread_id="legacy-thread",
+        role="user",
+        content="partial question",
+        metadata={
+            "item_id": "question",
+            "user_id": "123",
+            "voice_transcription_failed": "true",
+        },
+    )
 
 
 def test_realtime_session_uses_create_defaults_for_null_fields():

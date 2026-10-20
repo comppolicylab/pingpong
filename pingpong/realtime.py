@@ -239,6 +239,7 @@ class ConversationItemOrderingBuffer:
         self.ready_item_heap: list[tuple[int, str]] = []
         self.queued_ready_item_ids: set[str] = set()
         self.pruned_saved_item_ids: set[str] = set()
+        self.failed_transcription_item_ids: set[str] = set()
         self.next_conversation_order = 0
         self.next_output_index = max(0, initial_output_index)
 
@@ -369,6 +370,17 @@ class ConversationItemOrderingBuffer:
         if item.role is None:
             item.role = role
         self._mark_item_and_descendants_for_readiness(item.item_id)
+
+    def fail_transcription(self, item_id: str) -> None:
+        if item_id in self.pruned_saved_item_ids:
+            return
+        item = self._get_or_create_transcript_item(item_id)
+        if item.is_transcription_complete:
+            return
+        self.failed_transcription_item_ids.add(item_id)
+        # A failed attempt is terminal for ordering, even without any text.
+        # Preserve deltas already received instead of blocking its descendants.
+        self.register_transcription(item_id, item.transcription_text or "", "user")
 
     def pop_next_ready_message(
         self,
@@ -536,6 +548,7 @@ async def add_message_to_thread(
     role: ConversationRole,
     realtime_recorder: RealtimeRecorder | None = None,
     output_index: str | None = None,
+    transcription_failed: bool = False,
 ):
     is_user_message = role == "user"
     message_saved = False
@@ -612,7 +625,12 @@ async def add_message_to_thread(
                 browser_connection.state["db"],
                 {
                     "message_id": item_id,
-                    "message_status": schemas.MessageStatus.COMPLETED,
+                    "message_status": schemas.MessageStatus.INCOMPLETE
+                    if transcription_failed
+                    else schemas.MessageStatus.COMPLETED,
+                    "message_metadata": {"voice_transcription_failed": True}
+                    if transcription_failed
+                    else None,
                     "run_id": run.id,
                     "thread_id": thread.id,
                     "assistant_id": thread.assistant_id
@@ -656,6 +674,8 @@ async def add_message_to_thread(
             metadata = {
                 "item_id": item_id,
             }
+            if transcription_failed:
+                metadata["voice_transcription_failed"] = "true"
             if output_index is not None:
                 metadata["output_index"] = str(output_index)
             if is_user_message:
@@ -739,6 +759,8 @@ async def enqueue_ready_thread_message_tasks(
                 role,
                 realtime_recorder=realtime_recorder,
                 output_index=output_index,
+                transcription_failed=item_id
+                in ordering_buffer.failed_transcription_item_ids,
             )
 
         await openai_task_queue.put(task)
@@ -1033,6 +1055,20 @@ async def handle_openai_events(
                     ordering_buffer.register_transcription_delta(
                         event.item_id, event.delta, "user"
                     )
+                case "conversation.item.input_audio_transcription.failed":
+                    openai_connection_logger.warning(
+                        "Realtime input transcription failed for item_id=%s.",
+                        event.item_id,
+                    )
+                    ordering_buffer.fail_transcription(event.item_id)
+                    await enqueue_ready_thread_message_tasks(
+                        ordering_buffer,
+                        openai_task_queue,
+                        openai_client,
+                        browser_connection,
+                        thread,
+                        realtime_recorder,
+                    )
                 case "response.output_audio.delta":
                     delta_audio_b64 = event.delta
                     try:
@@ -1076,7 +1112,6 @@ async def handle_openai_events(
                 case (
                     "conversation.created"
                     | "conversation.item.created"
-                    | "conversation.item.input_audio_transcription.failed"
                     | "conversation.item.retrieved"
                     | "conversation.item.truncated"
                     | "conversation.item.done"
