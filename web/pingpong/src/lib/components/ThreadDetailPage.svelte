@@ -1523,10 +1523,9 @@
 		voiceSessionEndError = null;
 		checkingMicrophoneDevices = checkingDevices;
 		audioSessionWarning = null;
-		if (socket) {
-			socket.close();
-			socket = null;
-		}
+		const sessionSocket = socket;
+		socket = null;
+		sessionSocket?.close();
 		startingAudioSession = false;
 		audioSessionStarted = false;
 		openMicrophoneModal = false;
@@ -1596,6 +1595,11 @@
 		const sessionSocket = socket;
 		let recordingStarted = false;
 
+		sessionSocket.addEventListener('close', () => {
+			if (socket !== sessionSocket || endingAudioSession) return;
+			void handleSessionEnd();
+		});
+
 		socket.addEventListener('message', async (event) => {
 			if (socket !== sessionSocket || wavStreamPlayer !== sessionPlayer || endingAudioSession)
 				return;
@@ -1612,6 +1616,9 @@
 				case 'session.expiring':
 					audioSessionWarning =
 						'The session time limit has been reached. Finishing your session...';
+					await handleSessionEnd();
+					break;
+				case 'session.ended':
 					await handleSessionEnd();
 					break;
 				case 'session.updated':

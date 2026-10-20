@@ -242,7 +242,10 @@ async def test_late_cancellation_closes_after_protected_finalization_and_commit(
 
 
 @with_user(123)
-async def test_save_confirmation_exposes_committed_history_to_another_reader(db, user):
+@pytest.mark.parametrize("stop_reason", ["browser", "provider"])
+async def test_save_confirmation_exposes_committed_history_to_another_reader(
+    db, user, stop_reason
+):
     async with db.async_session() as session:
         thread = Thread(
             version=3, tools_available="[]", user_message_ct=0, display_user_info=False
@@ -260,7 +263,11 @@ async def test_save_confirmation_exposes_committed_history_to_another_reader(db,
     original_send = browser.send_json
 
     async def send(data):
-        if data["type"] == "response.audio.delta":
+        if data["type"] == "response.audio.delta" and stop_reason == "provider":
+            connection.events.put_nowait(None)
+        if (
+            data["type"] == "response.audio.delta" and stop_reason == "browser"
+        ) or data["type"] == "session.ended":
             browser.telemetry(
                 type="response.audio.delta.started",
                 item_id="reply",

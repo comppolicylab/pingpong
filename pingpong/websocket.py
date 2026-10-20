@@ -8,7 +8,9 @@ from typing import Any, cast
 from pathlib import Path
 from urllib.parse import urlparse
 
+from openai import WebSocketConnectionClosedError
 from sqlalchemy import select
+from websockets.exceptions import ConnectionClosed
 
 from pingpong import models, schemas
 from pingpong.ai_models import get_reasoning_effort_map
@@ -26,6 +28,7 @@ from .config import config
 
 browser_connection_logger = logging.getLogger("realtime_browser")
 openai_connection_logger = logging.getLogger("realtime_openai")
+REALTIME_CONNECTION_ERRORS = (ConnectionClosed, WebSocketConnectionClosedError, OSError)
 
 VOICE_SESSION_ACTIVE_MESSAGE = (
     "This voice session is already active in another connection."
@@ -595,6 +598,7 @@ def ws_with_realtime_connection(func):
             tracing_config,
         )
         extra_headers = build_realtime_extra_headers(safety_identifier)
+        session_completed = False
         try:
             async with openai_client.realtime.connect(
                 model=assistant.model,
@@ -605,7 +609,15 @@ def ws_with_realtime_connection(func):
                 if assistant.assistant_should_message_first:
                     await realtime_connection.response.create()
                 await func(browser_connection, class_id, thread_id, *args, **kwargs)
+                session_completed = True
         except Exception as e:
+            if session_completed and isinstance(e, REALTIME_CONNECTION_ERRORS):
+                # Provider context cleanup must not roll back finalized history.
+                openai_connection_logger.warning(
+                    "Provider connection closed after voice session finalization.",
+                    exc_info=True,
+                )
+                return
             openai_connection_logger.exception(f"Error in Realtime connection: {e}")
             await browser_connection.send_json(
                 {
