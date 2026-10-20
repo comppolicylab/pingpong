@@ -11,6 +11,8 @@ from urllib.parse import urlparse
 
 from openai import WebSocketConnectionClosedError
 from sqlalchemy import select
+from starlette.requests import ClientDisconnect
+from starlette.websockets import WebSocketDisconnect, WebSocketState
 from websockets.exceptions import ConnectionClosed
 
 from pingpong import models, schemas
@@ -294,17 +296,33 @@ async def _thread_has_messages(db, thread_id: int) -> bool:
 async def _reject_realtime_session(
     browser_connection: StateWebSocket, message: str
 ) -> None:
-    await browser_connection.send_json(
-        {
-            "type": "error",
-            "error": {
-                "type": "invalid_request_error",
-                "code": "voice_session_unavailable",
-                "message": message,
-            },
-        }
-    )
-    await browser_connection.close()
+    try:
+        await browser_connection.send_json(
+            {
+                "type": "error",
+                "error": {
+                    "type": "invalid_request_error",
+                    "code": "voice_session_unavailable",
+                    "message": message,
+                },
+            }
+        )
+        await browser_connection.close()
+    except (WebSocketDisconnect, ClientDisconnect, OSError):
+        browser_connection_logger.debug(
+            "Browser disconnected while rejecting an unavailable voice session."
+        )
+    except RuntimeError:
+        if (
+            getattr(browser_connection, "application_state", None)
+            != WebSocketState.DISCONNECTED
+            and getattr(browser_connection, "client_state", None)
+            != WebSocketState.DISCONNECTED
+        ):
+            raise
+        browser_connection_logger.debug(
+            "Browser websocket already closed while rejecting an unavailable voice session."
+        )
 
 
 def ws_auth_middleware(func):
