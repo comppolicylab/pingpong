@@ -271,6 +271,9 @@ class ConversationItemOrderingBuffer:
             )
             self.next_conversation_order += 1
             self.items_by_id[item_id] = item
+        elif item.previous_item_id == self._UNSET_PREVIOUS_ITEM_ID:
+            item.conversation_order = self.next_conversation_order
+            self.next_conversation_order += 1
         else:
             self._logger.warning(
                 "Received duplicate conversation.item.added for item_id %s.",
@@ -301,13 +304,7 @@ class ConversationItemOrderingBuffer:
             )
             return
 
-        item = self._get_item(item_id=item_id)
-        if item is None:
-            self._logger.warning(
-                "Received completed transcript for unknown item_id %s before conversation.item.added.",
-                item_id,
-            )
-            return
+        item = self._get_or_create_transcript_item(item_id)
 
         if self._is_message_saved(item):
             self._logger.warning(
@@ -350,13 +347,7 @@ class ConversationItemOrderingBuffer:
             )
             return
 
-        item = self._get_item(item_id=item_id)
-        if item is None:
-            self._logger.warning(
-                "Received transcript delta for unknown item_id %s before conversation.item.added.",
-                item_id,
-            )
-            return
+        item = self._get_or_create_transcript_item(item_id)
 
         if self._is_message_saved(item):
             self._logger.warning(
@@ -412,6 +403,15 @@ class ConversationItemOrderingBuffer:
 
     def _get_item(self, item_id: str) -> ConversationChainItem | None:
         return self.items_by_id.get(item_id)
+
+    def _get_or_create_transcript_item(self, item_id: str) -> ConversationChainItem:
+        item = self._get_item(item_id)
+        if item is None:
+            # Keep early text, but leave the predecessor unresolved so it cannot
+            # dispatch until conversation.item.added supplies its chain position.
+            item = ConversationChainItem(item_id=item_id)
+            self.items_by_id[item_id] = item
+        return item
 
     def _set_item_previous_item_id(
         self, *, item: ConversationChainItem, previous_item_id: str | None
