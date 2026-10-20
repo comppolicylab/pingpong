@@ -4,7 +4,6 @@ from functools import wraps
 import inspect
 from io import BytesIO
 import logging
-import sys
 import uuid_utils as uuid
 from typing import Union
 
@@ -582,7 +581,7 @@ class RealtimeRecorder:
                 sanitize_for_log(last_assistant_response.item_id, max_len=256),
             )
 
-            if not last_assistant_response.starts_at:
+            if last_assistant_response.starts_at is None:
                 # If we don't have a start time for the last assistant response,
                 # we can't save anything.
                 # This can happen if the assistant response is not complete
@@ -669,13 +668,17 @@ class RealtimeRecorder:
             # If this is the first time we are saving the buffer,
             # set the end timestamp to start of the earliest
             # (user or assistant) audio chunk
-            if not self.end_timestamp:
+            if self.end_timestamp is None:
                 self.end_timestamp = min(
-                    assistant_responses_to_save[0].starts_at
-                    if assistant_responses_to_save[0].starts_at
-                    else sys.maxsize,
-                    user_audio_chunks_to_save[0].ends_at
-                    - len(user_audio_chunks_to_save[0].audio),
+                    [
+                        response.starts_at
+                        for response in assistant_responses_to_save
+                        if response.starts_at is not None
+                    ]
+                    + [
+                        chunk.ends_at - len(chunk.audio)
+                        for chunk in user_audio_chunks_to_save
+                    ]
                 )
 
             # Calculate how long the buffer to save is
