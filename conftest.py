@@ -1,3 +1,4 @@
+import logging
 import os
 from datetime import datetime
 from pathlib import Path
@@ -10,8 +11,10 @@ os.environ["CONFIG_PATH"] = "test_config.toml"
 
 
 def pytest_configure():
-    """Give each pytest-xdist worker its own stateful test resources."""
+    """Configure test logging and isolate each worker's stateful resources."""
     from pingpong.config import config
+
+    logging.getLogger("aiosqlite").setLevel(logging.WARNING)
 
     config.authz.host = "127.0.0.1"
     config.authz.port = 0

@@ -126,19 +126,56 @@ def test_empty_transcript_is_skipped_and_descendant_still_dispatches():
     assert _drain_ready_messages(buffer) == []
 
 
-def test_transcript_before_item_added_is_ignored(caplog: pytest.LogCaptureFixture):
+@pytest.mark.parametrize("role", ["user", "assistant"])
+def test_completed_transcript_waits_for_item_metadata(
+    role, caplog: pytest.LogCaptureFixture
+):
     logger_name = "ordering-test-before-item-added"
     buffer = ConversationItemOrderingBuffer(logging.getLogger(logger_name))
     caplog.set_level(logging.WARNING, logger=logger_name)
 
-    buffer.register_transcription("item-1", "hello", "user")
-    buffer.register_transcription_delta("item-1", "hi", "user")
-    assert buffer.items_by_id == {}
-
-    buffer.register_conversation_item("item-1", None, "user")
+    buffer.register_transcription("item-1", "hello", role)
     assert _drain_ready_messages(buffer) == []
 
-    assert "before conversation.item.added" in caplog.text
+    buffer.register_conversation_item("item-1", None, role)
+    assert _drain_ready_messages(buffer) == [("item-1", "hello", role, "0")]
+    assert _drain_ready_messages(buffer) == []
+    assert not caplog.records
+
+
+@pytest.mark.parametrize("role", ["user", "assistant"])
+@pytest.mark.parametrize("completed_text", [None, "corrected transcript"])
+def test_early_deltas_survive_item_registration(role, completed_text):
+    buffer = ConversationItemOrderingBuffer(logging.getLogger("ordering-test"))
+    buffer.register_transcription_delta("item-1", "hel", role)
+    assert _drain_ready_messages(buffer) == []
+
+    buffer.register_conversation_item("item-1", None, role)
+    buffer.register_transcription_delta("item-1", "lo", role)
+    assert _drain_ready_messages(buffer) == []
+
+    buffer.register_transcription("item-1", completed_text, role)
+    assert _drain_ready_messages(buffer) == [
+        ("item-1", completed_text or "hello", role, "0")
+    ]
+
+
+def test_early_transcripts_follow_late_predecessor_metadata():
+    buffer = ConversationItemOrderingBuffer(
+        logging.getLogger("ordering-test"), initial_output_index=7
+    )
+    buffer.register_transcription("reply", "answer", "assistant")
+    buffer.register_transcription("question", "question", "user")
+    assert _drain_ready_messages(buffer) == []
+
+    buffer.register_conversation_item("reply", "question", "assistant")
+    assert _drain_ready_messages(buffer) == []
+    buffer.register_conversation_item("question", None, "user")
+    assert _drain_ready_messages(buffer) == [
+        ("question", "question", "user", "7"),
+        ("reply", "answer", "assistant", "8"),
+    ]
+    assert _drain_ready_messages(buffer) == []
 
 
 def test_relevant_registration_sets_has_transcription_flag():
