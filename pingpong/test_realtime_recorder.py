@@ -1,3 +1,4 @@
+import asyncio
 from typing import Any
 
 import pytest
@@ -70,6 +71,45 @@ def make_recorder() -> RealtimeRecorder:
     recorder.ffmpeg = FakeFfmpeg()  # type: ignore[assignment]
     recorder.end_timestamp = 1_000
     return recorder
+
+
+@pytest.mark.parametrize("encoder_error", [False, True])
+async def test_unheard_recording_stops_writers_before_deleting(encoder_error):
+    recorder = make_recorder()
+    store = recorder.audio_store_obj
+    encoder_finished = asyncio.Event()
+    upload_finished = asyncio.Event()
+
+    async def finish_encoding():
+        assert recorder.ffmpeg.stdin.closed
+        if encoder_error:
+            raise RuntimeError("encoder failed")
+        encoder_finished.set()
+
+    async def upload():
+        try:
+            await encoder_finished.wait()
+        finally:
+            upload_finished.set()
+
+    async def delete():
+        assert upload_finished.is_set()
+        store.deleted = True
+
+    recorder.ffmpeg.wait = finish_encoding
+    store.delete_file = delete
+    recorder.upload_task = asyncio.create_task(upload())
+    # Ensure the uploader is running when shutdown begins.
+    await asyncio.sleep(0)
+    if encoder_error:
+        with pytest.raises(RuntimeError, match="encoder failed"):
+            await recorder.complete_audio_upload(has_played_audio=False)
+    else:
+        await recorder.complete_audio_upload(has_played_audio=False)
+    assert recorder.upload_task.done()
+    assert recorder.closed
+    assert store.deleted
+    assert not store.completed
 
 
 @pytest.mark.parametrize("first_start", [0, 1000])
@@ -211,7 +251,6 @@ async def test_complete_audio_upload_keeps_completed_object_on_metadata_error(
     audio_store_obj = recorder.audio_store_obj
     assert isinstance(audio_store_obj, FakeAudioStoreObject)
     recorder.session = FakeSession()  # type: ignore[assignment]
-    recorder.should_save_audio = True
     recorder.audio_duration = 1000
 
     async def fail_create_or_replace_for_thread(cls, session, data):
@@ -223,7 +262,7 @@ async def test_complete_audio_upload_keeps_completed_object_on_metadata_error(
         classmethod(fail_create_or_replace_for_thread),
     )
 
-    await recorder.complete_audio_upload()
+    await recorder.complete_audio_upload(has_played_audio=True)
 
     assert audio_store_obj.completed
     assert not audio_store_obj.deleted
@@ -279,10 +318,9 @@ async def test_recording_metadata_error_does_not_roll_back_transcript_messages(
         assert isinstance(audio_store_obj, FakeAudioStoreObject)
         recorder.session = session
         recorder.thread_id = thread.id
-        recorder.should_save_audio = True
         recorder.audio_duration = 1000
 
-        await recorder.complete_audio_upload()
+        await recorder.complete_audio_upload(has_played_audio=True)
         await session.commit()
         message_id = message.id
         thread_id = thread.id
