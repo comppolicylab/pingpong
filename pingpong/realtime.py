@@ -1749,6 +1749,34 @@ async def handle_openai_events(
                             thread,
                             realtime_recorder,
                         )
+                    if getattr(event.response, "status", None) == "failed":
+                        error = getattr(event.response.status_details, "error", None)
+                        openai_connection_logger.error(
+                            "Realtime response failed response_id=%s "
+                            "error_type=%s error_code=%s error_message=%s.",
+                            sanitize_for_log(event.response.id),
+                            sanitize_for_log(getattr(error, "type", None)),
+                            sanitize_for_log(getattr(error, "code", None)),
+                            sanitize_for_log(
+                                getattr(error, "message", None), max_len=512
+                            ),
+                        )
+                        if not (
+                            (shutdown_drain and shutdown_drain.stopping)
+                            or (session_expiry and session_expiry.stopping)
+                        ):
+                            # A failed reply is recoverable, unlike a startup error.
+                            await send_browser_event(
+                                {
+                                    "type": "error",
+                                    "error": {
+                                        "type": "server_error",
+                                        "code": "openai_realtime_response",
+                                        "message": "The assistant couldn't respond. Please try speaking to continue.",
+                                        "param": None,
+                                    },
+                                }
+                            )
                 case "response.output_audio.delta":
                     if session_expiry is not None and session_expiry.stopping:
                         continue

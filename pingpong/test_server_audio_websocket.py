@@ -1928,6 +1928,109 @@ def assistant_response_snapshot(
     )
 
 
+@pytest.mark.parametrize("shutdown", [None, "drain", "expiry"])
+@pytest.mark.parametrize("error_details", [False, True])
+async def test_failed_greeting_reports_error_and_keeps_processing(
+    caplog, shutdown, error_details
+):
+    websocket = DummyWebSocket()
+    response = {
+        "id": "failed-greeting",
+        "status": "failed",
+        "output": [],
+        "status_details": {
+            "type": "failed",
+            "error": {
+                "type": "server_error",
+                "code": "server_error",
+                "message": "Internal provider details",
+            },
+        }
+        if error_details
+        else None,
+    }
+    failure = ResponseDoneEvent.model_validate(
+        {"type": "response.done", "event_id": "failure", "response": response}
+    )
+    ordering_buffer = realtime_module.ConversationItemOrderingBuffer(
+        realtime_module.openai_connection_logger
+    )
+    drain = realtime_module.RealtimeShutdownDrain()
+    drain.stopping = shutdown == "drain"
+    expiry = realtime_module.RealtimeSessionExpiry()
+    expiry.stopping = shutdown == "expiry"
+    provider_end = Mock()
+
+    await realtime_module.handle_openai_events(
+        websocket,
+        FakeRealtimeEventStream(
+            [
+                failure,
+                SimpleNamespace(
+                    type="conversation.item.added",
+                    previous_item_id=None,
+                    item=SimpleNamespace(id="next-turn", type="message", role="user"),
+                ),
+            ]
+        ),
+        object(),
+        SimpleNamespace(id=1, version=1),
+        asyncio.Queue(),
+        realtime_module.RealtimeAssistantAudioTracker(),
+        ordering_buffer=ordering_buffer,
+        shutdown_drain=drain,
+        session_expiry=expiry,
+        on_provider_end=provider_end,
+    )
+
+    assert not websocket.closed
+    provider_end.assert_not_called()
+    assert "next-turn" in ordering_buffer.items_by_id
+    assert "Realtime response failed response_id=failed-greeting" in caplog.text
+    if error_details:
+        assert "error_code=server_error" in caplog.text
+        assert "Internal_provider_details" in caplog.text
+    assert websocket.sent_json == (
+        [
+            {
+                "type": "error",
+                "error": {
+                    "type": "server_error",
+                    "code": "openai_realtime_response",
+                    "message": "The assistant couldn't respond. Please try speaking to continue.",
+                    "param": None,
+                },
+            }
+        ]
+        if shutdown is None
+        else []
+    )
+
+
+@pytest.mark.parametrize("status", ["completed", "cancelled", "incomplete"])
+async def test_non_failed_response_does_not_report_failure(caplog, status):
+    websocket = DummyWebSocket()
+    event = ResponseDoneEvent.model_validate(
+        {
+            "type": "response.done",
+            "event_id": "finished",
+            "response": {"id": "reply", "status": status, "output": []},
+        }
+    )
+    await realtime_module.handle_openai_events(
+        websocket,
+        FakeRealtimeEventStream([event]),
+        object(),
+        SimpleNamespace(id=1, version=1),
+        asyncio.Queue(),
+        realtime_module.RealtimeAssistantAudioTracker(),
+    )
+
+    assert not websocket.closed
+    assert websocket.sent_json == []
+    assert "Realtime response failed" not in caplog.text
+
+
 @with_user(123)
 @pytest.mark.parametrize(
     "response_status", ["completed", "cancelled", "failed", "incomplete"]
