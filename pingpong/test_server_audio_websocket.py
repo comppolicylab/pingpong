@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from openai.types.realtime import ResponseDoneEvent
 from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
@@ -125,6 +126,279 @@ class FakeRealtimeEventStream:
     async def __aiter__(self):
         for event in self.events:
             yield event
+
+
+def assistant_response_snapshot(
+    status="completed", content_type="output_audio", transcript="complete answer"
+):
+    return ResponseDoneEvent.model_validate(
+        {
+            "event_id": "response-finished",
+            "type": "response.done",
+            "response": {
+                "id": "response",
+                "status": status,
+                "output": [
+                    {
+                        "id": "reply",
+                        "type": "message",
+                        "role": "assistant",
+                        "status": "completed"
+                        if status == "completed"
+                        else "incomplete",
+                        "content": [{"type": content_type, "transcript": transcript}],
+                    }
+                ],
+            },
+        }
+    )
+
+
+@with_user(123)
+@pytest.mark.parametrize(
+    "response_status", ["completed", "cancelled", "failed", "incomplete"]
+)
+@pytest.mark.parametrize("metadata_first", [False, True])
+@pytest.mark.parametrize("content_type", [None, "output_audio"])
+async def test_response_snapshot_recovers_transcript_and_unblocks_followup(
+    db, user, response_status, metadata_first, content_type
+):
+    async with db.async_session() as session:
+        thread = models.Thread(version=3, tools_available="[]", user_message_ct=0)
+        session.add(thread)
+        await session.flush()
+        websocket = DummyWebSocket()
+        websocket.state["db"] = session
+        websocket.state["session"] = SimpleNamespace(user=SimpleNamespace(id=123))
+        reply_metadata = SimpleNamespace(
+            type="conversation.item.added",
+            previous_item_id="question",
+            item=SimpleNamespace(id="reply", type="message", role="assistant"),
+        )
+        events = [
+            SimpleNamespace(
+                type="conversation.item.added",
+                previous_item_id=None,
+                item=SimpleNamespace(id="question", type="message", role="user"),
+            ),
+            SimpleNamespace(
+                type="conversation.item.input_audio_transcription.completed",
+                item_id="question",
+                transcript="question",
+            ),
+        ]
+        if metadata_first:
+            events.append(reply_metadata)
+        events.extend(
+            [
+                SimpleNamespace(
+                    type="response.output_audio_transcript.delta",
+                    item_id="reply",
+                    delta="partial",
+                ),
+                SimpleNamespace(
+                    type="conversation.item.added",
+                    previous_item_id="reply",
+                    item=SimpleNamespace(id="followup", type="message", role="user"),
+                ),
+                SimpleNamespace(
+                    type="conversation.item.input_audio_transcription.completed",
+                    item_id="followup",
+                    transcript="followup",
+                ),
+                assistant_response_snapshot(response_status, content_type),
+            ]
+        )
+        if not metadata_first:
+            events.append(reply_metadata)
+        events.append(assistant_response_snapshot(response_status, content_type))
+        queue = asyncio.Queue()
+        await realtime_module.handle_openai_events(
+            websocket,
+            FakeRealtimeEventStream(events),
+            object(),
+            thread,
+            queue,
+            realtime_module.RealtimeAssistantAudioTracker(),
+        )
+        while not queue.empty():
+            await (await queue.get())()
+        messages = (
+            await session.scalars(
+                select(models.Message)
+                .where(models.Message.thread_id == thread.id)
+                .order_by(models.Message.output_index)
+                .options(selectinload(models.Message.content))
+            )
+        ).all()
+        assert [message.message_id for message in messages] == [
+            "question",
+            "reply",
+            "followup",
+        ]
+        assert [message.output_index for message in messages] == [0, 1, 2]
+        assert messages[1].content[0].text == "complete answer"
+        assert messages[1].message_status == schemas.MessageStatus.COMPLETED
+        assert not messages[1].message_metadata
+
+
+@pytest.mark.parametrize("user_complete_first", [False, True])
+@pytest.mark.parametrize("snapshot_first", [False, True])
+async def test_response_snapshot_and_transcript_completion_are_idempotent(
+    monkeypatch, caplog, user_complete_first, snapshot_first
+):
+    save = AsyncMock()
+    monkeypatch.setattr(realtime_module, "add_message_to_thread", save)
+    user_completion = SimpleNamespace(
+        type="conversation.item.input_audio_transcription.completed",
+        item_id="question",
+        transcript="question",
+    )
+    transcript_completion = SimpleNamespace(
+        type="response.output_audio_transcript.done",
+        item_id="reply",
+        transcript="complete answer",
+    )
+    events = [
+        SimpleNamespace(
+            type="conversation.item.added",
+            previous_item_id=None,
+            item=SimpleNamespace(id="question", type="message", role="user"),
+        ),
+        SimpleNamespace(
+            type="conversation.item.added",
+            previous_item_id="question",
+            item=SimpleNamespace(id="reply", type="message", role="assistant"),
+        ),
+    ]
+    if user_complete_first:
+        events.append(user_completion)
+    terminal_events = [assistant_response_snapshot("cancelled"), transcript_completion]
+    events.extend(terminal_events if snapshot_first else reversed(terminal_events))
+    events.append(assistant_response_snapshot("cancelled"))
+    if not user_complete_first:
+        events.append(user_completion)
+    queue = asyncio.Queue()
+    await realtime_module.handle_openai_events(
+        DummyWebSocket(),
+        FakeRealtimeEventStream(events),
+        object(),
+        SimpleNamespace(id=1, version=1),
+        queue,
+        realtime_module.RealtimeAssistantAudioTracker(),
+    )
+    while not queue.empty():
+        await (await queue.get())()
+    assert [call.args[3] for call in save.await_args_list] == ["question", "reply"]
+    assert save.await_args_list[1].args[4] == "complete answer"
+    assert save.await_args_list[1].kwargs["transcription_failed"] is False
+    assert "already-saved" not in caplog.text
+    assert "already-complete" not in caplog.text
+
+
+@pytest.mark.parametrize(
+    "output",
+    [
+        None,
+        [],
+        [
+            {
+                "id": "reply",
+                "type": "function_call",
+                "call_id": "call",
+                "name": "tool",
+                "arguments": "{}",
+            }
+        ],
+        [
+            {
+                "id": "reply",
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": "not an audio transcript"}],
+            }
+        ],
+    ],
+)
+async def test_response_snapshot_without_audio_text_keeps_waiting(monkeypatch, output):
+    save = AsyncMock()
+    monkeypatch.setattr(realtime_module, "add_message_to_thread", save)
+    events = [
+        SimpleNamespace(
+            type="conversation.item.added",
+            previous_item_id=None,
+            item=SimpleNamespace(id="reply", type="message", role="assistant"),
+        ),
+        SimpleNamespace(
+            type="response.output_audio_transcript.delta",
+            item_id="reply",
+            delta="partial",
+        ),
+        ResponseDoneEvent.model_validate(
+            {
+                "type": "response.done",
+                "event_id": "empty-snapshot",
+                "response": {"id": "response", "status": "completed", "output": output},
+            }
+        ),
+        assistant_response_snapshot(),
+    ]
+    queue = asyncio.Queue()
+    await realtime_module.handle_openai_events(
+        DummyWebSocket(),
+        FakeRealtimeEventStream(events),
+        object(),
+        SimpleNamespace(id=1, version=1),
+        queue,
+        realtime_module.RealtimeAssistantAudioTracker(),
+    )
+    while not queue.empty():
+        await (await queue.get())()
+    save.assert_awaited_once()
+    assert save.await_args.args[4] == "complete answer"
+
+
+@pytest.mark.parametrize("snapshot_text", ["", " \t\n"])
+@pytest.mark.parametrize("partial_text", [None, "partial answer"])
+async def test_blank_response_snapshot_preserves_buffered_delta_text(
+    monkeypatch, snapshot_text, partial_text
+):
+    enqueue = AsyncMock(wraps=realtime_module.enqueue_ready_thread_message_tasks)
+    monkeypatch.setattr(realtime_module, "enqueue_ready_thread_message_tasks", enqueue)
+    snapshot = assistant_response_snapshot("cancelled", transcript=snapshot_text)
+    events = [
+        SimpleNamespace(
+            type="conversation.item.added",
+            previous_item_id=None,
+            item=SimpleNamespace(id="reply", type="message", role="assistant"),
+        )
+    ]
+    if partial_text:
+        events.append(
+            SimpleNamespace(
+                type="response.output_audio_transcript.delta",
+                item_id="reply",
+                delta=partial_text,
+            )
+        )
+    events.append(snapshot)
+    queue = asyncio.Queue()
+    await realtime_module.handle_openai_events(
+        DummyWebSocket(),
+        FakeRealtimeEventStream(events),
+        object(),
+        SimpleNamespace(id=1, version=1),
+        queue,
+        realtime_module.RealtimeAssistantAudioTracker(),
+    )
+    buffer = enqueue.await_args_list[0].kwargs["ordering_buffer"]
+    assert queue.empty()
+    if partial_text:
+        assert buffer.items_by_id["reply"].transcription_text == partial_text
+        assert not buffer.has_completed_transcription("reply")
+        assert enqueue.await_count == 1  # Only item registration changed readiness.
+    else:
+        assert buffer.has_completed_transcription("reply")
 
 
 @with_user(123)
