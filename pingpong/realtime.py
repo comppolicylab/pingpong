@@ -371,6 +371,12 @@ class ConversationItemOrderingBuffer:
             item.role = role
         self._mark_item_and_descendants_for_readiness(item.item_id)
 
+    def has_completed_transcription(self, item_id: str) -> bool:
+        item = self._get_item(item_id)
+        return item_id in self.pruned_saved_item_ids or bool(
+            item and item.is_transcription_complete
+        )
+
     def fail_transcription(self, item_id: str) -> None:
         if item_id in self.pruned_saved_item_ids:
             return
@@ -990,6 +996,8 @@ async def handle_openai_events(
                         realtime_recorder=realtime_recorder,
                     )
                 case "response.output_audio_transcript.done":
+                    if ordering_buffer.has_completed_transcription(event.item_id):
+                        continue
                     ordering_buffer.register_transcription(
                         event.item_id, event.transcript, "assistant"
                     )
@@ -1069,6 +1077,40 @@ async def handle_openai_events(
                         thread,
                         realtime_recorder,
                     )
+                case "response.done":
+                    # The final snapshot can supply text when transcript.done was
+                    # missed. Replayed snapshots must not duplicate completed items.
+                    for item in event.response.output or []:
+                        item_id = getattr(item, "id", None)
+                        if (
+                            not item_id
+                            or getattr(item, "role", None) != "assistant"
+                            or getattr(item, "type", None) != "message"
+                            or ordering_buffer.has_completed_transcription(item_id)
+                        ):
+                            continue
+                        transcripts = []
+                        for content in getattr(item, "content", None) or []:
+                            if getattr(content, "type", None) in {
+                                None,
+                                "audio",
+                                "output_audio",
+                            }:
+                                transcript = getattr(content, "transcript", None)
+                                if transcript is not None:
+                                    transcripts.append(transcript)
+                        if transcripts:
+                            ordering_buffer.register_transcription(
+                                item_id, "".join(transcripts), "assistant"
+                            )
+                    await enqueue_ready_thread_message_tasks(
+                        ordering_buffer,
+                        openai_task_queue,
+                        openai_client,
+                        browser_connection,
+                        thread,
+                        realtime_recorder,
+                    )
                 case "response.output_audio.delta":
                     delta_audio_b64 = event.delta
                     try:
@@ -1120,7 +1162,6 @@ async def handle_openai_events(
                     | "input_audio_buffer.cleared"
                     | "input_audio_buffer.speech_stopped"
                     | "response.created"
-                    | "response.done"
                     | "response.output_item.added"
                     | "response.output_item.done"
                     | "response.content_part.added"
