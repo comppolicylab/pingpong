@@ -4,7 +4,9 @@ import base64
 from collections import deque
 import json
 import logging
+import math
 import struct
+import time
 from dataclasses import dataclass
 from heapq import heappop, heappush
 from typing import Awaitable, Callable, Literal, cast
@@ -51,6 +53,75 @@ ConversationRole = Literal["user", "assistant"]
 VoicePlaybackOutcome = Literal["completed", "interrupted", "discarded", "unknown"]
 UNSET_PREVIOUS_ITEM_ID = "__UNSET_PREVIOUS_ITEM_ID__"
 BROWSER_DISCONNECT_DRAIN_SECONDS = 5.0
+REALTIME_SESSION_MAX_SECONDS = 60 * 60
+REALTIME_EXPIRY_MARGIN_SECONDS = 60.0
+BROWSER_EXPIRY_STOP_SECONDS = 5.0
+REALTIME_EXPIRY_WARNING_SECONDS = (5 * 60, 60)
+EXPIRY_WARNING_SEND_SECONDS = 1.0
+
+
+class RealtimeSessionExpiry:
+    def __init__(self):
+        self.stopping = False
+        self.deadline = (
+            asyncio.get_running_loop().time()
+            + REALTIME_SESSION_MAX_SECONDS
+            - REALTIME_EXPIRY_MARGIN_SECONDS
+        )
+        self._changed = asyncio.Event()
+
+    def observe(self, session) -> None:
+        expires_at = getattr(session, "expires_at", None)
+        if (
+            isinstance(expires_at, (int, float))
+            and not isinstance(expires_at, bool)
+            and math.isfinite(expires_at)
+        ):
+            # Convert epoch time once; later wall-clock changes must not move
+            # the deadline. Updates can shorten, but never extend, the session.
+            self.deadline = min(
+                self.deadline,
+                asyncio.get_running_loop().time()
+                + expires_at
+                - time.time()
+                - REALTIME_EXPIRY_MARGIN_SECONDS,
+            )
+            self._changed.set()
+
+    async def wait(
+        self, on_warning: Callable[[int], Awaitable[None]] | None = None
+    ) -> None:
+        warnings = set(REALTIME_EXPIRY_WARNING_SECONDS) if on_warning else set()
+        while True:
+            self._changed.clear()
+            remaining = self.deadline - asyncio.get_running_loop().time()
+            if remaining <= 0:
+                self.stopping = True
+                return
+            due = [seconds for seconds in warnings if remaining <= seconds]
+            if due:
+                # If the deadline moves earlier, send only the most urgent
+                # warning rather than a burst of obsolete notices.
+                warnings.difference_update(due)
+                try:
+                    async with asyncio.timeout(
+                        min(EXPIRY_WARNING_SEND_SECONDS, remaining)
+                    ):
+                        if on_warning is not None:
+                            await on_warning(math.ceil(remaining))
+                except Exception:
+                    # An optional warning must never end the conversation or
+                    # leave the expiry timer stuck behind a browser send.
+                    browser_connection_logger.debug(
+                        "Could not deliver voice expiry warning.", exc_info=True
+                    )
+                continue
+            delay = remaining - max(warnings) if warnings else remaining
+            try:
+                async with asyncio.timeout(delay):
+                    await self._changed.wait()
+            except TimeoutError:
+                continue
 
 
 class RealtimeShutdownDrain:
@@ -1213,6 +1284,7 @@ async def handle_browser_messages(
     *,
     close_on_cancel: bool = True,
     on_playback_settled: Callable[[str], Awaitable[None]] | None = None,
+    session_expiry: RealtimeSessionExpiry | None = None,
 ):
     try:
         while True:
@@ -1358,6 +1430,8 @@ async def handle_browser_messages(
                         f"Failed to decode unexpected message JSON: {e}"
                     )
             elif "bytes" in message:
+                if session_expiry is not None and session_expiry.stopping:
+                    continue
                 buffer = message["bytes"]
 
                 timestamp_size = 8
@@ -1401,6 +1475,7 @@ async def handle_openai_events(
     realtime_recorder: RealtimeRecorder | None = None,
     ordering_buffer: ConversationItemOrderingBuffer | None = None,
     shutdown_drain: RealtimeShutdownDrain | None = None,
+    session_expiry: RealtimeSessionExpiry | None = None,
 ):
     initial_output_index = 0
     if thread.version == 3:
@@ -1427,6 +1502,17 @@ async def handle_openai_events(
     async def send_browser_event(data: dict, *, close: bool = False) -> None:
         nonlocal browser_delivery_available
         if not browser_delivery_available:
+            return
+        if (
+            session_expiry is not None
+            and session_expiry.stopping
+            and data["type"]
+            in {
+                "session.updated",
+                "response.audio.delta",
+                "input_audio_buffer.speech_started",
+            }
+        ):
             return
         try:
             await browser_connection.send_json(data)
@@ -1508,10 +1594,14 @@ async def handle_openai_events(
                         event.item_id, event.delta, "assistant"
                     )
                 case "session.created":
+                    if session_expiry is not None:
+                        session_expiry.observe(event.session)
                     openai_connection_logger.debug(
                         f"Session successfully created: {event.session}"
                     )
                 case "session.updated":
+                    if session_expiry is not None:
+                        session_expiry.observe(event.session)
                     openai_connection_logger.debug(
                         f"Session successfully updated: {event.session}"
                     )
@@ -1629,6 +1719,8 @@ async def handle_openai_events(
                             realtime_recorder,
                         )
                 case "response.output_audio.delta":
+                    if session_expiry is not None and session_expiry.stopping:
+                        continue
                     if assistant_audio_tracker.is_item_playback_settled(event.item_id):
                         continue
                     delta_audio_b64 = event.delta
@@ -1766,6 +1858,7 @@ async def browser_realtime_websocket(
     openai_task_queue: NamedQueue = NamedQueue("openai_task_queue")
     assistant_audio_tracker = RealtimeAssistantAudioTracker()
     shutdown_drain = RealtimeShutdownDrain()
+    session_expiry = RealtimeSessionExpiry()
     ordering_buffer = ConversationItemOrderingBuffer(
         openai_connection_logger, assistant_audio_tracker=assistant_audio_tracker
     )
@@ -1812,12 +1905,52 @@ async def browser_realtime_websocket(
             realtime_recorder,
             close_on_cancel=False,
             on_playback_settled=on_playback_settled,
+            session_expiry=session_expiry,
         )
     )
 
     async def wait_for_browser_disconnect_drain():
-        # asyncio.wait does not cancel browser_task when this watcher is cancelled.
-        await asyncio.wait({browser_task})
+        async def warn_browser(seconds_remaining: int) -> None:
+            await browser_connection.send_json(
+                {
+                    "type": "session.expiry_warning",
+                    "seconds_remaining": seconds_remaining,
+                }
+            )
+
+        expiry_task = asyncio.create_task(session_expiry.wait(warn_browser))
+        try:
+            # Keep the browser reader alive for the final played offsets, even
+            # after microphone input and new playback have been cut off.
+            await asyncio.wait(
+                {browser_task, expiry_task}, return_when=asyncio.FIRST_COMPLETED
+            )
+            if not browser_task.done():
+                openai_connection_logger.info(
+                    "Ending voice session before provider expiry."
+                )
+                try:
+                    async with asyncio.timeout(BROWSER_EXPIRY_STOP_SECONDS):
+                        await browser_connection.send_json({"type": "session.expiring"})
+                        await asyncio.wait({browser_task})
+                except (TimeoutError, WebSocketDisconnect, ClientDisconnect, OSError):
+                    browser_connection_logger.debug(
+                        "Browser did not finish the expiry shutdown handshake."
+                    )
+                except RuntimeError:
+                    if (
+                        getattr(browser_connection, "application_state", None)
+                        != WebSocketState.DISCONNECTED
+                        and getattr(browser_connection, "client_state", None)
+                        != WebSocketState.DISCONNECTED
+                    ):
+                        raise
+                if not browser_task.done():
+                    browser_task.cancel()
+                    await asyncio.wait({browser_task})
+        finally:
+            expiry_task.cancel()
+            await asyncio.gather(expiry_task, return_exceptions=True)
         await shutdown_drain.wait(realtime_connection, ordering_buffer)
 
     realtime_tasks: list[asyncio.Task] = [
@@ -1832,6 +1965,7 @@ async def browser_realtime_websocket(
                 realtime_recorder,
                 ordering_buffer=ordering_buffer,
                 shutdown_drain=shutdown_drain,
+                session_expiry=session_expiry,
             )
         ),
         asyncio.create_task(wait_for_browser_disconnect_drain()),

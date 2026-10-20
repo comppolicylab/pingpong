@@ -50,6 +50,7 @@
 		CheckOutline,
 		ServerOutline,
 		MicrophoneSlashOutline,
+		ClockOutline,
 		UsersSolid,
 		LinkOutline
 	} from 'flowbite-svelte-icons';
@@ -1375,6 +1376,7 @@
 	let socket: WebSocket | null = null;
 	let startingAudioSession = false;
 	let audioSessionStarted = false;
+	let audioSessionWarning: string | null = null;
 
 	const sendRealtimeBinary = (payload: ArrayBuffer): boolean => {
 		if (!socket || socket.readyState !== WebSocket.OPEN) {
@@ -1416,7 +1418,7 @@
 	 * @param data.mono The mono audio data.
 	 */
 	const chunkProcessor = (data: { raw: ArrayBuffer; mono: ArrayBuffer }) => {
-		if (!audioSessionStarted) {
+		if (!audioSessionStarted || endingAudioSession) {
 			return;
 		}
 		const audio = new Uint8Array(data.mono);
@@ -1470,6 +1472,7 @@
 	 * This function closes the WebSocket connection and resets the state of the audio session.
 	 */
 	const resetAudioSession = async () => {
+		audioSessionWarning = null;
 		if (socket) {
 			socket.close();
 			socket = null;
@@ -1497,6 +1500,7 @@
 		if (startingAudioSession) {
 			return;
 		}
+		audioSessionWarning = null;
 		startingAudioSession = true;
 		if (!wavRecorder) {
 			sadToast('We failed to start the session. Please try again.');
@@ -1515,12 +1519,26 @@
 		socket.binaryType = 'arraybuffer';
 		const sessionSocket = socket;
 		const sessionPlayer = wavStreamPlayer;
+		const sessionRecorder = wavRecorder;
 
 		socket.addEventListener('message', async (event) => {
 			if (socket !== sessionSocket || wavStreamPlayer !== sessionPlayer || endingAudioSession)
 				return;
 			const message = JSON.parse(event.data);
 			switch (message.type) {
+				case 'session.expiry_warning': {
+					const seconds = message.seconds_remaining;
+					if (!Number.isInteger(seconds) || seconds <= 0) break;
+					const amount = seconds >= 60 ? Math.ceil(seconds / 60) : seconds;
+					const unit = seconds >= 60 ? 'minute' : 'second';
+					audioSessionWarning = `This voice session will end within ${amount} ${unit}${amount === 1 ? '' : 's'}. Please wrap up your conversation.`;
+					break;
+				}
+				case 'session.expiring':
+					audioSessionWarning =
+						'The session time limit has been reached. Finishing your session...';
+					await handleSessionEnd();
+					break;
 				case 'session.updated':
 					if (!wavRecorder) {
 						sadToast('We failed to start the session. Please try again.');
@@ -1531,8 +1549,9 @@
 						return;
 					}
 					try {
-						await wavRecorder.begin(selectedAudioDevice.deviceId);
+						await sessionRecorder.begin(selectedAudioDevice.deviceId);
 					} catch (error) {
+						if (socket !== sessionSocket || endingAudioSession) return;
 						if (error instanceof Error && error.message === AUDIO_WORKLET_UNSUPPORTED_MESSAGE) {
 							sadToast(
 								'Voice mode is unavailable in this browser or LMS iframe. Please use the latest Chrome, Edge, or Safari.'
@@ -1545,7 +1564,17 @@
 						await resetAudioSession();
 						return;
 					}
-					await wavRecorder.record(chunkProcessor);
+					if (socket !== sessionSocket || endingAudioSession) {
+						await endingAudioSessionWork;
+						await sessionRecorder.quit();
+						return;
+					}
+					await sessionRecorder.record(chunkProcessor);
+					if (socket !== sessionSocket || endingAudioSession) {
+						await endingAudioSessionWork;
+						await sessionRecorder.quit();
+						return;
+					}
 					startingAudioSession = false;
 					audioSessionStarted = true;
 					break;
@@ -1604,14 +1633,20 @@
 	};
 
 	let endingAudioSession = false;
+	let endingAudioSessionWork: Promise<void> | null = null;
 	/**
 	 * Handle session end.
 	 */
-	const handleSessionEnd = async () => {
+	const handleSessionEnd = () => {
 		if (endingAudioSession) {
-			return;
+			return endingAudioSessionWork;
 		}
 		endingAudioSession = true;
+		endingAudioSessionWork = finishAudioSession();
+		return endingAudioSessionWork;
+	};
+
+	const finishAudioSession = async () => {
 		try {
 			if (wavStreamPlayer) {
 				try {
@@ -1643,6 +1678,8 @@
 			openMicrophoneModal = false;
 			microphoneAccess = false;
 			endingAudioSession = false;
+			endingAudioSessionWork = null;
+			audioSessionWarning = null;
 		}
 	};
 
@@ -2463,6 +2500,15 @@
 										>your full name, and listen to a recording of your conversation</span
 									>.</span
 								>
+							</div>
+						{/if}
+						{#if audioSessionWarning && (audioSessionStarted || startingAudioSession || endingAudioSession)}
+							<div
+								class="my-5 flex max-w-sm flex-col items-center justify-center gap-1 rounded-2xl border border-amber-600 px-3 py-2 text-center"
+								role="status"
+							>
+								<ClockOutline class="h-10 w-10 text-amber-600" />
+								<span class="text-sm font-normal text-gray-700">{audioSessionWarning}</span>
 							</div>
 						{/if}
 						<div class="flex w-full justify-center">
