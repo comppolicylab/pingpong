@@ -17,6 +17,78 @@ def _drain_ready_messages(buffer: ConversationItemOrderingBuffer):
         ready_messages.append(next_message)
 
 
+@pytest.mark.parametrize("end_first", [False, True])
+@pytest.mark.parametrize("retire_before_playback", [None, "audio_done", "truncate"])
+async def test_confirmed_playback_survives_generation_and_duration_cleanup(
+    end_first, retire_before_playback
+):
+    tracker = RealtimeAssistantAudioTracker()
+    await tracker.add_audio_delta("heard", "event-1", b"\0" * 480)
+    await tracker.add_audio_delta("unheard", "event-2", b"\0" * 480)
+    assert not tracker.has_played_audio
+    assert not tracker.has_item_played_audio("heard")
+    if retire_before_playback == "audio_done":
+        await tracker.mark_item_audio_done("heard")
+    elif retire_before_playback == "truncate":
+        await tracker.forget_item("heard")
+
+    callbacks = [
+        tracker.mark_audio_event_playback_started,
+        tracker.mark_audio_event_playback_ended,
+    ]
+    if end_first:
+        callbacks.reverse()
+    for callback in callbacks:
+        assert await callback("heard", "event-1")
+        assert not await callback("heard", "event-1")
+        assert tracker.has_played_audio
+        assert tracker.has_item_played_audio("heard")
+        assert not tracker.has_item_played_audio("unheard")
+        if end_first:
+            # A late start must still be recognized after generated-duration
+            # bookkeeping has been retired by the provider-done event.
+            await tracker.mark_item_audio_done("heard")
+    await tracker.mark_item_audio_done("heard")
+    await tracker.forget_item("heard")
+    assert tracker.has_played_audio
+    assert tracker.has_item_played_audio("heard")
+
+
+@pytest.mark.parametrize(
+    "callback", ["mark_audio_event_playback_started", "mark_audio_event_playback_ended"]
+)
+@pytest.mark.parametrize(
+    "item_id,event_id",
+    [
+        ("unknown", "event-1"),
+        ("known", "unknown"),
+        ("another", "event-1"),
+        (None, "event-1"),
+        ("known", None),
+        ([], "event-1"),
+        ("known", {}),
+    ],
+)
+async def test_unknown_or_malformed_audio_events_do_not_qualify_playback(
+    callback, item_id, event_id
+):
+    tracker = RealtimeAssistantAudioTracker()
+    await tracker.add_audio_delta("known", "event-1", b"\0" * 480)
+    await tracker.add_audio_delta("another", "event-2", b"\0" * 480)
+    assert not await getattr(tracker, callback)(item_id, event_id)
+    assert not tracker.has_played_audio
+
+
+@pytest.mark.parametrize("audio", [b"", b"\0"])
+async def test_empty_audio_event_does_not_qualify_playback_after_nonempty_audio(audio):
+    tracker = RealtimeAssistantAudioTracker()
+    await tracker.add_audio_delta("known", "event-1", b"\0" * 480)
+    await tracker.add_audio_delta("known", "empty", audio)
+    assert not await tracker.mark_audio_event_playback_started("known", "empty")
+    assert not await tracker.mark_audio_event_playback_ended("known", "empty")
+    assert not tracker.has_played_audio
+
+
 @pytest.mark.asyncio
 async def test_assistant_audio_tracker_clamps_to_generated_duration():
     tracker = RealtimeAssistantAudioTracker()

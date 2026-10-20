@@ -87,8 +87,14 @@ class ConversationChainItem:
     role: ConversationRole | None = None
 
 
+@dataclass
+class _AssistantAudioPlaybackEvent:
+    started: bool = False
+    ended: bool = False
+
+
 class RealtimeAssistantAudioTracker:
-    """Tracks generated assistant audio duration while playback can be truncated."""
+    """Tracks generated duration and browser-confirmed playback independently."""
 
     _BYTES_PER_FRAME = AUDIO_SAMPLE_WIDTH * AUDIO_CHANNELS
 
@@ -97,6 +103,17 @@ class RealtimeAssistantAudioTracker:
         self._sample_counts_by_item_id: dict[str, int] = {}
         self._event_end_sample_counts_by_item_id: dict[str, dict[str, int]] = {}
         self._audio_done_item_ids: set[str] = set()
+        self._playback_events_by_item_id: dict[
+            str, dict[str, _AssistantAudioPlaybackEvent]
+        ] = {}
+        self._played_item_ids: set[str] = set()
+
+    @property
+    def has_played_audio(self) -> bool:
+        return bool(self._played_item_ids)
+
+    def has_item_played_audio(self, item_id: str) -> bool:
+        return item_id in self._played_item_ids
 
     async def add_audio_delta(
         self,
@@ -117,6 +134,10 @@ class RealtimeAssistantAudioTracker:
                 self._event_end_sample_counts_by_item_id.setdefault(item_id, {})[
                     event_id
                 ] = item_sample_count
+                if sample_count > 0:
+                    self._playback_events_by_item_id.setdefault(item_id, {}).setdefault(
+                        event_id, _AssistantAudioPlaybackEvent()
+                    )
             browser_connection_logger.debug(
                 "Tracked realtime assistant audio delta item_id=%s event_id=%s "
                 "delta_samples=%s total_duration_ms=%s.",
@@ -128,23 +149,66 @@ class RealtimeAssistantAudioTracker:
                 ),
             )
 
-    async def mark_audio_event_playback_ended(
+    async def mark_audio_event_playback_started(
         self, item_id: str | None, event_id: str | None
-    ) -> None:
-        if not item_id or not event_id:
-            return
+    ) -> bool:
+        if (
+            not isinstance(item_id, str)
+            or not isinstance(event_id, str)
+            or not item_id
+            or not event_id
+        ):
+            return False
 
         async with self._lock:
+            return self._mark_playback_event(item_id, event_id, ended=False)
+
+    async def mark_audio_event_playback_ended(
+        self, item_id: str | None, event_id: str | None
+    ) -> bool:
+        if (
+            not isinstance(item_id, str)
+            or not isinstance(event_id, str)
+            or not item_id
+            or not event_id
+        ):
+            return False
+
+        async with self._lock:
+            accepted = self._mark_playback_event(item_id, event_id, ended=True)
             event_sample_counts = self._event_end_sample_counts_by_item_id.get(item_id)
             if event_sample_counts is None:
-                return
+                return accepted
 
             event_sample_counts.pop(event_id, None)
             if event_sample_counts:
-                return
+                return accepted
 
             self._event_end_sample_counts_by_item_id.pop(item_id, None)
             self._forget_item_if_audio_is_done(item_id)
+            return accepted
+
+    def _mark_playback_event(self, item_id: str, event_id: str, *, ended: bool) -> bool:
+        # Called under _lock. Keep pending callbacks independent of duration
+        # cleanup: browser telemetry may arrive after generation or truncation.
+        events = self._playback_events_by_item_id.get(item_id)
+        event = events.get(event_id) if events is not None else None
+        if event is None:
+            return False
+        if ended:
+            if event.ended:
+                return False
+            event.ended = True
+        else:
+            if event.started:
+                return False
+            event.started = True
+        self._played_item_ids.add(item_id)
+        if event.started and event.ended:
+            del self._playback_events_by_item_id[item_id][event_id]
+            if not self._playback_events_by_item_id[item_id]:
+                del self._playback_events_by_item_id[item_id]
+        return True
 
     async def mark_item_audio_done(self, item_id: str | None) -> None:
         if not item_id:
@@ -897,30 +961,31 @@ async def handle_browser_messages(
                                 final_duration_ms=audio_end_ms,
                             )
                     elif type == "response.audio.delta.started":
-                        if not realtime_recorder:
-                            continue
                         item_id = data.get("item_id")
                         event_id = data.get("event_id")
                         started_playing_at_ms = data.get("started_playing_at")
                         if (
-                            item_id is None
-                            or event_id is None
-                            or started_playing_at_ms is None
+                            not isinstance(item_id, str)
+                            or not isinstance(event_id, str)
+                            or not item_id
+                            or not event_id
+                            or not isinstance(started_playing_at_ms, int)
+                            or isinstance(started_playing_at_ms, bool)
+                            or started_playing_at_ms < 0
                         ):
-                            browser_connection_logger.exception(
-                                "Received response.audio.delta.started message without item_id, event_id, or started_playing_at: %s",
-                                sanitize_for_log(
-                                    json.dumps(data, sort_keys=True), max_len=512
-                                ),
+                            browser_connection_logger.warning(
+                                "Received invalid response.audio.delta.started metadata."
                             )
                             continue
-                        await (
-                            realtime_recorder.started_playing_assistant_response_delta(
+                        await assistant_audio_tracker.mark_audio_event_playback_started(
+                            item_id, event_id
+                        )
+                        if realtime_recorder:
+                            await realtime_recorder.started_playing_assistant_response_delta(
                                 item_id=item_id,
                                 event_id=event_id,
                                 started_playing_at_ms=started_playing_at_ms,
                             )
-                        )
                     elif type == "response.audio.delta.ended":
                         item_id = data.get("item_id")
                         event_id = data.get("event_id")
