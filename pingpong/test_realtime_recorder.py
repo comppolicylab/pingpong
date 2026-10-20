@@ -1,4 +1,7 @@
 import asyncio
+import shutil
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 from typing import Any
 
 import pytest
@@ -6,7 +9,11 @@ from sqlalchemy import select
 
 from pingpong import models, schemas
 from pingpong.models import VoiceModeRecording
-from pingpong.realtime_recorder import RealtimeRecorder, make_audio_recording_id
+from pingpong.realtime_recorder import (
+    RealtimeRecorder,
+    VoiceRecordingHealth,
+    make_audio_recording_id,
+)
 
 
 ONE_SECOND_PCM16 = b"\0" * 48_000
@@ -16,6 +23,7 @@ class FakeFfmpegStdin:
     def __init__(self):
         self.writes: list[bytes] = []
         self.closed = False
+        self.on_close = lambda: None
 
     def write(self, data: bytes) -> None:
         self.writes.append(data)
@@ -24,15 +32,35 @@ class FakeFfmpegStdin:
         pass
 
     def close(self) -> None:
+        if self.closed:
+            return
         self.closed = True
+        self.on_close()
 
 
 class FakeFfmpeg:
     def __init__(self):
         self.stdin = FakeFfmpegStdin()
+        self.returncode = None
+        self.exited = asyncio.Event()
+        self.stdin.on_close = lambda: self.exit(0)
 
-    async def wait(self) -> None:
-        pass
+    def exit(self, code):
+        if self.returncode is None:
+            self.returncode = code
+        self.exited.set()
+
+    def kill(self):
+        self.exit(-9)
+
+    async def wait(self):
+        await self.exited.wait()
+        return self.returncode
+
+    async def communicate(self):
+        self.stdin.close()
+        await self.wait()
+        return b"", b""
 
 
 class FakeAudioStoreObject:
@@ -73,6 +101,225 @@ def make_recorder() -> RealtimeRecorder:
     return recorder
 
 
+async def test_health_flags_and_first_failure_details_are_sticky(db):
+    health = VoiceRecordingHealth()
+    health.fail(
+        "recording", "save_buffer", BrokenPipeError(32, "secret URL"), "first.webm", 1
+    )
+    first = health.details["recording"].copy()
+    health.fail("recording", "cleanup", RuntimeError("later error"), "first.webm", 1)
+    health.fail("upload", "upload_part", OSError(5, "secret URL"), "first.webm", 1)
+    async with db.async_session() as session:
+        thread = models.Thread(thread_id="health-flags", version=3)
+        session.add(thread)
+        await session.flush()
+        assert thread.recording_issue is False
+        assert thread.upload_issue is False
+        await health.persist(session, thread.id)
+        await session.commit()
+        thread_id = thread.id
+
+    later = VoiceRecordingHealth()
+    later.fail(
+        "recording",
+        "later_attempt",
+        ValueError("another secret"),
+        "later.webm",
+        thread_id,
+    )
+    async with db.async_session() as session:
+        await later.persist(session, thread_id)
+        await VoiceRecordingHealth().persist(session, thread_id)
+        await session.commit()
+    async with db.async_session() as session:
+        thread = await session.get(models.Thread, thread_id)
+        assert thread.recording_issue and thread.upload_issue
+        assert thread.recording_issue_details == first
+        assert thread.recording_issue_details["error_code"] == 32
+        assert thread.upload_issue_details["phase"] == "upload_part"
+        assert "secret" not in str(thread.recording_issue_details)
+        assert not (await session.scalars(select(VoiceModeRecording))).all()
+
+
+@pytest.mark.parametrize("stage", ["upload", "encoder"])
+async def test_recording_startup_failure_returns_without_recording(monkeypatch, stage):
+    health = VoiceRecordingHealth()
+    store = FakeAudioStoreObject()
+    create_upload = AsyncMock(return_value=store)
+    if stage == "upload":
+        create_upload.side_effect = OSError(5, "storage unavailable")
+    monkeypatch.setattr(
+        "pingpong.realtime_recorder.config.audio_store.store.create_upload",
+        create_upload,
+    )
+    monkeypatch.setattr(
+        asyncio,
+        "create_subprocess_exec",
+        AsyncMock(side_effect=FileNotFoundError("ffmpeg")),
+    )
+    recorder = await RealtimeRecorder.create(1, "thread", None, health=health)
+    assert recorder is None
+    assert health.upload_issue == (stage == "upload")
+    assert health.recording_issue == (stage == "encoder")
+    assert store.deleted == (stage == "encoder")
+
+
+@pytest.mark.parametrize("phase", ["write", "exit", "input"])
+async def test_recording_failure_disables_buffers_and_reaps_worker(phase):
+    recorder = make_recorder()
+    ffmpeg = cast_fake_ffmpeg(recorder.ffmpeg)
+    worker = asyncio.create_task(recorder.handle_saving_buffer(every=60))
+    try:
+        await recorder.add_user_audio(ONE_SECOND_PCM16, 2_000)
+        await recorder.add_assistant_response_delta(ONE_SECOND_PCM16, "part", "reply")
+        await recorder.started_playing_assistant_response_delta("reply", "part", 1_000)
+        if phase == "exit":
+            ffmpeg.exit(7)
+        elif phase == "input":
+            await recorder.add_user_audio(b"\0", 2_000)
+        else:
+            ffmpeg.stdin.drain = AsyncMock(side_effect=BrokenPipeError(32, "pipe"))
+            await recorder.finalize()
+            await recorder.save_buffer()
+        await asyncio.wait_for(worker, 1)
+        assert recorder.health.recording_issue
+        assert not recorder.health.upload_issue
+        if phase == "exit":
+            assert recorder.health.details["recording"]["encoder_exit_code"] == 7
+        assert recorder.closed
+        assert not recorder.user_audio and not recorder.assistant_responses
+        writes = len(ffmpeg.stdin.writes)
+        await recorder.add_user_audio(ONE_SECOND_PCM16, 3_000)
+        await recorder.add_assistant_response_delta(ONE_SECOND_PCM16, "next", "next")
+        await recorder.save_buffer()
+        assert not recorder.user_audio and not recorder.assistant_responses
+        assert len(ffmpeg.stdin.writes) == writes
+        assert recorder.audio_store_obj.deleted
+    finally:
+        worker.cancel()
+        await asyncio.gather(worker, return_exceptions=True)
+
+
+@pytest.mark.parametrize("failure_at", ["part", "final_part", "completion"])
+async def test_upload_failures_are_flagged_without_retry_or_recording_row(
+    monkeypatch, failure_at
+):
+    recorder = make_recorder()
+    store = recorder.audio_store_obj
+    store.upload_part = AsyncMock(side_effect=OSError(5, "upload failed"))
+    stdout = asyncio.StreamReader()
+    stdout.feed_data(b"encoded audio")
+    stdout.feed_eof()
+    recorder.ffmpeg.stdout = stdout
+    if failure_at != "completion":
+        monkeypatch.setattr(
+            "pingpong.realtime_recorder.MIN_AUDIO_CHUNK_SIZE",
+            1 if failure_at == "part" else 100,
+        )
+        recorder.upload_task = asyncio.create_task(recorder._upload_ffmpeg_output())
+        await recorder.upload_task
+    else:
+        store.complete_upload = AsyncMock(side_effect=OSError(5, "completion failed"))
+    await recorder.complete_audio_upload(has_played_audio=True)
+    assert recorder.health.upload_issue
+    assert not recorder.health.recording_issue
+    assert recorder.health.details["upload"]["phase"] == (
+        "complete_upload" if failure_at == "completion" else "upload_part"
+    )
+    assert store.upload_part.await_count == int(failure_at != "completion")
+    assert store.deleted and recorder.closed
+
+
+async def test_recording_cancellation_is_not_a_failure(monkeypatch):
+    store = FakeAudioStoreObject()
+    health = VoiceRecordingHealth()
+    monkeypatch.setattr(
+        "pingpong.realtime_recorder.config.audio_store.store.create_upload",
+        AsyncMock(return_value=store),
+    )
+    monkeypatch.setattr(
+        asyncio, "create_subprocess_exec", AsyncMock(side_effect=asyncio.CancelledError)
+    )
+    with pytest.raises(asyncio.CancelledError):
+        await RealtimeRecorder.create(1, "thread", None, health=health)
+    assert store.deleted
+    assert not health.recording_issue and not health.upload_issue
+
+
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="FFmpeg is not installed")
+@pytest.mark.parametrize("upload_fails", [False, True])
+async def test_real_encoder_finalization_and_upload_failure(monkeypatch, upload_fails):
+    recorder = make_recorder()
+    recorder.session = FakeSession()
+    encoded = bytearray()
+
+    async def upload_part(content):
+        encoded.extend(content.getvalue())
+        if upload_fails:
+            raise OSError(5, "storage failure")
+
+    recorder.audio_store_obj.upload_part = upload_part
+    monkeypatch.setattr(
+        VoiceModeRecording,
+        "create_or_replace_for_thread",
+        AsyncMock(return_value=(SimpleNamespace(id=1), None)),
+    )
+    await recorder._start_encoder()
+    try:
+        await recorder.add_assistant_response_delta(ONE_SECOND_PCM16, "part", "reply")
+        await recorder.started_playing_assistant_response_delta("reply", "part", 1_000)
+        await recorder.ended_playing_assistant_response_delta("reply", "part")
+        await asyncio.wait_for(recorder.complete_audio_upload(has_played_audio=True), 5)
+        assert encoded
+        assert recorder.closed
+        assert recorder.ffmpeg.returncode is not None
+        assert not recorder.health.recording_issue
+        assert recorder.health.upload_issue == upload_fails
+        assert recorder.audio_store_obj.completed == (not upload_fails)
+        assert recorder.audio_store_obj.deleted == upload_fails
+    finally:
+        if not recorder.closed:
+            await recorder.abort()
+
+
+@pytest.mark.parametrize("blocked_operation", ["drain", "exit", "discard"])
+async def test_upload_failure_unblocks_final_encoding_without_worker(
+    monkeypatch, blocked_operation
+):
+    recorder = make_recorder()
+    encoder = cast_fake_ffmpeg(recorder.ffmpeg)
+    encoder.stdout = asyncio.StreamReader()
+    recorder.audio_store_obj.upload_part = AsyncMock(side_effect=OSError(5, "upload"))
+    recorder.upload_task = asyncio.create_task(recorder._upload_ffmpeg_output())
+    monkeypatch.setattr("pingpong.realtime_recorder.MIN_AUDIO_CHUNK_SIZE", 1)
+
+    def fail_upload():
+        encoder.stdout.feed_data(b"encoded audio")
+        encoder.stdout.feed_eof()
+
+    if blocked_operation == "drain":
+
+        async def drain():
+            fail_upload()
+            await asyncio.Future()
+
+        encoder.stdin.drain = drain
+        await recorder.add_assistant_response_delta(ONE_SECOND_PCM16, "part", "reply")
+        await recorder.started_playing_assistant_response_delta("reply", "part", 1_000)
+    else:
+        # The uploader fails while the child is still running. Finalization
+        # must wake and abort it instead of waiting on a pipe nobody drains.
+        encoder.stdin.on_close = fail_upload
+
+    await asyncio.wait_for(
+        recorder.complete_audio_upload(has_played_audio=blocked_operation != "discard"),
+        1,
+    )
+    assert recorder.closed and recorder.health.upload_issue
+    assert not recorder.health.recording_issue
+    assert encoder.returncode == -9
+
+
 @pytest.mark.parametrize("encoder_error", [False, True])
 async def test_unheard_recording_stops_writers_before_deleting(encoder_error):
     recorder = make_recorder()
@@ -102,11 +349,8 @@ async def test_unheard_recording_stops_writers_before_deleting(encoder_error):
     recorder.upload_task = asyncio.create_task(upload())
     # Ensure the uploader is running when shutdown begins.
     await asyncio.sleep(0)
-    if encoder_error:
-        with pytest.raises(RuntimeError, match="encoder failed"):
-            await recorder.complete_audio_upload(has_played_audio=False)
-    else:
-        await recorder.complete_audio_upload(has_played_audio=False)
+    await recorder.complete_audio_upload(has_played_audio=False)
+    assert recorder.health.recording_issue == encoder_error
     assert recorder.upload_task.done()
     assert recorder.closed
     assert store.deleted
@@ -178,8 +422,8 @@ async def test_complete_upload_preserves_trailing_user_audio(
 @pytest.mark.parametrize(
     "stage,error", [("write", BrokenPipeError), ("drain", ConnectionResetError)]
 )
-async def test_tail_write_failure_still_finalizes_previously_saved_audio(
-    db, monkeypatch, caplog, stage, error
+async def test_tail_write_failure_flags_recording_and_cleans_up(
+    monkeypatch, stage, error
 ):
     recorder = make_recorder()
     recorder.end_timestamp = None
@@ -189,7 +433,6 @@ async def test_tail_write_failure_still_finalizes_previously_saved_audio(
     await recorder.stopped_playing_assistant_response("reply", 1_000)
     await recorder.save_buffer()
     assert recorder.audio_duration == 2_000
-    saved_writes = list(cast_fake_ffmpeg(recorder.ffmpeg).stdin.writes)
     await recorder.add_user_audio(ONE_SECOND_PCM16, 3_000)
 
     def fail_write(data):
@@ -201,54 +444,18 @@ async def test_tail_write_failure_still_finalizes_previously_saved_audio(
     monkeypatch.setattr(
         recorder.ffmpeg.stdin, stage, fail_write if stage == "write" else fail_drain
     )
-    encoder_finished = asyncio.Event()
-    cleanup = []
-
-    async def finish_encoding():
-        assert recorder.ffmpeg.stdin.closed
-        cleanup.append("encoder")
-        encoder_finished.set()
-
-    async def upload():
-        await encoder_finished.wait()
-        cleanup.append("upload")
-
-    monkeypatch.setattr(recorder.ffmpeg, "wait", finish_encoding)
-    recorder.upload_task = asyncio.create_task(upload())
-    try:
-        async with db.async_session() as session:
-            thread = models.Thread(version=3)
-            session.add(thread)
-            await session.flush()
-            recorder.thread_id = thread.id
-            recorder.session = session
-            await asyncio.wait_for(
-                recorder.complete_audio_upload(has_played_audio=True), timeout=1
-            )
-            await session.commit()
-            recording = await session.scalar(
-                select(VoiceModeRecording).where(
-                    VoiceModeRecording.thread_id == thread.id
-                )
-            )
-            assert recording is not None
-            assert recording.duration == 2_000
-    finally:
-        recorder.upload_task.cancel()
-        await asyncio.gather(recorder.upload_task, return_exceptions=True)
-
-    assert cleanup == ["encoder", "upload"]
-    assert recorder.audio_store_obj.completed
-    assert not recorder.audio_store_obj.deleted
+    await asyncio.wait_for(
+        recorder.complete_audio_upload(has_played_audio=True), timeout=1
+    )
+    assert recorder.health.recording_issue
+    assert not recorder.health.upload_issue
+    assert recorder.health.details["recording"]["phase"] == "write_user_audio_tail"
     assert recorder.closed
+    assert recorder.audio_store_obj.deleted
+    assert not recorder.audio_store_obj.completed
     assert recorder.audio_duration == 2_000
     assert recorder.end_timestamp == 2_000
-    assert len(recorder.user_audio) == 1
-    assert (
-        cast_fake_ffmpeg(recorder.ffmpeg).stdin.writes[: len(saved_writes)]
-        == saved_writes
-    )
-    assert "Failed to save user audio tail." in caplog.text
+    assert cast_fake_ffmpeg(recorder.ffmpeg).returncode == -9
 
 
 async def test_first_assistant_save_preserves_existing_zero_boundary():

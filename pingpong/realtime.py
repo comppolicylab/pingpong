@@ -30,6 +30,7 @@ from pingpong.realtime_recorder import (
     AUDIO_FRAME_RATE,
     AUDIO_SAMPLE_WIDTH,
     RealtimeRecorder,
+    VoiceRecordingHealth,
 )
 from pingpong.websocket import (
     ws_auth_middleware,
@@ -1624,12 +1625,16 @@ async def browser_realtime_websocket(
     )
 
     realtime_recorder: RealtimeRecorder | None = None
+    recording_health = VoiceRecordingHealth()
     if thread.display_user_info:
         realtime_recorder = await RealtimeRecorder.create(
             thread_id=thread.id,
             thread_obj_id=thread.thread_id if thread.thread_id else str(thread.id),
             session=browser_connection.state["db"],
+            health=recording_health,
         )
+        if realtime_recorder is not None:
+            recording_health = realtime_recorder.health
 
     async def on_playback_settled(item_id: str) -> None:
         ordering_buffer.discard_unheard_assistant_transcripts(item_id)
@@ -1692,17 +1697,24 @@ async def browser_realtime_websocket(
         )
     )
 
-    if realtime_recorder:
-        realtime_tasks.append(
-            asyncio.create_task(realtime_recorder.handle_saving_buffer(every=10))
-        )
+    recorder_task = (
+        asyncio.create_task(realtime_recorder.handle_saving_buffer(every=10))
+        if realtime_recorder
+        else None
+    )
 
     try:
         await asyncio.wait(realtime_tasks, return_when=asyncio.FIRST_COMPLETED)
     finally:
+        if recorder_task is not None:
+            recorder_task.cancel()
         for task in realtime_tasks:
             task.cancel()
-        results = await asyncio.gather(*realtime_tasks, return_exceptions=True)
+        results = await asyncio.gather(
+            *realtime_tasks,
+            *([recorder_task] if recorder_task is not None else []),
+            return_exceptions=True,
+        )
         try:
             # Per-reply decisions cannot finish while playback callbacks can
             # still arrive. Settle the reader before releasing unheard replies.
@@ -1745,6 +1757,16 @@ async def browser_realtime_websocket(
                 except Exception:
                     openai_connection_logger.exception(
                         "Error finalizing realtime recording."
+                    )
+            if recording_health.recording_issue or recording_health.upload_issue:
+                try:
+                    await recording_health.persist(
+                        browser_connection.state["db"], thread.id
+                    )
+                except Exception:
+                    openai_connection_logger.exception(
+                        "Error saving voice recording health flags for thread_id=%s",
+                        thread.id,
                     )
         for result in results:
             if isinstance(result, Exception) and not isinstance(

@@ -22,7 +22,7 @@ from pingpong import models
 from pingpong import realtime as realtime_module
 from pingpong import schemas
 from pingpong import websocket as websocket_module
-from pingpong.realtime_recorder import RealtimeRecorder
+from pingpong.realtime_recorder import RealtimeRecorder, VoiceRecordingHealth
 from pingpong.testutil import with_user
 
 server = importlib.import_module("pingpong.server")
@@ -149,6 +149,28 @@ def buffering_recorder(thread_id=1, session=None):
     recorder = RealtimeRecorder(SimpleNamespace(), "synthetic.webm", thread_id, session)
     recorder.ffmpeg = SimpleNamespace()
     return recorder
+
+
+def running_fake_encoder():
+    exited = asyncio.Event()
+    process = SimpleNamespace(returncode=None)
+
+    def finish(code=0):
+        if process.returncode is None:
+            process.returncode = code
+        exited.set()
+
+    async def wait():
+        await exited.wait()
+        return process.returncode
+
+    process.stdin = SimpleNamespace(
+        close=Mock(side_effect=finish), write=Mock(), drain=AsyncMock()
+    )
+    process.wait = AsyncMock(side_effect=wait)
+    process.communicate = AsyncMock(side_effect=wait)
+    process.kill = Mock(side_effect=lambda: finish(-9))
+    return process
 
 
 def browser_with_playback_events(events):
@@ -301,10 +323,7 @@ async def test_session_retention_depends_on_playback_not_transcripts(
         recorder = buffering_recorder(thread_id, session)
         store = SimpleNamespace(complete_upload=AsyncMock(), delete_file=AsyncMock())
         recorder.audio_store_obj = store
-        recorder.ffmpeg = SimpleNamespace(
-            stdin=SimpleNamespace(close=Mock(), write=Mock(), drain=AsyncMock()),
-            wait=AsyncMock(),
-        )
+        recorder.ffmpeg = running_fake_encoder()
         monkeypatch.setattr(
             RealtimeRecorder, "create", AsyncMock(return_value=recorder)
         )
@@ -371,7 +390,7 @@ async def test_session_retention_depends_on_playback_not_transcripts(
             assert store.complete_upload.await_count == int(played)
             assert store.delete_file.await_count == int(not played)
             recorder.ffmpeg.stdin.close.assert_called_once()
-            recorder.ffmpeg.wait.assert_awaited_once()
+            recorder.ffmpeg.wait.assert_awaited()
             if played:
                 assert recorder.audio_duration > 0
                 recorder.ffmpeg.stdin.write.assert_called()
@@ -506,10 +525,7 @@ async def test_unheard_reply_does_not_save_or_block_later_user_transcripts(
         recorder.audio_store_obj = SimpleNamespace(
             complete_upload=AsyncMock(), delete_file=AsyncMock()
         )
-        recorder.ffmpeg = SimpleNamespace(
-            stdin=SimpleNamespace(close=Mock(), write=Mock(), drain=AsyncMock()),
-            wait=AsyncMock(),
-        )
+        recorder.ffmpeg = running_fake_encoder()
         monkeypatch.setattr(
             RealtimeRecorder, "create", AsyncMock(return_value=recorder)
         )
@@ -904,6 +920,7 @@ async def test_recording_finalization_waits_for_in_flight_transcript_write(monke
         assert write_finished
 
     recorder = SimpleNamespace(
+        health=VoiceRecordingHealth(),
         handle_saving_buffer=periodic,
         complete_audio_upload=AsyncMock(side_effect=finalize),
     )
@@ -933,6 +950,133 @@ async def test_recording_finalization_waits_for_in_flight_transcript_write(monke
         release_write.set()
         task.cancel()
         await asyncio.gather(task, return_exceptions=True)
+
+
+@with_user(123)
+@pytest.mark.parametrize(
+    "failure", ["upload_setup", "encoder_setup", "recording", "upload"]
+)
+async def test_recording_failure_preserves_live_session_and_transcripts(
+    db, user, monkeypatch, failure
+):
+    ready = asyncio.Event()
+    release = asyncio.Event()
+    browser_alive = asyncio.Event()
+    recorder = None
+
+    async def browser(*args, **kwargs):
+        browser_alive.set()
+        await asyncio.Future()
+
+    async def provider(*args, **kwargs):
+        nonlocal recorder
+        recorder = args[6]
+        queue, tracker = args[4:6]
+        await tracker.add_audio_delta("reply", "audio", b"\0\0")
+        await tracker.mark_audio_event_playback_started("reply", "audio")
+        if failure == "recording":
+            await recorder.add_user_audio(b"\0", 1_000)
+        elif failure == "upload":
+            recorder.ffmpeg.stdout.feed_data(b"encoded")
+            await recorder._failure_event.wait()
+        else:
+            assert recorder is None
+
+        async def write_transcript():
+            assert await realtime_module.add_message_to_thread(
+                None,
+                args[0],
+                args[3],
+                "after-failure",
+                "Transcript received after recording failed",
+                "assistant",
+                output_index="0",
+            )
+            ready.set()
+
+        await queue.put(write_transcript)
+        await release.wait()
+
+    encoder = running_fake_encoder()
+    encoder.stdout = asyncio.StreamReader()
+    finish = encoder.stdin.close.side_effect
+
+    def close_encoder():
+        finish()
+        encoder.stdout.feed_eof()
+
+    encoder.stdin.close.side_effect = close_encoder
+    store = SimpleNamespace(
+        delete_file=AsyncMock(),
+        complete_upload=AsyncMock(),
+        upload_part=AsyncMock(side_effect=OSError(5, "storage failure")),
+    )
+    create_upload = AsyncMock(return_value=store)
+    if failure == "upload_setup":
+        create_upload.side_effect = OSError(5, "storage setup failure")
+    monkeypatch.setattr(
+        "pingpong.realtime_recorder.config.audio_store.store.create_upload",
+        create_upload,
+    )
+    create_encoder = AsyncMock(return_value=encoder)
+    if failure == "encoder_setup":
+        create_encoder.side_effect = FileNotFoundError("ffmpeg")
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", create_encoder)
+    monkeypatch.setattr("pingpong.realtime_recorder.MIN_AUDIO_CHUNK_SIZE", 1)
+    monkeypatch.setattr(realtime_module, "handle_openai_events", provider)
+    monkeypatch.setattr(realtime_module, "handle_browser_messages", browser)
+    async with db.async_session() as session:
+        thread = models.Thread(
+            thread_id="health-live",
+            version=3,
+            display_user_info=True,
+            tools_available="[]",
+        )
+        session.add(thread)
+        await session.flush()
+        thread_id = thread.id
+        websocket = DummyWebSocket()
+        websocket.state["thread"] = thread
+        websocket.state["db"] = session
+        websocket.state["session"] = SimpleNamespace(user=user)
+        websocket.state["realtime_connection"] = None
+        websocket.state["openai_client"] = None
+        task = asyncio.create_task(
+            inspect.unwrap(realtime_module.browser_realtime_websocket)(
+                websocket, "1", str(thread_id)
+            )
+        )
+        try:
+            await asyncio.wait_for(ready.wait(), 2)
+            await asyncio.wait_for(browser_alive.wait(), 1)
+            # Let the failed recorder worker finish while voice stays active.
+            await asyncio.sleep(0.02)
+            assert not task.done()
+            assert not websocket.closed
+            if recorder:
+                assert recorder.closed
+                assert not recorder.user_audio and not recorder.assistant_responses
+            release.set()
+            await asyncio.wait_for(task, 2)
+            await session.commit()
+        finally:
+            release.set()
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+    async with db.async_session() as session:
+        saved = await session.get(models.Thread, thread_id)
+        kind = "upload" if failure in {"upload", "upload_setup"} else "recording"
+        assert saved.recording_issue == (kind == "recording")
+        assert saved.upload_issue == (kind == "upload")
+        assert getattr(saved, f"{kind}_issue_details")["recording_id"]
+        assert await session.scalar(
+            select(models.Message).where(models.Message.thread_id == thread_id)
+        )
+        assert not await session.scalar(
+            select(models.VoiceModeRecording).where(
+                models.VoiceModeRecording.thread_id == thread_id
+            )
+        )
 
 
 @pytest.mark.parametrize("prior_playback", [False, True])
@@ -1169,6 +1313,7 @@ async def test_realtime_session_stops_browser_before_final_queue_drain(
         "create",
         AsyncMock(
             return_value=SimpleNamespace(
+                health=VoiceRecordingHealth(),
                 handle_saving_buffer=save_recording,
                 complete_audio_upload=finalize_recording,
             )
