@@ -751,6 +751,42 @@ class RealtimeRecorder:
         except Exception as e:
             realtime_recorder_logger.exception(f"Failed to save buffer: {e}")
 
+    async def _save_user_audio_tail(self) -> None:
+        # Finalization runs after browser and periodic writers have stopped.
+        # Unlike periodic saves, this tail does not require another model reply.
+        async with self.save_lock:
+            if not self.user_audio:
+                return
+            starts_at = self.end_timestamp
+            if starts_at is None:
+                starts_at = min(
+                    chunk.ends_at - len(chunk.audio) for chunk in self.user_audio
+                )
+            ends_at = max(chunk.ends_at for chunk in self.user_audio)
+            if ends_at <= starts_at:
+                self.user_audio.clear()
+                return
+
+            tail = AudioSegment.silent(
+                duration=ends_at - starts_at, frame_rate=AUDIO_FRAME_RATE
+            )
+            for chunk in self.user_audio:
+                chunk_starts_at = chunk.ends_at - len(chunk.audio)
+                # Audio crossing an earlier save boundary contributes only its
+                # unsaved suffix; older chunks must not be overlaid at negative
+                # positions (which pydub interprets relative to the segment end).
+                skip_ms = max(starts_at - chunk_starts_at, 0)
+                if skip_ms < len(chunk.audio):
+                    tail = tail.overlay(
+                        chunk.audio[skip_ms:],
+                        position=max(chunk_starts_at - starts_at, 0),
+                    )
+
+            await self._write_to_ffmpeg(tail.raw_data)
+            self.audio_duration += ends_at - starts_at
+            self.end_timestamp = ends_at
+            self.user_audio.clear()
+
     @not_closed
     async def complete_audio_upload(self, *, has_played_audio: bool):
         """
@@ -780,6 +816,7 @@ class RealtimeRecorder:
         # Finish bundling any responses or user audio still in RAM
         await self.finalize()
         await self.save_buffer()
+        await self._save_user_audio_tail()
 
         # Close FFmpeg's stdin so it processes the remaining clusters
         if not self.ffmpeg or not self.ffmpeg.stdin:
