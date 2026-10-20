@@ -14,6 +14,7 @@ from fastapi import WebSocketDisconnect
 from openai import OpenAIError
 from sqlalchemy import func, select
 from starlette.requests import ClientDisconnect
+from starlette.websockets import WebSocketState
 
 from openai.resources.realtime.realtime import AsyncRealtimeConnection
 
@@ -1009,6 +1010,36 @@ async def handle_openai_events(
     )
 
     session_updated = False
+    browser_delivery_available = True
+
+    async def send_browser_event(data: dict, *, close: bool = False) -> None:
+        nonlocal browser_delivery_available
+        if not browser_delivery_available:
+            return
+        try:
+            await browser_connection.send_json(data)
+            if close:
+                await browser_connection.close()
+        except (WebSocketDisconnect, ClientDisconnect, OSError):
+            browser_connection_logger.debug(
+                "Browser disconnected; disabling provider event delivery."
+            )
+        except RuntimeError:
+            # Starlette also raises RuntimeError when a concurrent close has
+            # already changed the websocket state. Preserve unrelated failures.
+            if (
+                getattr(browser_connection, "application_state", None)
+                != WebSocketState.DISCONNECTED
+                and getattr(browser_connection, "client_state", None)
+                != WebSocketState.DISCONNECTED
+            ):
+                raise
+            browser_connection_logger.debug(
+                "Browser websocket already closed; disabling provider event delivery."
+            )
+        else:
+            return
+        browser_delivery_available = False
 
     try:
         async for event in realtime_connection:
@@ -1065,7 +1096,7 @@ async def handle_openai_events(
                         f"Session successfully updated: {event.session}"
                     )
                     session_updated = True
-                    await browser_connection.send_json(
+                    await send_browser_event(
                         {
                             "type": "session.updated",
                             "message": "Connected to OpenAI.",
@@ -1074,17 +1105,17 @@ async def handle_openai_events(
                 case "session.error" | "error":
                     openai_connection_logger.exception(f"Session error: {event.error}")
                     if _is_realtime_session_startup_error(event.error, session_updated):
-                        await browser_connection.send_json(
+                        await send_browser_event(
                             {
                                 "type": "error",
                                 "error": _serialize_realtime_error(event.error),
-                            }
+                            },
+                            close=True,
                         )
-                        await browser_connection.close()
                         return
                 case "session.ended":
                     openai_connection_logger.debug(f"Session ended: {event.session}")
-                    await browser_connection.send_json(
+                    await send_browser_event(
                         {
                             "type": "session.ended",
                             "message": "Session ended.",
@@ -1183,7 +1214,15 @@ async def handle_openai_events(
                         event_id=event.event_id,
                         audio_bytes=delta_audio_bytes,
                     )
-                    await browser_connection.send_json(
+                    # Register generated audio before the browser can start it
+                    # and send playback telemetry back on the other task.
+                    if realtime_recorder:
+                        await realtime_recorder.add_assistant_response_delta(
+                            audio_chunk_bytes=delta_audio_bytes,
+                            event_id=event.event_id,
+                            item_id=event.item_id,
+                        )
+                    await send_browser_event(
                         {
                             "type": "response.audio.delta",
                             "audio": delta_audio_b64,
@@ -1191,18 +1230,12 @@ async def handle_openai_events(
                             "event_id": event.event_id,
                         }
                     )
-                    if realtime_recorder:
-                        await realtime_recorder.add_assistant_response_delta(
-                            audio_chunk_bytes=delta_audio_bytes,
-                            event_id=event.event_id,
-                            item_id=event.item_id,
-                        )
                 case "response.output_audio.done" | "response.audio.done":
                     await assistant_audio_tracker.mark_item_audio_done(
                         getattr(event, "item_id", None)
                     )
                 case "input_audio_buffer.speech_started":
-                    await browser_connection.send_json(
+                    await send_browser_event(
                         {
                             "type": "input_audio_buffer.speech_started",
                             "message": "User speech detected.",
