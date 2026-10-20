@@ -1307,7 +1307,11 @@
 	 * @param devices The updated list of available audio devices.
 	 */
 	const handleDeviceChange = (devices: ExtendedMediaDeviceInfo[]) => {
-		audioDevices = devices.filter((device) => device.deviceId && device.label);
+		const namedDevices = devices.filter((device) => device.deviceId && device.label);
+		// Safari may hide names again once the permission-check stream stops.
+		// Keep the choices captured with access; Start still requests the exact ID.
+		if (devices.length > 0 && namedDevices.length === 0 && microphoneDevicesReady) return;
+		audioDevices = namedDevices;
 		microphoneDevicesReady = audioDevices.length > 0;
 		selectAudioDevice();
 	};
@@ -1330,15 +1334,11 @@
 	const enableMicrophoneAccess = async () => {
 		if (preparingMicrophone) return;
 		preparingMicrophone = true;
-		const recorder = wavRecorder ?? new WavRecorder({ sampleRate: 24000, debug: true });
+		const recorder =
+			wavRecorder ?? new WavRecorder({ sampleRate: 24000, debug: true, streamingOnly: true });
 		wavRecorder = recorder;
 		try {
-			await recorder.prepareMicrophone();
-			if (wavRecorder !== recorder) {
-				await recorder.quit();
-				return;
-			}
-			const devices = await recorder.listDevices();
+			const devices = await recorder.requestMicrophoneAccess();
 			if (wavRecorder !== recorder) return;
 			handleDeviceChange(devices);
 			if (!microphoneDevicesReady) throw new Error('No selectable microphones are available.');
@@ -1361,7 +1361,8 @@
 	 * Initialize audio output from the Start Session user action.
 	 */
 	const handleSessionSetup = async () => {
-		const recorder = wavRecorder ?? new WavRecorder({ sampleRate: 24000, debug: true });
+		const recorder =
+			wavRecorder ?? new WavRecorder({ sampleRate: 24000, debug: true, streamingOnly: true });
 		wavRecorder = recorder;
 		const player = new WavStreamPlayer({
 			sampleRate: 24000,
@@ -1554,7 +1555,8 @@
 		const selectedDeviceId = selectedAudioDevice.deviceId;
 		audioSessionWarning = null;
 		startingAudioSession = true;
-		const sessionRecorder = wavRecorder ?? new WavRecorder({ sampleRate: 24000, debug: true });
+		const sessionRecorder =
+			wavRecorder ?? new WavRecorder({ sampleRate: 24000, debug: true, streamingOnly: true });
 		wavRecorder = sessionRecorder;
 		if (!(await handleSessionSetup())) {
 			if (wavRecorder === sessionRecorder) startingAudioSession = false;
@@ -1761,7 +1763,7 @@
 				if (generation !== audioSessionGeneration) return;
 			}
 			if ($messages.length === 0) {
-				const recorder = new WavRecorder({ sampleRate: 24000, debug: true });
+				const recorder = new WavRecorder({ sampleRate: 24000, debug: true, streamingOnly: true });
 				wavRecorder = recorder;
 				let deviceRefreshId = 0;
 				recorder.listenForDeviceChange((devices) => {
@@ -1968,7 +1970,7 @@
 			) {
 				return;
 			}
-			const recorder = new WavRecorder({ sampleRate: 24000, debug: true });
+			const recorder = new WavRecorder({ sampleRate: 24000, debug: true, streamingOnly: true });
 			wavRecorder = recorder;
 			const devices = await recorder.listDevices();
 			if (initializationId !== microphoneInitializationId || wavRecorder !== recorder) return;

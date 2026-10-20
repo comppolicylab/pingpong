@@ -58,6 +58,7 @@ export interface WavRecorderOptions {
 	sampleRate?: number;
 	outputToSpeakers?: boolean;
 	debug?: boolean;
+	streamingOnly?: boolean;
 }
 
 export type ChunkProcessor = (data: { raw: ArrayBuffer; mono: ArrayBuffer }) => void;
@@ -71,6 +72,8 @@ export class WavRecorder {
 	sampleRate: number;
 	outputToSpeakers: boolean;
 	debug: boolean;
+	private streamingOnly: boolean;
+	private context: AudioContext | null = null;
 
 	private _deviceChangeCallback: ((this: MediaDevices, ev: Event) => any) | null; // eslint-disable-line @typescript-eslint/no-explicit-any
 
@@ -96,7 +99,8 @@ export class WavRecorder {
 	constructor({
 		sampleRate = 44100,
 		outputToSpeakers = false,
-		debug = false
+		debug = false,
+		streamingOnly = false
 	}: WavRecorderOptions = {}) {
 		// Script source
 		this.scriptSrc = AudioProcessorSrc;
@@ -104,6 +108,7 @@ export class WavRecorder {
 		this.sampleRate = sampleRate;
 		this.outputToSpeakers = outputToSpeakers;
 		this.debug = !!debug;
+		this.streamingOnly = streamingOnly;
 		this._deviceChangeCallback = null;
 		// State variables
 		this.stream = null;
@@ -344,9 +349,21 @@ export class WavRecorder {
 	}
 
 	/**
-	 * Open a paused microphone stream so the user can choose a named device.
-	 * Reuse it at Start when it matches the selected microphone. When switching
-	 * devices, acquire the replacement before releasing the temporary grant.
+	 * Request access and list named microphones, releasing the temporary stream
+	 * even if enumeration fails or the page navigates away while awaiting access.
+	 */
+	async requestMicrophoneAccess(): Promise<ExtendedMediaDeviceInfo[]> {
+		const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+		try {
+			return await this.listDevices();
+		} finally {
+			stream.getTracks().forEach((track) => track.stop());
+		}
+	}
+
+	/**
+	 * Acquire the microphone selected for capture. Reuse an existing live stream
+	 * only when it matches, and release it once a replacement is acquired.
 	 */
 	async prepareMicrophone(deviceId?: string): Promise<void> {
 		const track = this.stream?.getAudioTracks().find((track) => track.readyState === 'live');
@@ -380,12 +397,14 @@ export class WavRecorder {
 		const stream = this.stream;
 		if (!stream) throw new Error('Microphone setup was cancelled');
 		const context = new AudioContext({ sampleRate: this.sampleRate });
+		this.context = context;
 		const source = context.createMediaStreamSource(stream);
 		// Load and execute the module script.
 		try {
 			await context.audioWorklet.addModule(this.scriptSrc);
 		} catch (e) {
 			await context.close();
+			this.context = null;
 			throw new Error(`Could not add audioWorklet module: ${this.scriptSrc}`, { cause: e });
 		}
 		const processor = new AudioWorkletNode(context, 'audio_processor');
@@ -500,7 +519,7 @@ export class WavRecorder {
 			mono: new ArrayBuffer(0)
 		};
 		this.log('Recording ...');
-		await this._event('start');
+		await this._event('start', { streamingOnly: this.streamingOnly });
 		this.recording = true;
 		return true;
 	}
@@ -555,44 +574,49 @@ export class WavRecorder {
 	}
 
 	/**
-	 * Ends the current recording session and saves the result
-	 * @returns {Promise<WavPackerAudioType>}
+	 * Ends capture, exporting a WAV only when audio retention is enabled.
+	 * Streaming-only capture returns null.
 	 */
-	async end(): Promise<WavPackerAudioType> {
+	async end(): Promise<WavPackerAudioType | null> {
 		if (!this.processor) {
 			throw new Error('Session ended: please call .begin() first');
 		}
 
 		const _processor = this.processor;
 
-		this.log('Stopping ...');
-		await this._event('stop');
-		this.recording = false;
+		// Release the microphone immediately, even if the worklet never replies.
 		if (this.stream) {
 			const tracks = this.stream.getTracks();
 			tracks.forEach((track) => track.stop());
 		}
-		this.log('Exporting ...');
-		const exportData = await this._event('export', {}, _processor);
-
-		this.processor.disconnect();
-		if (this.source) {
-			this.source.disconnect();
+		try {
+			this.log('Stopping ...');
+			await this._event('stop', {}, _processor);
+			if (this.streamingOnly) return null;
+			this.log('Exporting ...');
+			const exportData = await this._event('export', {}, _processor);
+			return new WavPacker().pack(this.sampleRate, exportData.audio);
+		} finally {
+			this.recording = false;
+			_processor.port.onmessage = null;
+			_processor.disconnect();
+			this.source?.disconnect();
+			this.node?.disconnect();
+			this.analyser?.disconnect();
+			this.stream = null;
+			this.processor = null;
+			this.source = null;
+			this.node = null;
+			this.analyser = undefined;
+			this._chunkProcessor = () => {};
+			this._chunkProcessorBuffer = {
+				raw: new ArrayBuffer(0),
+				mono: new ArrayBuffer(0)
+			};
+			const context = this.context;
+			this.context = null;
+			if (context && context.state !== 'closed') await context.close();
 		}
-		if (this.node) {
-			this.node.disconnect();
-		}
-		if (this.analyser) {
-			this.analyser.disconnect();
-		}
-		this.stream = null;
-		this.processor = null;
-		this.source = null;
-		this.node = null;
-
-		const packer = new WavPacker();
-		const result = packer.pack(this.sampleRate, exportData.audio);
-		return result;
 	}
 
 	/**

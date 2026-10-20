@@ -27,7 +27,7 @@
  * SOFTWARE.
  */
 
-const AudioProcessorWorklet = `
+export const AudioProcessorWorklet = `
 class AudioProcessor extends AudioWorkletProcessor {
 
   constructor() {
@@ -39,6 +39,7 @@ class AudioProcessor extends AudioWorkletProcessor {
   initialize() {
     this.foundAudio = false;
     this.recording = false;
+    this.streamingOnly = false;
     this.chunks = [];
   }
 
@@ -150,6 +151,8 @@ class AudioProcessor extends AudioWorkletProcessor {
     let receiptData = {};
     switch (event) {
       case 'start':
+        this.streamingOnly = e.data.data?.streamingOnly === true;
+        if (this.streamingOnly) this.chunks = [];
         this.recording = true;
         break;
       case 'stop':
@@ -226,7 +229,7 @@ class AudioProcessor extends AudioWorkletProcessor {
       // We need to copy the TypedArray, because the \`process\`
       // internals will reuse the same buffer to hold each input
       const chunk = inputs.map((input) => input.slice(sliceIndex));
-      this.chunks.push(chunk);
+      if (!this.streamingOnly) this.chunks.push(chunk);
       this.sendChunk(chunk);
     }
     return true;
