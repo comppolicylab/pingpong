@@ -1080,6 +1080,7 @@ async def handle_openai_events(
                 case "response.done":
                     # The final snapshot can supply text when transcript.done was
                     # missed. Replayed snapshots must not duplicate completed items.
+                    registered_transcript = False
                     for item in event.response.output or []:
                         item_id = getattr(item, "id", None)
                         if (
@@ -1100,17 +1101,30 @@ async def handle_openai_events(
                                 if transcript is not None:
                                     transcripts.append(transcript)
                         if transcripts:
+                            transcript_text = "".join(transcripts)
+                            pending_item = ordering_buffer.items_by_id.get(item_id)
+                            if (
+                                not _has_non_empty_transcript(transcript_text)
+                                and pending_item is not None
+                                and _has_non_empty_transcript(
+                                    pending_item.transcription_text
+                                )
+                            ):
+                                # A blank snapshot cannot safely replace known text.
+                                continue
                             ordering_buffer.register_transcription(
-                                item_id, "".join(transcripts), "assistant"
+                                item_id, transcript_text, "assistant"
                             )
-                    await enqueue_ready_thread_message_tasks(
-                        ordering_buffer,
-                        openai_task_queue,
-                        openai_client,
-                        browser_connection,
-                        thread,
-                        realtime_recorder,
-                    )
+                            registered_transcript = True
+                    if registered_transcript:
+                        await enqueue_ready_thread_message_tasks(
+                            ordering_buffer,
+                            openai_task_queue,
+                            openai_client,
+                            browser_connection,
+                            thread,
+                            realtime_recorder,
+                        )
                 case "response.output_audio.delta":
                     delta_audio_b64 = event.delta
                     try:
