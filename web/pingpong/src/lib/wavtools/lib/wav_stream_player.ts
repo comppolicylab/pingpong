@@ -43,6 +43,11 @@ export type OnAudioPartEndedProcessor = (data: {
 	timestamp: number;
 }) => void;
 export type OnPlaybackStoppedProcessor = () => void;
+export type PlaybackSettled = {
+	trackId: string;
+	outcome: 'completed' | 'interrupted' | 'discarded';
+	played: boolean;
+};
 interface WavStreamPlayerOptions {
 	sampleRate?: number;
 	/**
@@ -56,6 +61,7 @@ interface WavStreamPlayerOptions {
 	onAudioPartStarted?: OnAudioPartStartedProcessor;
 	onAudioPartEnded?: OnAudioPartEndedProcessor;
 	onPlaybackStopped?: OnPlaybackStoppedProcessor;
+	onPlaybackSettled?: (data: PlaybackSettled) => void;
 }
 
 interface TrackSampleOffset {
@@ -86,6 +92,14 @@ export class WavStreamPlayer {
 	private onAudioPartStarted: OnAudioPartStartedProcessor | null;
 	private onAudioPartEnded: OnAudioPartEndedProcessor | null;
 	private onPlaybackStopped: OnPlaybackStoppedProcessor | null;
+	private onPlaybackSettled: ((data: PlaybackSettled) => void) | null;
+	private pendingTrackIds = new Set<string>();
+	private playedTrackIds = new Set<string>();
+	private settledTrackIds = new Set<string>();
+	private streamTracks = new Map<AudioWorkletNode, Set<string>>();
+	private interruptingStreams = new Set<AudioWorkletNode>();
+	private pendingInterrupts = new Set<Promise<TrackSampleOffset | null>>();
+	private closed = false;
 
 	/**
 	 * Creates a new WavStreamPlayer instance
@@ -98,7 +112,8 @@ export class WavStreamPlayer {
 		stopOnEmptyBuffer = true,
 		onAudioPartStarted,
 		onAudioPartEnded,
-		onPlaybackStopped
+		onPlaybackStopped,
+		onPlaybackSettled
 	}: WavStreamPlayerOptions = {}) {
 		this.scriptSrc = StreamProcessorSrc;
 		this.sampleRate = sampleRate;
@@ -114,6 +129,7 @@ export class WavStreamPlayer {
 		this.onAudioPartStarted = onAudioPartStarted || null;
 		this.onAudioPartEnded = onAudioPartEnded || null;
 		this.onPlaybackStopped = onPlaybackStopped || null;
+		this.onPlaybackSettled = onPlaybackSettled || null;
 	}
 
 	/**
@@ -219,6 +235,7 @@ export class WavStreamPlayer {
 			throw new Error('Not connected, please call .connect() first');
 		}
 		const streamNode = new AudioWorkletNode(this.context, 'stream_processor');
+		this.streamTracks.set(streamNode, new Set());
 		streamNode.connect(this.gainNode || this.context.destination);
 		// This is queued before any write messages, so the worklet sees this
 		// configuration before it can process streamed PCM.
@@ -227,6 +244,7 @@ export class WavStreamPlayer {
 			stopOnEmptyBuffer: this.stopOnEmptyBuffer
 		});
 		streamNode.port.onmessage = (e) => {
+			if (this.closed) return;
 			const { event } = e.data;
 			if (event === 'stop') {
 				this._handlePlaybackStopped(streamNode);
@@ -241,14 +259,18 @@ export class WavStreamPlayer {
 				};
 			} else if (event === 'audio_part_started') {
 				const { trackId, eventId, timestamp } = e.data;
+				this.playedTrackIds.add(trackId);
 				if (this.onAudioPartStarted) {
 					this.onAudioPartStarted({ trackId, eventId, timestamp });
 				}
 			} else if (event === 'audio_part_ended') {
 				const { trackId, eventId, timestamp } = e.data;
+				this.playedTrackIds.add(trackId);
 				if (this.onAudioPartEnded) {
 					this.onAudioPartEnded({ trackId, eventId, timestamp });
 				}
+			} else if (event === 'track_settled') {
+				this.settleTrack(e.data);
 			}
 		};
 		if (this.analyser) {
@@ -261,10 +283,36 @@ export class WavStreamPlayer {
 
 	private _handlePlaybackStopped(streamNode: AudioWorkletNode | null): void {
 		streamNode?.disconnect();
+		if (streamNode) {
+			this.streamTracks.delete(streamNode);
+			this.interruptingStreams.delete(streamNode);
+		}
+		if (this.stream && streamNode && this.stream !== streamNode) return;
 		if (!streamNode || this.stream === streamNode) {
 			this.stream = null;
 		}
 		this.onPlaybackStopped?.();
+	}
+
+	private settleTrack(data: PlaybackSettled): void {
+		if (!this.pendingTrackIds.has(data.trackId) || this.settledTrackIds.has(data.trackId)) return;
+		this.settledTrackIds.add(data.trackId);
+		this.pendingTrackIds.delete(data.trackId);
+		this.onPlaybackSettled?.({ trackId: data.trackId, outcome: data.outcome, played: data.played });
+	}
+
+	/** Mark this reply's generation finished; playback may still be queued. */
+	finishTrack(trackId: string): void {
+		if (this.closed || this.settledTrackIds.has(trackId) || this.interruptedTrackIds[trackId])
+			return;
+		this.pendingTrackIds.add(trackId);
+		if (!this.stream) {
+			const played = this.playedTrackIds.has(trackId);
+			this.settleTrack({ trackId, outcome: played ? 'completed' : 'discarded', played });
+			return;
+		}
+		this.streamTracks.get(this.stream)?.add(trackId);
+		this.stream.port.postMessage({ event: 'finish_track', trackId });
 	}
 
 	/**
@@ -282,11 +330,12 @@ export class WavStreamPlayer {
 	): Int16Array | undefined {
 		if (typeof trackId !== 'string') {
 			throw new Error(`trackId must be a string`);
-		} else if (this.interruptedTrackIds[trackId]) {
+		} else if (
+			this.closed ||
+			this.interruptedTrackIds[trackId] ||
+			this.settledTrackIds.has(trackId)
+		) {
 			return;
-		}
-		if (!this.stream) {
-			this._start();
 		}
 		let buffer: Int16Array;
 		if (arrayBuffer instanceof Int16Array) {
@@ -296,6 +345,12 @@ export class WavStreamPlayer {
 		} else {
 			throw new Error(`argument must be Int16Array or ArrayBuffer`);
 		}
+		if (!buffer.length) return buffer;
+		if (!this.stream) {
+			this._start();
+		}
+		this.pendingTrackIds.add(trackId);
+		if (this.stream) this.streamTracks.get(this.stream)?.add(trackId);
 		this.stream?.port.postMessage({ event: 'write', buffer, trackId, eventId });
 		return buffer;
 	}
@@ -322,6 +377,15 @@ export class WavStreamPlayer {
 			return null;
 		}
 		const requestId = crypto.randomUUID();
+		if (interrupt) {
+			// Fence every reply already posted to this stream before yielding.
+			// New replies get a new stream; old replies cannot resume on it.
+			for (const trackId of this.streamTracks.get(stream) ?? []) {
+				this.interruptedTrackIds[trackId] = true;
+			}
+			this.interruptingStreams.add(stream);
+			this.stream = null;
+		}
 		stream.port.postMessage({
 			event: interrupt ? 'interrupt' : 'offset',
 			requestId
@@ -333,7 +397,7 @@ export class WavStreamPlayer {
 			if (trackSampleOffset) {
 				break;
 			}
-			if (this.stream !== stream) {
+			if (interrupt ? !this.interruptingStreams.has(stream) : this.stream !== stream) {
 				return null;
 			}
 			if (Date.now() >= timeoutAt) {
@@ -355,13 +419,30 @@ export class WavStreamPlayer {
 	 * @returns {{trackId: string|null, offset: number, currentTime: number}}
 	 */
 	async interrupt(): Promise<TrackSampleOffset | null> {
-		return this.getTrackSampleOffset(true);
+		// A second caller (for example End during barge-in) must wait for the
+		// first receipt too, without sending a duplicate interrupt/truncate.
+		const pending = [...this.pendingInterrupts];
+		const current = this.stream ? this.getTrackSampleOffset(true) : null;
+		if (current) this.pendingInterrupts.add(current);
+		try {
+			const results = await Promise.all(current ? [...pending, current] : pending);
+			return current ? (results.at(-1) ?? null) : null;
+		} finally {
+			if (current) this.pendingInterrupts.delete(current);
+		}
 	}
 
 	/**
 	 * Fully tear down the audio graph and release the AudioContext.
 	 */
 	async close(): Promise<void> {
+		this.closed = true;
+		for (const stream of this.interruptingStreams) stream.disconnect();
+		this.interruptingStreams.clear();
+		this.streamTracks.clear();
+		this.pendingTrackIds.clear();
+		this.playedTrackIds.clear();
+		this.settledTrackIds.clear();
 		if (this.stream) {
 			this.stream.disconnect();
 			this.stream = null;

@@ -49,6 +49,8 @@ class StreamProcessor extends AudioWorkletProcessor {
     this.endedEventIds = new Set();
     this.stopOnEmptyBuffer = true;
     this.finishWhenDrained = false;
+    this.tracks = new Map();
+    this.settledTrackIds = new Set();
     this.port.onmessage = (event) => {
       if (event.data) {
         const payload = event.data;
@@ -66,22 +68,36 @@ class StreamProcessor extends AudioWorkletProcessor {
           const requestId = payload.requestId;
           const trackId = this.currentlyPlayingTrackId;
           const offset = trackId ? this.trackSampleOffsets[trackId] || 0 : 0;
+          const eventId = this.currentlyPlayingEventId;
+          if (payload.event === 'interrupt') {
+            this.hasInterrupted = true;
+            for (const [id, track] of this.tracks) {
+              this.settleTrack(id, track.played ? 'interrupted' : 'discarded');
+            }
+            this.outputBuffers = [];
+            this.writeOffset = 0;
+          }
+          // Report the offset after all settlements, so an interrupt receipt
+          // also means queued-reply outcomes have reached the main thread.
           this.port.postMessage({
             event: 'offset',
             requestId,
             trackId,
             offset,
-            eventId: this.currentlyPlayingEventId,
+            eventId,
           });
-          if (payload.event === 'interrupt') {
-            this.hasInterrupted = true;
-          }
         } else if (payload.event === 'configure') {
           if (typeof payload.stopOnEmptyBuffer === 'boolean') {
             this.stopOnEmptyBuffer = payload.stopOnEmptyBuffer;
           }
         } else if (payload.event === 'finish') {
           this.finishWhenDrained = true;
+          for (const track of this.tracks.values()) track.generationDone = true;
+        } else if (payload.event === 'finish_track') {
+          if (!this.hasInterrupted && !this.settledTrackIds.has(payload.trackId)) {
+            const track = this.getTrack(payload.trackId);
+            track.generationDone = true;
+          }
         } else {
           throw new Error(\`Unhandled event "\${payload.event}"\`);
         }
@@ -90,6 +106,12 @@ class StreamProcessor extends AudioWorkletProcessor {
   }
 
   writeData(float32Array, trackId = null, eventId = null) {
+    if (this.hasInterrupted || this.settledTrackIds.has(trackId) || !float32Array.length) {
+      return false;
+    }
+    const track = this.getTrack(trackId);
+    if (track.generationDone) return false;
+    track.pendingSamples += float32Array.length;
     if (
       this.writeOffset > 0 &&
       (this.write.trackId !== trackId || this.write.eventId !== eventId)
@@ -119,6 +141,25 @@ class StreamProcessor extends AudioWorkletProcessor {
     return true;
   }
 
+  getTrack(trackId) {
+    if (!this.tracks.has(trackId)) {
+      this.tracks.set(trackId, { pendingSamples: 0, played: false, generationDone: false });
+    }
+    return this.tracks.get(trackId);
+  }
+
+  settleTrack(trackId, outcome) {
+    const track = this.tracks.get(trackId);
+    if (!track || this.settledTrackIds.has(trackId)) return;
+    this.settledTrackIds.add(trackId);
+    this.tracks.delete(trackId);
+    this.port.postMessage({ event: 'track_settled', trackId, outcome, played: track.played });
+    if (this.currentlyPlayingTrackId === trackId) {
+      this.currentlyPlayingTrackId = null;
+      this.currentlyPlayingEventId = null;
+    }
+  }
+
   flushWriteBuffer() {
     if (this.writeOffset === 0) {
       return false;
@@ -135,6 +176,13 @@ class StreamProcessor extends AudioWorkletProcessor {
   }
 
   process(inputs, outputs, parameters) {
+    // A preceding render quantum has now advanced. Empty gaps while generation
+    // continues are not terminal, even if every received chunk has played.
+    for (const [trackId, track] of this.tracks) {
+      if (track.generationDone && track.pendingSamples === 0) {
+        this.settleTrack(trackId, track.played ? 'completed' : 'discarded');
+      }
+    }
     const output = outputs[0];
     const outputChannelData = output[0];
     const outputBuffers = this.outputBuffers;
@@ -150,6 +198,9 @@ class StreamProcessor extends AudioWorkletProcessor {
       }
       this.currentlyPlayingTrackId = trackId;
       this.currentlyPlayingEventId = eventId;
+      const track = this.tracks.get(trackId);
+      track.pendingSamples -= validSampleCount;
+      track.played = track.played || validSampleCount > 0;
       if (trackId) {
         this.trackSampleOffsets[trackId] =
           this.trackSampleOffsets[trackId] || 0;

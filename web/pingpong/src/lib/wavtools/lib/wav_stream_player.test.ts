@@ -73,6 +73,92 @@ describe('WavStreamPlayer', () => {
 		expect(postMessage).toHaveBeenCalledWith({ event: 'finish' });
 	});
 
+	it('reports an empty reply once and rejects its late audio', () => {
+		const onPlaybackSettled = vi.fn();
+		const player = new WavStreamPlayer({ onPlaybackSettled });
+		player.finishTrack('empty');
+		player.finishTrack('empty');
+		expect(onPlaybackSettled).toHaveBeenCalledExactlyOnceWith({
+			trackId: 'empty',
+			outcome: 'discarded',
+			played: false
+		});
+		expect(player.add16BitPCM(new Int16Array(128), 'empty', 'late')).toBeUndefined();
+	});
+
+	it('fences all old-stream replies while a replacement plays and ignores the old stop', async () => {
+		stubWebAudioGlobals();
+		const nodes: {
+			port: { postMessage: ReturnType<typeof vi.fn>; onmessage: (event: { data: object }) => void };
+			disconnect: ReturnType<typeof vi.fn>;
+		}[] = [];
+		vi.stubGlobal(
+			'AudioWorkletNode',
+			class {
+				port = { postMessage: vi.fn(), onmessage: vi.fn() };
+				connect = vi.fn();
+				disconnect = vi.fn();
+				constructor() {
+					nodes.push(this);
+				}
+			}
+		);
+		const onPlaybackSettled = vi.fn();
+		const onPlaybackStopped = vi.fn();
+		const player = new WavStreamPlayer({
+			stopOnEmptyBuffer: false,
+			onPlaybackSettled,
+			onPlaybackStopped
+		});
+		await player.connect();
+		player.add16BitPCM(new Int16Array(256), 'playing', 'part-1');
+		player.add16BitPCM(new Int16Array(128), 'queued', 'part-2');
+		player.finishTrack('playing');
+		expect(nodes[0].port.postMessage).toHaveBeenCalledWith({
+			event: 'finish_track',
+			trackId: 'playing'
+		});
+		const interrupted = player.interrupt();
+		let secondFinished = false;
+		const secondInterrupt = player.interrupt().then((offset) => {
+			secondFinished = true;
+			return offset;
+		});
+		await Promise.resolve();
+		expect(secondFinished).toBe(false);
+		player.add16BitPCM(new Int16Array(128), 'next', 'part-3');
+		expect(nodes).toHaveLength(2);
+		expect(player.add16BitPCM(new Int16Array(128), 'queued', 'late')).toBeUndefined();
+		for (const data of [
+			{ event: 'track_settled', trackId: 'playing', outcome: 'interrupted', played: true },
+			{ event: 'track_settled', trackId: 'queued', outcome: 'discarded', played: false }
+		])
+			nodes[0].port.onmessage({ data });
+		const command = nodes[0].port.postMessage.mock.calls.find(
+			([data]) => data.event === 'interrupt'
+		)?.[0];
+		nodes[0].port.onmessage({
+			data: { event: 'offset', requestId: command.requestId, trackId: 'playing', offset: 128 }
+		});
+		nodes[0].port.onmessage({ data: { event: 'stop' } });
+		await expect(interrupted).resolves.toMatchObject({ trackId: 'playing', offset: 128 });
+		await expect(secondInterrupt).resolves.toBeNull();
+		expect(
+			nodes[0].port.postMessage.mock.calls.filter(([data]) => data.event === 'interrupt')
+		).toHaveLength(1);
+		expect(onPlaybackSettled.mock.calls.map(([data]) => data.trackId)).toEqual([
+			'playing',
+			'queued'
+		]);
+		expect(onPlaybackStopped).not.toHaveBeenCalled();
+		expect(player.add16BitPCM(new Int16Array(128), 'next', 'part-4')).toBeDefined();
+		nodes[0].port.onmessage({
+			data: { event: 'track_settled', trackId: 'queued', outcome: 'discarded', played: false }
+		});
+		expect(onPlaybackSettled).toHaveBeenCalledTimes(2);
+		await player.close();
+	});
+
 	it('stops playback when finish is called before a stream starts', () => {
 		const onPlaybackStopped = vi.fn();
 		const player = new WavStreamPlayer({ onPlaybackStopped });
