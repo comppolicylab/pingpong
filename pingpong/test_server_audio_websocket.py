@@ -547,6 +547,18 @@ async def test_unheard_reply_does_not_save_or_block_later_user_transcripts(
                         )
                     }
                 )
+                await incoming.put(
+                    {
+                        "text": json.dumps(
+                            {
+                                "type": "response.audio.playback.settled",
+                                "item_id": "reply",
+                                "outcome": "interrupted",
+                                "played": True,
+                            }
+                        )
+                    }
+                )
 
         async def receive():
             nonlocal playback_received
@@ -631,6 +643,10 @@ async def test_unheard_reply_does_not_save_or_block_later_user_transcripts(
                 )
             ).all()
             assert [message.message_id for message in messages] == saved_ids
+            assert (
+                messages[1].message_metadata["voice_playback_outcome"] == "interrupted"
+            )
+            assert messages[1].message_status == schemas.MessageStatus.COMPLETED
 
 
 @pytest.mark.parametrize("playback_first", [False, True])
@@ -677,8 +693,13 @@ async def test_each_assistant_write_waits_for_its_own_playback(
                 await asyncio.wait_for(queue.join(), timeout=0.02)
             write.assert_not_awaited()
             await callback("held", "held")
+        with pytest.raises(TimeoutError):
+            await asyncio.wait_for(queue.join(), timeout=0.02)
+        write.assert_not_awaited()
+        await tracker.mark_item_playback_settled("held", "interrupted", True)
         await asyncio.wait_for(queue.join(), timeout=1)
         assert [call.args[3] for call in write.await_args_list] == ["held", "later"]
+        assert write.await_args_list[0].kwargs["playback_outcome"] == "interrupted"
         assert not await callback("held", "held")
     finally:
         worker.cancel()
@@ -1692,6 +1713,43 @@ async def test_failed_partial_transcription_marks_classic_message_metadata():
             "item_id": "question",
             "user_id": "123",
             "voice_transcription_failed": "true",
+        },
+    )
+
+
+@pytest.mark.parametrize("version", [1, 2])
+@pytest.mark.parametrize("outcome", ["completed", "interrupted", "unknown"])
+async def test_classic_voice_transcript_records_playback_outcome_without_changing_text(
+    version, outcome
+):
+    websocket = DummyWebSocket()
+    websocket.state["anonymous_share_token"] = None
+    websocket.state["anonymous_session_token"] = None
+    create = AsyncMock()
+    client = SimpleNamespace(
+        beta=SimpleNamespace(
+            threads=SimpleNamespace(messages=SimpleNamespace(create=create))
+        )
+    )
+    text = "The complete available transcript, including potentially unheard words."
+    assert await realtime_module.add_message_to_thread(
+        client,
+        websocket,
+        SimpleNamespace(version=version, thread_id="classic-thread"),
+        "reply",
+        text,
+        "assistant",
+        output_index="7",
+        playback_outcome=outcome,
+    )
+    create.assert_awaited_once_with(
+        thread_id="classic-thread",
+        role="assistant",
+        content=text,
+        metadata={
+            "item_id": "reply",
+            "output_index": "7",
+            "voice_playback_outcome": outcome,
         },
     )
 

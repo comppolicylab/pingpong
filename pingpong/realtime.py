@@ -47,6 +47,7 @@ openai_connection_logger = logging.getLogger("realtime_openai")
 
 TaskFunc = Callable[[], Awaitable[object]]
 ConversationRole = Literal["user", "assistant"]
+VoicePlaybackOutcome = Literal["completed", "interrupted", "discarded", "unknown"]
 UNSET_PREVIOUS_ITEM_ID = "__UNSET_PREVIOUS_ITEM_ID__"
 BROWSER_DISCONNECT_DRAIN_SECONDS = 5.0
 
@@ -113,7 +114,7 @@ class RealtimeAssistantAudioTracker:
         self._item_retention_decisions: dict[str, asyncio.Event] = {}
         self._known_item_ids: set[str] = set()
         self._items_with_audio: set[str] = set()
-        self._settled_item_ids: set[str] = set()
+        self._playback_outcomes: dict[str, VoicePlaybackOutcome] = {}
         self._generation_done_item_ids: set[str] = set()
 
     @property
@@ -131,7 +132,7 @@ class RealtimeAssistantAudioTracker:
         if (
             not self.has_item_played_audio(item_id)
             and not self._playback_tracking_finished
-            and item_id not in self._settled_item_ids
+            and item_id not in self._playback_outcomes
         ):
             decision = self._item_retention_decisions.setdefault(
                 item_id, asyncio.Event()
@@ -139,12 +140,27 @@ class RealtimeAssistantAudioTracker:
             await decision.wait()
         return self.has_item_played_audio(item_id)
 
+    async def wait_for_item_playback_outcome(
+        self, item_id: str
+    ) -> VoicePlaybackOutcome:
+        # Playback start qualifies retention, but it does not tell us whether
+        # the whole reply was heard. Save the terminal outcome with the text.
+        while (
+            item_id not in self._playback_outcomes
+            and not self._playback_tracking_finished
+        ):
+            decision = self._item_retention_decisions.setdefault(
+                item_id, asyncio.Event()
+            )
+            await decision.wait()
+        return self._playback_outcomes.get(item_id, "unknown")
+
     def register_item(self, item_id: str | None) -> None:
         if isinstance(item_id, str) and item_id:
             self._known_item_ids.add(item_id)
 
     def is_item_playback_settled(self, item_id: str) -> bool:
-        return item_id in self._settled_item_ids
+        return item_id in self._playback_outcomes
 
     async def mark_item_playback_settled(
         self, item_id: str | None, outcome: str | None, played: bool | None
@@ -160,7 +176,7 @@ class RealtimeAssistantAudioTracker:
             if (
                 self._playback_tracking_finished
                 or item_id not in self._known_item_ids
-                or item_id in self._settled_item_ids
+                or item_id in self._playback_outcomes
                 or (played and item_id not in self._items_with_audio)
                 or (not played and self.has_item_played_audio(item_id))
                 or (outcome == "completed" and not played)
@@ -171,7 +187,7 @@ class RealtimeAssistantAudioTracker:
                 or (outcome == "discarded" and played)
             ):
                 return False
-            self._settled_item_ids.add(item_id)
+            self._playback_outcomes[item_id] = cast(VoicePlaybackOutcome, outcome)
             self._playback_events_by_item_id.pop(item_id, None)
             if played:
                 self._played_item_ids.add(item_id)
@@ -274,7 +290,7 @@ class RealtimeAssistantAudioTracker:
     def _mark_playback_event(self, item_id: str, event_id: str, *, ended: bool) -> bool:
         # Called under _lock. Keep pending callbacks independent of duration
         # cleanup: browser telemetry may arrive after generation or truncation.
-        if self._playback_tracking_finished or item_id in self._settled_item_ids:
+        if self._playback_tracking_finished or item_id in self._playback_outcomes:
             return False
         events = self._playback_events_by_item_id.get(item_id)
         event = events.get(event_id) if events is not None else None
@@ -736,6 +752,7 @@ async def add_message_to_thread(
     realtime_recorder: RealtimeRecorder | None = None,
     output_index: str | None = None,
     transcription_failed: bool = False,
+    playback_outcome: VoicePlaybackOutcome | None = None,
 ) -> bool:
     is_user_message = role == "user"
     message_saved = False
@@ -748,6 +765,12 @@ async def add_message_to_thread(
             output_index,
         )
         return False
+
+    message_metadata: dict[str, str | bool] = {}
+    if transcription_failed:
+        message_metadata["voice_transcription_failed"] = True
+    if not is_user_message and playback_outcome is not None:
+        message_metadata["voice_playback_outcome"] = playback_outcome
 
     if thread.version == 3:
         session = browser_connection.state["db"]
@@ -828,9 +851,7 @@ async def add_message_to_thread(
                         "message_status": schemas.MessageStatus.INCOMPLETE
                         if transcription_failed
                         else schemas.MessageStatus.COMPLETED,
-                        "message_metadata": {"voice_transcription_failed": True}
-                        if transcription_failed
-                        else None,
+                        "message_metadata": message_metadata or None,
                         "run_id": run.id,
                         "thread_id": thread.id,
                         "assistant_id": thread.assistant_id
@@ -892,6 +913,8 @@ async def add_message_to_thread(
             }
             if transcription_failed:
                 metadata["voice_transcription_failed"] = "true"
+            if not is_user_message and playback_outcome is not None:
+                metadata["voice_playback_outcome"] = playback_outcome
             if output_index is not None:
                 metadata["output_index"] = str(output_index)
             if is_user_message:
@@ -964,6 +987,7 @@ async def enqueue_ready_thread_message_tasks(
             role: ConversationRole = role,
             output_index: str = output_index,
         ):
+            playback_outcome: VoicePlaybackOutcome | None = None
             if (
                 role == "assistant"
                 and ordering_buffer.assistant_audio_tracker is not None
@@ -972,6 +996,9 @@ async def enqueue_ready_thread_message_tasks(
                     item_id
                 ):
                     return
+                playback_outcome = await ordering_buffer.assistant_audio_tracker.wait_for_item_playback_outcome(
+                    item_id
+                )
             # Retry in place so later writes cannot overtake this item. Classic
             # provider-side writes have no local idempotency guarantee.
             max_attempts = 2 if thread.version == 3 else 1
@@ -987,6 +1014,7 @@ async def enqueue_ready_thread_message_tasks(
                     output_index=output_index,
                     transcription_failed=item_id
                     in ordering_buffer.failed_transcription_item_ids,
+                    playback_outcome=playback_outcome,
                 )
                 if saved:
                     return

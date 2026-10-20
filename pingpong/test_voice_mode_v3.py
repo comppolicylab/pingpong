@@ -154,6 +154,9 @@ async def test_repeated_voice_transcript_write_is_scoped_to_thread_and_idempoten
                     role,
                     output_index=output_index,
                     transcription_failed=role == "user",
+                    playback_outcome="interrupted"
+                    if role == "assistant" and output_index == "0"
+                    else None,
                 )
         await session.commit()
 
@@ -193,6 +196,11 @@ async def test_repeated_voice_transcript_write_is_scoped_to_thread_and_idempoten
             if role == "user":
                 assert (
                     messages[0].message_metadata["voice_transcription_failed"] is True
+                )
+            else:
+                assert (
+                    messages[0].message_metadata["voice_playback_outcome"]
+                    == "interrupted"
                 )
             assert thread.user_message_ct == int(role == "user")
         assert len((await session.scalars(select(models.Run))).all()) == 2
@@ -442,7 +450,12 @@ async def test_audio_thread_copies_deletion_protection_from_assistant(
 
 
 @with_user(123)
-async def test_add_message_to_thread_persists_version_3_voice_messages(db, user):
+@pytest.mark.parametrize(
+    "playback_outcome", [None, "completed", "interrupted", "unknown"]
+)
+async def test_add_message_to_thread_persists_version_3_voice_messages(
+    db, user, playback_outcome
+):
     mock_threads_messages_create = AsyncMock()
     openai_client = SimpleNamespace(
         beta=SimpleNamespace(
@@ -508,6 +521,7 @@ async def test_add_message_to_thread_persists_version_3_voice_messages(db, user)
             transcript_text="hello from user",
             role="user",
             output_index="0",
+            playback_outcome=playback_outcome,
         )
         await add_message_to_thread(
             openai_client,  # type: ignore[arg-type]
@@ -517,6 +531,7 @@ async def test_add_message_to_thread_persists_version_3_voice_messages(db, user)
             transcript_text="hello from assistant",
             role="assistant",
             output_index="1",
+            playback_outcome=playback_outcome,
         )
 
         runs = (
@@ -564,6 +579,27 @@ async def test_add_message_to_thread_persists_version_3_voice_messages(db, user)
         assert len(messages[1].content) == 1
         assert messages[1].content[0].type == schemas.MessagePartType.OUTPUT_TEXT
         assert messages[1].content[0].text == "hello from assistant"
+        assert all(
+            message.message_status == schemas.MessageStatus.COMPLETED
+            for message in messages
+        )
+        assert messages[0].message_metadata is None
+        assert messages[1].message_metadata == (
+            {"voice_playback_outcome": playback_outcome} if playback_outcome else None
+        )
+        await session.commit()
+
+    async with db.async_session() as session:
+        saved = await session.scalar(
+            select(models.Message).where(
+                models.Message.thread_id == 21,
+                models.Message.message_id == "item-assistant-1",
+            )
+        )
+        assert saved is not None
+        assert saved.message_metadata == (
+            {"voice_playback_outcome": playback_outcome} if playback_outcome else None
+        )
 
     mock_threads_messages_create.assert_not_awaited()
 
