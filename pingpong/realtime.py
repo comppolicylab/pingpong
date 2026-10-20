@@ -12,7 +12,7 @@ from typing import Awaitable, Callable, Literal, cast
 import pybase64
 from fastapi import WebSocketDisconnect
 from openai import OpenAIError
-from sqlalchemy import func
+from sqlalchemy import func, select
 from starlette.requests import ClientDisconnect
 
 from openai.resources.realtime.realtime import AsyncRealtimeConnection
@@ -555,7 +555,7 @@ async def add_message_to_thread(
     realtime_recorder: RealtimeRecorder | None = None,
     output_index: str | None = None,
     transcription_failed: bool = False,
-):
+) -> bool:
     is_user_message = role == "user"
     message_saved = False
 
@@ -566,7 +566,7 @@ async def add_message_to_thread(
             role,
             output_index,
         )
-        return
+        return False
 
     if thread.version == 3:
         session = browser_connection.state["db"]
@@ -574,6 +574,16 @@ async def add_message_to_thread(
             # Keep the run, message text and user counter atomic without rolling
             # back transcripts already written by this session.
             async with session.begin_nested():
+                existing_message_run_id = await session.scalar(
+                    select(Message.run_id).where(
+                        Message.thread_id == thread.id, Message.message_id == item_id
+                    )
+                )
+                if existing_message_run_id is not None:
+                    browser_connection.state["voice_mode_run_id"] = (
+                        existing_message_run_id
+                    )
+                    return True
                 existing_run_id = (
                     browser_connection.state["voice_mode_run_id"]
                     if "voice_mode_run_id" in browser_connection.state
@@ -693,7 +703,7 @@ async def add_message_to_thread(
                 openai_connection_logger.exception(
                     "Failed to reload thread after realtime transcript rollback."
                 )
-            return
+            return False
     elif thread.version <= 2:
         try:
             metadata = {
@@ -726,19 +736,19 @@ async def add_message_to_thread(
             openai_connection_logger.exception(
                 f"Failed to send message to OpenAI: {e}, item_id={item_id}, role={role}"
             )
-            return
+            return False
     else:
         openai_connection_logger.error(
             "Unsupported thread version %s for realtime transcript persistence.",
             thread.version,
         )
-        return
+        return False
 
     if message_saved and realtime_recorder and not realtime_recorder.should_save_audio:
         realtime_recorder.should_save_audio = True
 
     if not message_saved:
-        return
+        return False
 
     if is_user_message and thread.version <= 2:
         try:
@@ -752,6 +762,7 @@ async def add_message_to_thread(
             openai_connection_logger.exception(
                 f"Failed to update thread in database: {e}"
             )
+    return True
 
 
 async def enqueue_ready_thread_message_tasks(
@@ -775,18 +786,31 @@ async def enqueue_ready_thread_message_tasks(
             role: ConversationRole = role,
             output_index: str = output_index,
         ):
-            await add_message_to_thread(
-                openai_client,
-                browser_connection,
-                thread,
-                item_id,
-                transcript_text,
-                role,
-                realtime_recorder=realtime_recorder,
-                output_index=output_index,
-                transcription_failed=item_id
-                in ordering_buffer.failed_transcription_item_ids,
-            )
+            # Retry in place so later writes cannot overtake this item. Classic
+            # provider-side writes have no local idempotency guarantee.
+            max_attempts = 2 if thread.version == 3 else 1
+            for attempt in range(max_attempts):
+                saved = await add_message_to_thread(
+                    openai_client,
+                    browser_connection,
+                    thread,
+                    item_id,
+                    transcript_text,
+                    role,
+                    realtime_recorder=realtime_recorder,
+                    output_index=output_index,
+                    transcription_failed=item_id
+                    in ordering_buffer.failed_transcription_item_ids,
+                )
+                if saved:
+                    return
+                if attempt + 1 < max_attempts:
+                    if not browser_connection.state["db"].is_active:
+                        return
+                    openai_connection_logger.warning(
+                        "Retrying Version 3 realtime transcript write for item_id=%s.",
+                        item_id,
+                    )
 
         await openai_task_queue.put(task)
 
