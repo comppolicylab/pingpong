@@ -1,3 +1,4 @@
+import asyncio
 from datetime import datetime, timezone
 import importlib
 from types import SimpleNamespace
@@ -10,9 +11,222 @@ from starlette.datastructures import State
 
 from pingpong.ai_models import KNOWN_MODELS
 from pingpong import models
+from pingpong import realtime as realtime_module
 import pingpong.schemas as schemas
 from pingpong.realtime import add_message_to_thread
 from pingpong.testutil import with_authz, with_user
+
+
+@with_user(123)
+@pytest.mark.parametrize(
+    "failure_stage, permanent_failure",
+    [
+        ("text", False),
+        ("text", True),
+        ("counter", False),
+        ("counter", True),
+        ("result", False),
+    ],
+)
+async def test_queued_voice_transcript_retries_without_blocking_later_messages(
+    db, user, monkeypatch, failure_stage, permanent_failure
+):
+    async with db.async_session() as session:
+        thread = models.Thread(version=3, user_message_ct=0, tools_available="[]")
+        session.add(thread)
+        await session.flush()
+        thread_id = thread.id
+        websocket = SimpleNamespace(
+            state=State({"db": session, "session": SimpleNamespace(user=user)})
+        )
+        buffer = realtime_module.ConversationItemOrderingBuffer(
+            realtime_module.openai_connection_logger
+        )
+        for item_id, predecessor, role in [
+            ("question", None, "user"),
+            ("answer", "question", "assistant"),
+        ]:
+            buffer.register_conversation_item(item_id, predecessor, role)
+            buffer.register_transcription(item_id, f"text for {item_id}", role)
+        queue = realtime_module.NamedQueue("test transcript writes")
+        await realtime_module.enqueue_ready_thread_message_tasks(
+            buffer, queue, None, websocket, thread, None
+        )
+
+        attempts = 0
+        writes = []
+        create_part = models.MessagePart.create
+        refresh = session.refresh
+        write_message = realtime_module.add_message_to_thread
+
+        async def maybe_fail_text(db_session, data):
+            nonlocal attempts
+            writes.append(data["text"])
+            if failure_stage == "text" and data["text"] == "text for question":
+                attempts += 1
+                if permanent_failure or attempts == 1:
+                    return await create_part(db_session, {**data, "type": None})
+            return await create_part(db_session, data)
+
+        async def maybe_fail_counter(instance, *args, **kwargs):
+            nonlocal attempts
+            await refresh(instance, *args, **kwargs)
+            if instance is thread and session.in_nested_transaction():
+                attempts += 1
+                if permanent_failure or attempts == 1:
+                    raise RuntimeError("injected counter failure")
+
+        async def maybe_lose_success_result(*args, **kwargs):
+            nonlocal attempts
+            saved = await write_message(*args, **kwargs)
+            if args[3] == "question":
+                attempts += 1
+                if attempts == 1:
+                    websocket.state._state.pop("voice_mode_run_id", None)
+                    return False
+            return saved
+
+        monkeypatch.setattr(models.MessagePart, "create", maybe_fail_text)
+        if failure_stage == "counter":
+            monkeypatch.setattr(session, "refresh", maybe_fail_counter)
+        elif failure_stage == "result":
+            monkeypatch.setattr(
+                realtime_module, "add_message_to_thread", maybe_lose_success_result
+            )
+        while not queue.empty():
+            await (await queue.get())()
+            queue.task_done()
+        await queue.join()
+        assert session.is_active
+        assert attempts == 2
+        assert writes == (
+            ["text for question", "text for answer"]
+            if failure_stage == "result"
+            else ["text for question", "text for question", "text for answer"]
+        )
+        await session.commit()
+
+    async with db.async_session() as session:
+        messages = (
+            await session.scalars(
+                select(models.Message)
+                .where(models.Message.thread_id == thread_id)
+                .order_by(models.Message.output_index)
+                .options(selectinload(models.Message.content))
+            )
+        ).all()
+        assert [message.message_id for message in messages] == (
+            ["answer"] if permanent_failure else ["question", "answer"]
+        )
+        assert [message.output_index for message in messages] == (
+            [1] if permanent_failure else [0, 1]
+        )
+        assert all(len(message.content) == 1 for message in messages)
+        assert len((await session.scalars(select(models.Run))).all()) == 1
+        saved_thread = await session.get(models.Thread, thread_id)
+        assert saved_thread.user_message_ct == int(not permanent_failure)
+
+
+@with_user(123)
+@pytest.mark.parametrize("role", ["user", "assistant"])
+async def test_repeated_voice_transcript_write_is_scoped_to_thread_and_idempotent(
+    db, user, role
+):
+    async with db.async_session() as session:
+        threads = [
+            models.Thread(version=3, user_message_ct=0, tools_available="[]")
+            for _ in range(2)
+        ]
+        session.add_all(threads)
+        await session.flush()
+        thread_ids = [thread.id for thread in threads]
+        for thread in threads:
+            websocket = SimpleNamespace(
+                state=State({"db": session, "session": SimpleNamespace(user=user)})
+            )
+            for output_index in ["0", "99"]:
+                await add_message_to_thread(
+                    None,
+                    websocket,
+                    thread,
+                    "same-item",
+                    "original text",
+                    role,
+                    output_index=output_index,
+                    transcription_failed=role == "user",
+                )
+        await session.commit()
+
+    async with db.async_session() as session:
+        for thread_id in thread_ids:
+            # Also replay after a commit with a fresh session and no cached run ID.
+            thread = await session.get(models.Thread, thread_id)
+            websocket = SimpleNamespace(
+                state=State({"db": session, "session": SimpleNamespace(user=user)})
+            )
+            await add_message_to_thread(
+                None,
+                websocket,
+                thread,
+                "same-item",
+                "replayed text",
+                role,
+                output_index="100",
+            )
+            messages = (
+                await session.scalars(
+                    select(models.Message)
+                    .where(models.Message.thread_id == thread_id)
+                    .options(selectinload(models.Message.content))
+                )
+            ).all()
+            assert len(messages) == 1
+            assert messages[0].output_index == 0
+            assert len(messages[0].content) == 1
+            assert messages[0].content[0].text == "original text"
+            assert websocket.state["voice_mode_run_id"] == messages[0].run_id
+            assert messages[0].message_status == (
+                schemas.MessageStatus.INCOMPLETE
+                if role == "user"
+                else schemas.MessageStatus.COMPLETED
+            )
+            if role == "user":
+                assert (
+                    messages[0].message_metadata["voice_transcription_failed"] is True
+                )
+            assert thread.user_message_ct == int(role == "user")
+        assert len((await session.scalars(select(models.Run))).all()) == 2
+
+
+@with_user(123)
+async def test_cancelled_voice_transcript_write_is_not_retried(db, user, monkeypatch):
+    async with db.async_session() as session:
+        thread = models.Thread(version=3, user_message_ct=0, tools_available="[]")
+        session.add(thread)
+        await session.flush()
+        websocket = SimpleNamespace(
+            state=State({"db": session, "session": SimpleNamespace(user=user)})
+        )
+        buffer = realtime_module.ConversationItemOrderingBuffer(
+            realtime_module.openai_connection_logger
+        )
+        buffer.register_conversation_item("question", None, "user")
+        buffer.register_transcription("question", "question text", "user")
+        queue = realtime_module.NamedQueue("test transcript writes")
+        await realtime_module.enqueue_ready_thread_message_tasks(
+            buffer, queue, None, websocket, thread, None
+        )
+        create_part = AsyncMock(side_effect=asyncio.CancelledError)
+        monkeypatch.setattr(models.MessagePart, "create", create_part)
+
+        with pytest.raises(asyncio.CancelledError):
+            await (await queue.get())()
+
+        create_part.assert_awaited_once()
+        assert session.is_active
+        assert not (await session.scalars(select(models.Message))).all()
+        assert not (await session.scalars(select(models.Run))).all()
+        assert thread.user_message_ct == 0
 
 
 @with_user(123)
