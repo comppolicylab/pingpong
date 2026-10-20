@@ -72,6 +72,84 @@ def make_recorder() -> RealtimeRecorder:
     return recorder
 
 
+@pytest.mark.parametrize("first_start", [0, 1000])
+@pytest.mark.parametrize("event_id", ["event-1", "event-2"])
+@pytest.mark.parametrize("phase", ["playing", "ended", "truncated", "finalized"])
+async def test_duplicate_playback_start_preserves_recording_timeline(
+    first_start, event_id, phase
+):
+    recorder = make_recorder()
+    for index, chunk_id in enumerate(("event-1", "event-2")):
+        await recorder.add_assistant_response_delta(
+            ONE_SECOND_PCM16, chunk_id, "item-1"
+        )
+        await recorder.started_playing_assistant_response_delta(
+            "item-1", chunk_id, first_start + index * 1000
+        )
+    if phase == "ended":
+        await recorder.ended_playing_assistant_response_delta("item-1", event_id)
+    elif phase == "truncated":
+        await recorder.stopped_playing_assistant_response(
+            "item-1", final_duration_ms=1500
+        )
+    elif phase == "finalized":
+        await recorder.finalize()
+    response = recorder.assistant_responses["item-1"]
+
+    def timeline():
+        return (
+            response.starts_at,
+            response.duration,
+            response.complete,
+            response.truncated,
+            {
+                chunk_id: (chunk.starts_at, chunk.ended)
+                for chunk_id, chunk in response.audio_chunks.items()
+            },
+        )
+
+    before = timeline()
+    await recorder.started_playing_assistant_response_delta(
+        "item-1", event_id, first_start + 5000
+    )
+    if phase != "playing":
+        await recorder.ended_playing_assistant_response_delta("item-1", event_id)
+    assert timeline() == before
+
+
+async def test_late_first_playback_start_is_accepted_after_end():
+    recorder = make_recorder()
+    await recorder.add_assistant_response_delta(ONE_SECOND_PCM16, "event-1", "item-1")
+    await recorder.ended_playing_assistant_response_delta("item-1", "event-1")
+    await recorder.ended_playing_assistant_response_delta("item-1", "event-1")
+    await recorder.started_playing_assistant_response_delta("item-1", "event-1", 1000)
+    await recorder.started_playing_assistant_response_delta("item-1", "event-1", 5000)
+    response = recorder.assistant_responses["item-1"]
+    assert response.starts_at == 1000
+    assert response.audio_chunks["event-1"].starts_at == 1000
+    assert response.audio_chunks["event-1"].ended
+
+
+@pytest.mark.parametrize("duplicate_start", [500, 5000])
+async def test_duplicate_playback_start_does_not_change_exported_audio_duration(
+    duplicate_start,
+):
+    recorder = make_recorder()
+    await recorder.add_assistant_response_delta(ONE_SECOND_PCM16, "event-1", "item-1")
+    await recorder.started_playing_assistant_response_delta("item-1", "event-1", 1000)
+    await recorder.ended_playing_assistant_response_delta("item-1", "event-1")
+    await recorder.started_playing_assistant_response_delta(
+        "item-1", "event-1", duplicate_start
+    )
+    await recorder.finalize()
+    await recorder.save_buffer()
+    assert recorder.audio_duration == 1000
+    assert recorder.end_timestamp == 2000
+    assert len(b"".join(cast_fake_ffmpeg(recorder.ffmpeg).stdin.writes)) == len(
+        ONE_SECOND_PCM16
+    )
+
+
 def test_make_audio_recording_id_keeps_thread_id_and_adds_unique_suffix():
     first = make_audio_recording_id("79169")
     second = make_audio_recording_id("79169")
