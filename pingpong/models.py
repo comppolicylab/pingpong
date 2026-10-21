@@ -9561,6 +9561,14 @@ class Thread(Base):
         server_default=schemas.InteractionMode.CHAT.name,
     )
     display_user_info = Column(Boolean, server_default="false")
+    recording_issue = Column(
+        Boolean, nullable=False, default=False, server_default=false()
+    )
+    upload_issue = Column(
+        Boolean, nullable=False, default=False, server_default=false()
+    )
+    recording_issue_details = Column(JSON, nullable=True)
+    upload_issue_details = Column(JSON, nullable=True)
     prevent_user_thread_deletion = Column(
         Boolean, nullable=False, default=False, server_default="false"
     )
