@@ -1307,11 +1307,17 @@
 	 * @param devices The updated list of available audio devices.
 	 */
 	const handleDeviceChange = (devices: ExtendedMediaDeviceInfo[]) => {
-		const namedDevices = devices.filter((device) => device.deviceId && device.label);
-		// Safari may hide names again once the permission-check stream stops.
-		// Keep the choices captured with access; Start still requests the exact ID.
-		if (devices.length > 0 && namedDevices.length === 0 && microphoneDevicesReady) return;
-		audioDevices = namedDevices;
+		// Reuse known names only for device IDs present in this update.
+		audioDevices = devices
+			.map((device) => {
+				const known = audioDevices.find((known) => known.deviceId === device.deviceId);
+				if (!device.label && known) {
+					known.default = device.default;
+					return known;
+				}
+				return device;
+			})
+			.filter((device) => device.deviceId && device.label);
 		microphoneDevicesReady = audioDevices.length > 0;
 		selectAudioDevice();
 	};
