@@ -251,6 +251,24 @@ async def test_tail_write_failure_still_finalizes_previously_saved_audio(
     assert "Failed to save user audio tail." in caplog.text
 
 
+async def test_first_assistant_save_preserves_existing_zero_boundary():
+    recorder = make_recorder()
+    recorder.end_timestamp = 0
+    assistant_pcm = b"\x02\x00" * 24_000
+    await recorder.add_assistant_response_delta(assistant_pcm, "event-1", "item-1")
+    await recorder.started_playing_assistant_response_delta("item-1", "event-1", 1_000)
+    await recorder.ended_playing_assistant_response_delta("item-1", "event-1")
+    await recorder.stopped_playing_assistant_response("item-1", 1_000)
+
+    await recorder.save_buffer()
+
+    assert b"".join(cast_fake_ffmpeg(recorder.ffmpeg).stdin.writes) == (
+        ONE_SECOND_PCM16 + assistant_pcm
+    )
+    assert recorder.audio_duration == 2_000
+    assert recorder.end_timestamp == 2_000
+
+
 @pytest.mark.parametrize("saved_until", [None, 0, 1_000, 1_500, 2_000])
 async def test_final_user_audio_flush_respects_saved_boundary(db, saved_until):
     recorder = make_recorder()
@@ -274,6 +292,62 @@ async def test_final_user_audio_flush_respects_saved_boundary(db, saved_until):
     assert recorder.end_timestamp == 2_000
     assert recorder.audio_duration == 2_000
     assert not recorder.user_audio
+
+
+@pytest.mark.parametrize("assistant_starts_at", [0, 1_000])
+@pytest.mark.parametrize("user_timing", ["absent", "before", "after"])
+@pytest.mark.parametrize("periodic_save", [False, True])
+async def test_first_recording_save_uses_available_audio(
+    db, assistant_starts_at, user_timing, periodic_save
+):
+    recorder = make_recorder()
+    recorder.end_timestamp = None
+    assistant_pcm = b"\x02\x00" * 24_000
+    user_pcm = b"\x01\x00" * 24_000
+    if user_timing == "before":
+        await recorder.add_user_audio(user_pcm, assistant_starts_at)
+    await recorder.add_assistant_response_delta(assistant_pcm, "event-1", "item-1")
+    await recorder.started_playing_assistant_response_delta(
+        "item-1", "event-1", assistant_starts_at
+    )
+    await recorder.ended_playing_assistant_response_delta("item-1", "event-1")
+    await recorder.stopped_playing_assistant_response("item-1", 1_000)
+    if user_timing == "after":
+        await recorder.add_user_audio(user_pcm, assistant_starts_at + 2_500)
+
+    expected = assistant_pcm
+    if user_timing == "before":
+        expected = user_pcm + expected
+    elif user_timing == "after":
+        expected += ONE_SECOND_PCM16[:24_000] + user_pcm
+    expected_duration = len(expected) // 48
+    if periodic_save:
+        await recorder.save_buffer()
+        assert "item-1" not in recorder.assistant_responses
+        assert recorder.end_timestamp == assistant_starts_at + 1_000
+        # Once saved, the same reply must not be encoded again.
+        await recorder.save_buffer()
+
+    async with db.async_session() as session:
+        thread = models.Thread(thread_id="thread-first-recording-save", version=3)
+        session.add(thread)
+        await session.flush()
+        recorder.thread_id = thread.id
+        recorder.session = session
+        await recorder.complete_audio_upload(has_played_audio=True)
+        await session.commit()
+        saved = await session.scalar(
+            select(VoiceModeRecording).where(VoiceModeRecording.thread_id == thread.id)
+        )
+        assert saved is not None
+        assert saved.duration == expected_duration
+
+    assert b"".join(cast_fake_ffmpeg(recorder.ffmpeg).stdin.writes) == expected
+    assert recorder.audio_duration == expected_duration
+    assert not recorder.user_audio
+    assert not recorder.assistant_responses
+    assert recorder.closed
+    assert recorder.audio_store_obj.completed
 
 
 @pytest.mark.parametrize("first_start", [0, 1000])
