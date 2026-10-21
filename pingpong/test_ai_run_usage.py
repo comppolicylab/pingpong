@@ -72,6 +72,7 @@ async def test_terminal_response_persists_full_usage(db, event_type, status):
         assert run.usage == payload
         assert run.status == status
         assert run.completed is not None
+        assert run.provider_metadata is None
 
 
 @pytest.mark.parametrize("completion", ["cleanup", "missing_usage", "forced_stop"])

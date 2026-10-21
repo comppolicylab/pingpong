@@ -206,6 +206,82 @@ def test_invalid_usage_metadata_does_not_break_event_processing(caplog):
     assert "Failed to serialize realtime usage metadata" in caplog.text
 
 
+def test_usage_and_diagnostic_snapshots_are_separate_and_do_not_alias_tracker_state():
+    usage = RealtimeUsage()
+    usage.observe(response_done("failed"))
+    usage.record_error(
+        event("error", event_id="event_error", error=SimpleNamespace(code="test_error"))
+    )
+    accounting = usage.to_json()
+    diagnostics = usage.provider_metadata_to_json()
+
+    assert accounting == {
+        "schema_version": 1,
+        "provider": "openai",
+        "api": "realtime",
+        "responses": {"resp_1": {"usage": RESPONSE_USAGE}},
+        "transcriptions": {},
+    }
+    assert set(diagnostics) == {
+        "schema_version",
+        "provider",
+        "api",
+        "responses",
+        "errors",
+    }
+    assert set(diagnostics["responses"]["resp_1"]) == {
+        "item_ids",
+        "status",
+        "status_details",
+    }
+    assert diagnostics["errors"][0]["error"]["code"] == "test_error"
+
+    accounting["responses"]["resp_1"]["usage"]["input_token_details"][
+        "audio_tokens"
+    ] = -1
+    diagnostics["responses"]["resp_1"]["item_ids"].append("extra")
+    diagnostics["responses"]["resp_1"]["status_details"]["error"]["code"] = "changed"
+    diagnostics["errors"][0]["error"]["code"] = "changed"
+    assert usage.to_json()["responses"]["resp_1"]["usage"] == RESPONSE_USAGE
+    original = usage.provider_metadata_to_json()
+    assert original["responses"]["resp_1"]["item_ids"] == ["reply"]
+    assert (
+        original["responses"]["resp_1"]["status_details"]["error"]["code"]
+        == "internal_error"
+    )
+    assert original["errors"][0]["error"]["code"] == "test_error"
+
+
+def test_transcription_only_usage_has_no_response_diagnostics():
+    usage = RealtimeUsage()
+    usage.observe(configured_session())
+    usage.observe(transcription_done({"type": "duration", "seconds": 2.5}))
+
+    assert usage.to_json()["transcriptions"] == {
+        "user": {
+            "0": {"model": "whisper-1", "usage": {"type": "duration", "seconds": 2.5}}
+        }
+    }
+    assert usage.provider_metadata_to_json() is None
+
+
+def test_content_filter_reason_is_preserved_only_in_provider_metadata():
+    payload = response_done("incomplete").model_dump(mode="json", exclude_unset=True)
+    payload["response"]["status_details"] = {
+        "type": "incomplete",
+        "reason": "content_filter",
+    }
+    usage = RealtimeUsage()
+    usage.observe(ResponseDoneEvent.model_validate(payload))
+
+    assert usage.to_json()["responses"] == {"resp_1": {"usage": RESPONSE_USAGE}}
+    assert usage.provider_metadata_to_json()["responses"]["resp_1"] == {
+        "item_ids": ["reply"],
+        "status": "incomplete",
+        "status_details": {"type": "incomplete", "reason": "content_filter"},
+    }
+
+
 async def test_received_usage_survives_cancellation_during_browser_delivery():
     drain = realtime.RealtimeShutdownDrain()
     browser = DummyWebSocket()
@@ -338,6 +414,11 @@ async def test_usage_only_run_preserves_cost_data_without_retaining_a_conversati
         assert runs[0].status == schemas.RunStatus.COMPLETED
         assert runs[0].completed is not None
         assert runs[0].usage == usage.to_json()
+        assert runs[0].provider_metadata == usage.provider_metadata_to_json()
+        assert runs[0].usage["responses"] == {
+            "resp_1": {"usage": RESPONSE_USAGE},
+            "resp_2": {"usage": RESPONSE_USAGE},
+        }
         assert runs[0].model == browser.state["assistant"].model
         assert not await websocket_module._thread_has_messages(
             session, runs[0].thread_id
@@ -377,7 +458,8 @@ async def test_failed_response_without_usage_or_playback_is_retained(db, user, v
         run = (await session.scalars(select(models.Run))).one()
         assert run.run_id == "sess_failed"
         assert run.instructions is None
-        assert run.usage["responses"]["resp_1"] == {
+        assert run.usage["responses"]["resp_1"] == {"usage": None}
+        assert run.provider_metadata["responses"]["resp_1"] == {
             "item_ids": ["reply"],
             "status": "failed",
             "status_details": {
@@ -388,7 +470,6 @@ async def test_failed_response_without_usage_or_playback_is_retained(db, user, v
                     "message": "Synthetic response failure.",
                 },
             },
-            "usage": None,
         }
         assert not await websocket_module._thread_has_messages(session, thread_id)
         assert await session.scalar(select(models.VoiceModeRecording.id)) is None
@@ -449,9 +530,9 @@ async def test_startup_error_without_provider_operations_is_retained(
         assert run.incomplete_reason is None
         assert run.completed is not None
         assert run.instructions is None
-        assert run.usage["responses"] == {}
-        assert run.usage["transcriptions"] == {}
-        assert run.usage["errors"] == [
+        assert run.usage is None
+        assert run.provider_metadata["responses"] == {}
+        assert run.provider_metadata["errors"] == [
             {
                 "event_id": "event_failure",
                 "error": {
@@ -578,7 +659,8 @@ async def test_provider_reader_failure_without_usage_is_retained(db, user, endin
         run = (await session.scalars(select(models.Run))).one()
         assert run.run_id == "sess_ended"
         assert run.completed is not None
-        assert run.usage["responses"] == {} and run.usage["transcriptions"] == {}
+        assert run.usage is None
+        assert run.provider_metadata is None
         if ending == "internal_error":
             assert run.status == schemas.RunStatus.FAILED
             assert run.error_code == "voice_event_processing_error"
@@ -657,7 +739,9 @@ async def test_failed_usage_save_does_not_rollback_saved_transcripts(
         assert (
             await session.scalars(select(models.Message))
         ).one().message_id == "user"
-        assert (await session.scalars(select(models.Run))).one().usage is None
+        run = (await session.scalars(select(models.Run))).one()
+        assert run.usage is None
+        assert run.provider_metadata is None
 
 
 @with_user(123)
@@ -821,7 +905,10 @@ async def test_session_persists_usage_after_transcripts_without_playback_gating(
     async with db.async_session() as session:
         run = (await session.scalars(select(models.Run))).one()
         assert run.run_id == "sess_voice"
-        assert ("errors" in run.usage) == (ending == "shutdown_control_error")
+        assert "errors" not in run.usage
+        assert ("errors" in run.provider_metadata) == (
+            ending == "shutdown_control_error"
+        )
         assert run.status == (
             schemas.RunStatus.INCOMPLETE
             if ending in {"missing_done", "closed", "shutdown_control_error"}
@@ -837,7 +924,9 @@ async def test_session_persists_usage_after_transcripts_without_playback_gating(
             else None
         )
         if ending == "recovered":
-            assert run.usage["responses"]["resp_failed"]["status"] == "failed"
+            assert (
+                run.provider_metadata["responses"]["resp_failed"]["status"] == "failed"
+            )
         assert run.instructions is None
         saved_thread = await session.get(models.Thread, thread_id)
         assert saved_thread.instructions == "Thread-owned voice instructions."

@@ -146,13 +146,34 @@ class RealtimeUsage:
             or self.incomplete_reason is not None
         )
 
-    def to_json(self) -> dict[str, Any]:
+    def to_json(self) -> dict[str, Any] | None:
+        if not self.responses and not self.transcriptions:
+            return None
+        return {
+            "schema_version": 1,
+            "provider": "openai",
+            "api": "realtime",
+            "responses": {
+                response_id: {"usage": deepcopy(record["usage"])}
+                for response_id, record in self.responses.items()
+            },
+            "transcriptions": deepcopy(self.transcriptions),
+        }
+
+    def provider_metadata_to_json(self) -> dict[str, Any] | None:
+        if not self.responses and not self.errors:
+            return None
         result = {
             "schema_version": 1,
             "provider": "openai",
             "api": "realtime",
-            "responses": deepcopy(self.responses),
-            "transcriptions": deepcopy(self.transcriptions),
+            "responses": {
+                response_id: {
+                    field: deepcopy(record[field])
+                    for field in ("item_ids", "status", "status_details")
+                }
+                for response_id, record in self.responses.items()
+            },
         }
         if self.errors:
             result["errors"] = deepcopy(self.errors)

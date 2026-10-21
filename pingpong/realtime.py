@@ -1030,6 +1030,7 @@ async def save_voice_usage(
             )
             run.completed = func.now()
             run.usage = usage.to_json()
+            run.provider_metadata = usage.provider_metadata_to_json()
             await session.flush()
         browser_connection.state["voice_mode_run_id"] = run.id
     except Exception:
