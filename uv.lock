@@ -1802,7 +1802,7 @@ wheels = [
 
 [[package]]
 name = "locust"
-version = "2.46.6"
+version = "2.46.7"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "configargparse" },
@@ -1822,9 +1822,9 @@ dependencies = [
     { name = "typing-extensions", marker = "python_full_version < '3.12'" },
     { name = "werkzeug" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/44/de/45f598ddfa8f00889b10ffdf1f21e0e2bac5fe868c44b6ef7e98d0603f1e/locust-2.46.6.tar.gz", hash = "sha256:424833db016bbfa3e0ee83f4966f4577a39ea9d2d311368ff1313ee88f76b968", size = 1479271, upload-time = "2026-09-17T17:46:15.451Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/c7/09/6487af16b8abaa58259e5f68ab3b72e3140156478af1b02fac5d9a20a9dd/locust-2.46.7.tar.gz", hash = "sha256:cf112214068abe59615d36769db31ffd1430b67c6e5f693b9a23b8510224442b", size = 1479672, upload-time = "2026-10-04T20:51:36.72Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/a9/b2/ad46212711c4b818322eeca8cb82b85c7e93712d0c6916daca513f497393/locust-2.46.6-py3-none-any.whl", hash = "sha256:a029bf6973457a8567a163a891ca2e9491e4b45a3f52749c9b011a75246483c7", size = 1498929, upload-time = "2026-09-17T17:46:13.264Z" },
+    { url = "https://files.pythonhosted.org/packages/75/74/9c5b14bf99b2d059bf7651893b656e9cc8dc984341bec760bd46278b6124/locust-2.46.7-py3-none-any.whl", hash = "sha256:a737bcf8d6728d4f0efe9e460ef9c69d0084e1dd085734db6e4775ece453b7fe", size = 1499328, upload-time = "2026-10-04T20:51:35.118Z" },
 ]
 
 [[package]]
@@ -2740,8 +2740,8 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "locust", specifier = "~=2.46.6" },
-    { name = "pre-commit", specifier = "~=4.6.2" },
+    { name = "locust", specifier = "~=2.46.7" },
+    { name = "pre-commit", specifier = "~=4.7.0" },
     { name = "pytest", specifier = "~=9.1.1" },
     { name = "pytest-asyncio", specifier = "~=1.4.0" },
     { name = "pytest-xdist", specifier = "~=3.8.0" },
@@ -2767,7 +2767,7 @@ wheels = [
 
 [[package]]
 name = "pre-commit"
-version = "4.6.2"
+version = "4.7.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "cfgv" },
@@ -2776,9 +2776,9 @@ dependencies = [
     { name = "pyyaml" },
     { name = "virtualenv" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/74/89/1f3e8e1fc3e97de0fa963495832f581f025f29471602a309e48808244292/pre_commit-4.6.2.tar.gz", hash = "sha256:8f5d7bfb021ecdbcd9d49d89847082dd24172ccde534390081a679ad046e2441", size = 198670, upload-time = "2026-08-10T22:07:18.421Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/3a/c3/6965c2690ddce885ec75121572d065a5b94c5a5d8d3e657927ecda9fd715/pre_commit-4.7.0.tar.gz", hash = "sha256:1f3deee12b914c8fa184bd2b5953391c2e4f36763e403d4a23dc9983fa7c6e86", size = 198120, upload-time = "2026-10-12T20:45:40.32Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/45/e2/bbb7129c9e7999a6b8ee9cca3b66486c25c423ab5a75f34071798b74ce94/pre_commit-4.6.2-py2.py3-none-any.whl", hash = "sha256:e2dde9a75d3bce11bd3831c26d134df00a2803c1d818be6a0383c3dcda25dc4e", size = 226202, upload-time = "2026-08-10T22:07:16.942Z" },
+    { url = "https://files.pythonhosted.org/packages/eb/83/ce0a196e4f7b20b11ce3aa1fc72fb973f64b7628d51c1b8aebad37fb7f81/pre_commit-4.7.0-py2.py3-none-any.whl", hash = "sha256:2e229038ad3656081b70c27913157e4b636ef306f643f024a8a8e3f0f7b2f877", size = 226261, upload-time = "2026-10-12T20:45:38.858Z" },
 ]
 
 [[package]]
