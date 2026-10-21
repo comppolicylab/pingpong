@@ -5871,7 +5871,25 @@
 						class="underline">OpenAI's Documentation</a
 					> for detailed descriptions of model capabilities.</Helper
 				>
-				{#if selectedModelDeprecated}
+				{#if selectedModelRecord?.is_available === false}
+					<div
+						role="alert"
+						class="mb-2 flex flex-row items-center gap-4 rounded-lg border border-red-400 bg-gradient-to-b from-red-50 to-red-100 p-4 py-2 text-red-800"
+					>
+						<ExclamationCircleOutline class="h-8 w-8 text-red-800" strokeWidth="2" />
+						<div class="flex flex-col">
+							<span class="text-sm font-semibold">Your selected model is no longer available</span>
+							<span class="text-xs">
+								Your AI provider no longer serves <span class="font-semibold"
+									>{selectedModelRecord.name}</span
+								>. This assistant cannot respond using this model.
+								<span class="font-semibold"
+									>Select an available model below and save your changes to restore this assistant.</span
+								>
+							</span>
+						</div>
+					</div>
+				{:else if selectedModelDeprecated}
 					<div
 						class="mb-2 flex flex-row items-center gap-4 rounded-lg border border-amber-400 bg-gradient-to-b from-amber-50 to-amber-100 p-4 py-2 text-amber-800"
 					>

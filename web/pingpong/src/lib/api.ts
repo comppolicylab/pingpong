@@ -2955,6 +2955,7 @@ export type AssistantModel = {
 	supports_reasoning: boolean;
 	supports_mcp_server: boolean;
 	hide_in_model_selector?: boolean;
+	is_available?: boolean;
 	reasoning_effort_levels?: number[];
 	default_prompt_id?: string | null;
 };
