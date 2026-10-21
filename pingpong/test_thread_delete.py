@@ -376,8 +376,15 @@ async def test_private_class_with_protected_thread_can_be_deleted(
 @with_user(3500)
 @with_authz(grants=[("user:3500", "can_create_thread", "class:3502")])
 async def test_chat_thread_copies_deletion_protection_from_assistant(
-    api, db, valid_user_token
+    api, db, valid_user_token, monkeypatch
 ):
+    server_module = importlib.import_module("pingpong.server")
+    monkeypatch.setattr(
+        server_module,
+        "get_initial_thread_conversation_name",
+        AsyncMock(return_value="Protected Chat"),
+    )
+
     async with db.async_session() as session:
         class_ = models.Class(
             id=3502,
