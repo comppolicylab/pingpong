@@ -16,7 +16,6 @@ from .config import config
 from pydantic import BaseModel, ConfigDict, Field
 from pydub import AudioSegment
 from sqlalchemy.ext.asyncio import AsyncSession
-from starlette.requests import ClientDisconnect
 
 realtime_recorder_logger = logging.getLogger("audio_recorder")
 
@@ -150,7 +149,6 @@ class RealtimeRecorder:
         self.upload_task: asyncio.Task | None = None
         self.thread_id = thread_id
         self.session = session
-        self.should_save_audio = False
 
     def _discard_assistant_response(self, item_id: str) -> AssistantResponse | None:
         response = self.assistant_responses.pop(item_id, None)
@@ -754,18 +752,29 @@ class RealtimeRecorder:
             realtime_recorder_logger.exception(f"Failed to save buffer: {e}")
 
     @not_closed
-    async def complete_audio_upload(self):
+    async def complete_audio_upload(self, *, has_played_audio: bool):
         """
         Completes the audio upload.
         """
-        # If we haven't added any messages to the thread,
-        # we should delete the file from the audio store
-        if not self.should_save_audio:
-            realtime_recorder_logger.warning(
-                "No audio to save, deleting the file from the audio store."
+        if not has_played_audio:
+            realtime_recorder_logger.info(
+                "No confirmed model playback; discarding the recording."
             )
-            await self.audio_store_obj.delete_file()
-            self.closed = True
+            # Stop all writers before deleting/aborting the upload, including
+            # any WebM header or periodic data already buffered by the encoder.
+            try:
+                if self.ffmpeg and self.ffmpeg.stdin:
+                    self.ffmpeg.stdin.close()
+                if self.ffmpeg:
+                    await self.ffmpeg.wait()
+                if self.upload_task:
+                    await self.upload_task
+            finally:
+                if self.upload_task:
+                    self.upload_task.cancel()
+                    await asyncio.gather(self.upload_task, return_exceptions=True)
+                await self.audio_store_obj.delete_file()
+                self.closed = True
             return
 
         # Finish bundling any responses or user audio still in RAM
@@ -836,20 +845,10 @@ class RealtimeRecorder:
         self.closed = True
 
     async def handle_saving_buffer(self, every: int = 5):
-        try:
-            while True:
-                await asyncio.sleep(every)
-                try:
-                    await self.save_buffer()
-                except Exception as e:
-                    realtime_recorder_logger.exception("Error in save_buffer: %s", e)
-        except (asyncio.CancelledError, ClientDisconnect):
+        # The session supervisor owns finalization after transcript writes drain.
+        while True:
+            await asyncio.sleep(every)
             try:
-                realtime_recorder_logger.debug(
-                    "Received task cancellation signal. Saving buffer before closing."
-                )
-                await self.complete_audio_upload()
+                await self.save_buffer()
             except Exception as e:
                 realtime_recorder_logger.exception("Error in save_buffer: %s", e)
-            finally:
-                raise

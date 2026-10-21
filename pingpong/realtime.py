@@ -107,6 +107,7 @@ class RealtimeAssistantAudioTracker:
             str, dict[str, _AssistantAudioPlaybackEvent]
         ] = {}
         self._played_item_ids: set[str] = set()
+        self._retention_decided = asyncio.Event()
 
     @property
     def has_played_audio(self) -> bool:
@@ -114,6 +115,14 @@ class RealtimeAssistantAudioTracker:
 
     def has_item_played_audio(self, item_id: str) -> bool:
         return item_id in self._played_item_ids
+
+    async def wait_for_retention_decision(self) -> bool:
+        await self._retention_decided.wait()
+        return self.has_played_audio
+
+    def finish_playback_tracking(self) -> None:
+        # The browser reader must be stopped before resolving an unheard session.
+        self._retention_decided.set()
 
     async def add_audio_delta(
         self,
@@ -204,6 +213,7 @@ class RealtimeAssistantAudioTracker:
                 return False
             event.started = True
         self._played_item_ids.add(item_id)
+        self._retention_decided.set()
         if event.started and event.ended:
             del self._playback_events_by_item_id[item_id][event_id]
             if not self._playback_events_by_item_id[item_id]:
@@ -810,9 +820,6 @@ async def add_message_to_thread(
         )
         return False
 
-    if message_saved and realtime_recorder and not realtime_recorder.should_save_audio:
-        realtime_recorder.should_save_audio = True
-
     if not message_saved:
         return False
 
@@ -1370,15 +1377,18 @@ class NamedQueue(asyncio.Queue):
 async def process_queue_tasks(
     task_queue: NamedQueue,
     task_logger: logging.Logger,
+    assistant_audio_tracker: RealtimeAssistantAudioTracker,
 ):
     try:
         while True:
             task_func = await task_queue.get()
             try:
-                await task_func()
+                if await assistant_audio_tracker.wait_for_retention_decision():
+                    await task_func()
             except Exception as e:
                 task_logger.exception(f"Error processing {task_queue.name} task: {e}")
-            task_queue.task_done()
+            finally:
+                task_queue.task_done()
     except (asyncio.CancelledError, ClientDisconnect):
         task_logger.debug("Task queue processor was cancelled.")
 
@@ -1443,7 +1453,9 @@ async def browser_realtime_websocket(
         asyncio.create_task(wait_for_browser_disconnect_drain()),
     ]
     openai_queue_processor = asyncio.create_task(
-        process_queue_tasks(openai_task_queue, openai_connection_logger)
+        process_queue_tasks(
+            openai_task_queue, openai_connection_logger, assistant_audio_tracker
+        )
     )
 
     if realtime_recorder:
@@ -1458,17 +1470,34 @@ async def browser_realtime_websocket(
             task.cancel()
         results = await asyncio.gather(*realtime_tasks, return_exceptions=True)
         try:
-            # Stop producers first, then finish writes already queued.
+            if not assistant_audio_tracker.has_played_audio:
+                # No writes have qualified yet. Stop telemetry before deciding
+                # to discard; a final callback during cancellation still counts.
+                browser_task.cancel()
+                await asyncio.wait({browser_task})
+            assistant_audio_tracker.finish_playback_tracking()
+            # Stop producers first, then save qualified messages or discard the
+            # queued writes without touching local or provider-side history.
             await openai_task_queue.join()
         finally:
             openai_queue_processor.cancel()
             results.extend(
                 await asyncio.gather(openai_queue_processor, return_exceptions=True)
             )
-            # Keep the browser task alive until provider/recorder cleanup and
-            # queued transcript writes finish. Also reap it if it failed earlier.
-            browser_task.cancel()
+            if not browser_task.done():
+                browser_task.cancel()
             results.extend(await asyncio.gather(browser_task, return_exceptions=True))
+            # The recorder shares the transcript writer's DB session. Finalize
+            # only after writes and browser buffer mutations have stopped.
+            if realtime_recorder:
+                try:
+                    await realtime_recorder.complete_audio_upload(
+                        has_played_audio=assistant_audio_tracker.has_played_audio
+                    )
+                except Exception:
+                    openai_connection_logger.exception(
+                        "Error finalizing realtime recording."
+                    )
         for result in results:
             if isinstance(result, Exception) and not isinstance(
                 result, (ClientDisconnect, WebSocketDisconnect)

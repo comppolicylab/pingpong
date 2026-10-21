@@ -4,8 +4,9 @@ import importlib
 import inspect
 import json
 import logging
+import struct
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from openai.types.realtime import ResponseDoneEvent
@@ -246,7 +247,284 @@ async def test_invalid_browser_playback_start_does_not_corrupt_recorder(override
 
 
 @with_user(123)
-async def test_session_saves_late_transcripts_after_browser_disconnect(db, user):
+@pytest.mark.parametrize("version", [1, 2, 3])
+@pytest.mark.parametrize("recording", [False, True])
+@pytest.mark.parametrize("played", [False, True])
+@pytest.mark.parametrize("transcribed", [False, True])
+async def test_session_retention_depends_on_playback_not_transcripts(
+    db, user, monkeypatch, version, recording, played, transcribed
+):
+    audio_delivered = asyncio.Event()
+    browser_processed = asyncio.Event()
+    provider_messages = AsyncMock()
+
+    class Stream:
+        input_audio_buffer = SimpleNamespace(append=AsyncMock())
+
+        async def __aiter__(self):
+            yield SimpleNamespace(
+                type="conversation.item.added",
+                previous_item_id=None,
+                item=SimpleNamespace(id="question", type="message", role="user"),
+            )
+            if transcribed:
+                yield SimpleNamespace(
+                    type="conversation.item.input_audio_transcription.completed",
+                    item_id="question",
+                    transcript="question",
+                )
+            yield SimpleNamespace(
+                type="conversation.item.added",
+                previous_item_id="question",
+                item=SimpleNamespace(id="reply", type="message", role="assistant"),
+            )
+            if transcribed:
+                yield SimpleNamespace(
+                    type="response.output_audio_transcript.done",
+                    item_id="reply",
+                    transcript="answer",
+                )
+            yield synthetic_assistant_audio()
+            await browser_processed.wait()
+
+    async with db.async_session() as session:
+        thread = models.Thread(
+            version=version,
+            thread_id="classic-thread" if version < 3 else None,
+            user_message_ct=0,
+            tools_available="[]",
+            display_user_info=recording,
+        )
+        session.add(thread)
+        await session.flush()
+        thread_id = thread.id
+        recorder = buffering_recorder(thread_id, session)
+        store = SimpleNamespace(complete_upload=AsyncMock(), delete_file=AsyncMock())
+        recorder.audio_store_obj = store
+        recorder.ffmpeg = SimpleNamespace(
+            stdin=SimpleNamespace(close=Mock(), write=Mock(), drain=AsyncMock()),
+            wait=AsyncMock(),
+        )
+        monkeypatch.setattr(
+            RealtimeRecorder, "create", AsyncMock(return_value=recorder)
+        )
+        websocket = DummyWebSocket()
+        websocket.state["db"] = session
+        websocket.state["session"] = SimpleNamespace(user=user)
+        websocket.state["anonymous_share_token"] = None
+        websocket.state["anonymous_session_token"] = None
+        websocket.state["thread"] = thread
+        websocket.state["openai_client"] = SimpleNamespace(
+            beta=SimpleNamespace(
+                threads=SimpleNamespace(
+                    messages=SimpleNamespace(create=provider_messages)
+                )
+            )
+        )
+        stream = Stream()
+        websocket.state["realtime_connection"] = stream
+        sent_microphone = False
+        sent_playback = False
+
+        async def send_json(data):
+            websocket.sent_json.append(data)
+            if data.get("type") == "response.audio.delta":
+                audio_delivered.set()
+
+        async def receive():
+            nonlocal sent_microphone, sent_playback
+            if not sent_microphone:
+                sent_microphone = True
+                return {"bytes": struct.pack(">d", 1000) + b"\0" * 480}
+            await audio_delivered.wait()
+            if not sent_playback:
+                # Transcripts queued before playback must not write history yet.
+                assert not provider_messages.await_count
+                assert "voice_mode_run_id" not in websocket.state._state
+                sent_playback = True
+                return {
+                    "text": json.dumps(
+                        {
+                            "type": "response.audio.delta.started",
+                            "item_id": "reply" if played else "unknown",
+                            "event_id": "audio-1",
+                            "started_playing_at": 1000,
+                        }
+                    )
+                }
+            browser_processed.set()
+            return await asyncio.Future()
+
+        websocket.send_json = send_json
+        websocket.receive = receive
+        websocket._raise_on_disconnect = lambda message: None
+        handler = inspect.unwrap(realtime_module.browser_realtime_websocket)
+        await asyncio.wait_for(handler(websocket, "1", str(thread_id)), timeout=2)
+        await session.commit()
+        assert thread.user_message_ct == int(played and transcribed)
+        assert provider_messages.await_count == (
+            2 if version < 3 and played and transcribed else 0
+        )
+        stream.input_audio_buffer.append.assert_awaited_once()
+        if recording:
+            assert recorder.closed
+            assert store.complete_upload.await_count == int(played)
+            assert store.delete_file.await_count == int(not played)
+            recorder.ffmpeg.stdin.close.assert_called_once()
+            recorder.ffmpeg.wait.assert_awaited_once()
+            if played:
+                assert recorder.audio_duration > 0
+                recorder.ffmpeg.stdin.write.assert_called()
+
+    async with db.async_session() as session:
+        assert await websocket_module._thread_has_messages(session, thread_id) == (
+            version == 3 and played and transcribed
+        )
+        saved_recording = await session.scalar(
+            select(models.VoiceModeRecording).where(
+                models.VoiceModeRecording.thread_id == thread_id
+            )
+        )
+        assert (saved_recording is not None) == (recording and played)
+        assert bool(
+            await session.scalar(
+                select(models.Run.id).where(models.Run.thread_id == thread_id)
+            )
+        ) == (version == 3 and played and transcribed)
+
+
+@pytest.mark.parametrize("played", [False, True])
+@pytest.mark.parametrize("ended", [False, True])
+async def test_queued_writes_wait_for_session_retention_decision(played, ended):
+    tracker = realtime_module.RealtimeAssistantAudioTracker()
+    queue = realtime_module.NamedQueue("retention-test")
+    write = AsyncMock()
+    await queue.put(write)
+    worker = asyncio.create_task(
+        realtime_module.process_queue_tasks(queue, logging.getLogger(__name__), tracker)
+    )
+    try:
+        with pytest.raises(TimeoutError):
+            await asyncio.wait_for(queue.join(), timeout=0.02)
+        write.assert_not_awaited()
+        await tracker.add_audio_delta("reply", "audio", b"\0\0")
+        if played:
+            callback = (
+                tracker.mark_audio_event_playback_ended
+                if ended
+                else tracker.mark_audio_event_playback_started
+            )
+            await callback("reply", "audio")
+        else:
+            tracker.finish_playback_tracking()
+        await asyncio.wait_for(queue.join(), timeout=1)
+        assert write.await_count == int(played)
+    finally:
+        worker.cancel()
+        await asyncio.gather(worker, return_exceptions=True)
+
+
+async def test_recording_finalization_waits_for_in_flight_transcript_write(monkeypatch):
+    writing = asyncio.Event()
+    release_write = asyncio.Event()
+    periodic_stopped = asyncio.Event()
+    write_finished = False
+
+    async def write():
+        nonlocal write_finished
+        writing.set()
+        await release_write.wait()
+        write_finished = True
+
+    async def provider(*args):
+        queue, tracker = args[4:6]
+        await tracker.add_audio_delta("reply", "audio", b"\0\0")
+        await tracker.mark_audio_event_playback_started("reply", "audio")
+        await queue.put(write)
+        await writing.wait()
+
+    async def browser(*args):
+        await asyncio.Future()
+
+    async def periodic(**kwargs):
+        try:
+            await asyncio.Future()
+        finally:
+            periodic_stopped.set()
+
+    async def finalize(*, has_played_audio):
+        assert has_played_audio
+        assert write_finished
+
+    recorder = SimpleNamespace(
+        handle_saving_buffer=periodic,
+        complete_audio_upload=AsyncMock(side_effect=finalize),
+    )
+    monkeypatch.setattr(realtime_module, "handle_openai_events", provider)
+    monkeypatch.setattr(realtime_module, "handle_browser_messages", browser)
+    monkeypatch.setattr(RealtimeRecorder, "create", AsyncMock(return_value=recorder))
+    websocket = DummyWebSocket()
+    websocket.state["thread"] = SimpleNamespace(
+        id=1, thread_id=None, display_user_info=True
+    )
+    websocket.state["db"] = None
+    websocket.state["openai_client"] = None
+    websocket.state["realtime_connection"] = None
+    task = asyncio.create_task(
+        inspect.unwrap(realtime_module.browser_realtime_websocket)(websocket, "1", "1")
+    )
+    try:
+        await asyncio.wait_for(periodic_stopped.wait(), timeout=1)
+        recorder.complete_audio_upload.assert_not_awaited()
+        assert not task.done()
+        release_write.set()
+        await asyncio.wait_for(task, timeout=1)
+        recorder.complete_audio_upload.assert_awaited_once_with(has_played_audio=True)
+    finally:
+        release_write.set()
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+
+async def test_final_playback_callback_before_browser_stops_can_qualify_session(
+    monkeypatch,
+):
+    browser_ready = asyncio.Event()
+    write = AsyncMock()
+
+    async def browser(*args):
+        tracker = args[2]
+        browser_ready.set()
+        try:
+            await asyncio.Future()
+        finally:
+            await tracker.mark_audio_event_playback_ended("reply", "audio")
+
+    async def provider(*args):
+        queue, tracker = args[4:6]
+        await browser_ready.wait()
+        await tracker.add_audio_delta("reply", "audio", b"\0\0")
+        await queue.put(write)
+
+    monkeypatch.setattr(realtime_module, "handle_openai_events", provider)
+    monkeypatch.setattr(realtime_module, "handle_browser_messages", browser)
+    websocket = DummyWebSocket()
+    websocket.state["thread"] = SimpleNamespace(display_user_info=False)
+    websocket.state["db"] = None
+    websocket.state["openai_client"] = None
+    websocket.state["realtime_connection"] = None
+    await asyncio.wait_for(
+        inspect.unwrap(realtime_module.browser_realtime_websocket)(websocket, "1", "1"),
+        timeout=1,
+    )
+    write.assert_awaited_once()
+
+
+@with_user(123)
+@pytest.mark.parametrize("played", [False, True])
+async def test_session_saves_late_transcripts_after_browser_disconnect(
+    db, user, played
+):
     disconnect = asyncio.Event()
     browser_disconnected = asyncio.Event()
     provider_waiting = asyncio.Event()
@@ -271,6 +549,7 @@ async def test_session_saves_late_transcripts_after_browser_disconnect(db, user)
                     item_id="reply",
                     transcript="answer",
                 )
+                yield synthetic_assistant_audio()
                 provider_waiting.set()
                 await finish_transcript.wait()
                 yield SimpleNamespace(
@@ -297,11 +576,25 @@ async def test_session_saves_late_transcripts_after_browser_disconnect(db, user)
         websocket.state["realtime_connection"] = DelayedTranscriptStream()
 
         async def receive():
+            if played and not getattr(websocket, "playback_sent", False):
+                await provider_waiting.wait()
+                websocket.playback_sent = True
+                return {
+                    "text": json.dumps(
+                        {
+                            "type": "response.audio.delta.started",
+                            "item_id": "reply",
+                            "event_id": "audio-1",
+                            "started_playing_at": 1000,
+                        }
+                    )
+                }
             await disconnect.wait()
             browser_disconnected.set()
             raise WebSocketDisconnect(code=1000)
 
         websocket.receive = receive
+        websocket._raise_on_disconnect = lambda message: None
         handler = inspect.unwrap(realtime_module.browser_realtime_websocket)
         task = asyncio.create_task(handler(websocket, "1", str(thread_id)))
         try:
@@ -328,19 +621,32 @@ async def test_session_saves_late_transcripts_after_browser_disconnect(db, user)
                 .options(selectinload(models.Message.content))
             )
         ).all()
-        assert [message.message_id for message in messages] == ["question", "reply"]
-        assert [message.content[0].text for message in messages] == [
-            "question",
-            "answer",
-        ]
+        assert [message.message_id for message in messages] == (
+            ["question", "reply"] if played else []
+        )
+        assert [message.content[0].text for message in messages] == (
+            ["question", "answer"] if played else []
+        )
+        assert await websocket_module._thread_has_messages(session, thread_id) == played
+        saved_thread = await session.get(models.Thread, thread_id)
+        assert saved_thread.user_message_ct == int(played)
+        assert (
+            bool(
+                await session.scalar(
+                    select(models.Run.id).where(models.Run.thread_id == thread_id)
+                )
+            )
+            == played
+        )
 
 
 @pytest.mark.parametrize(
     "ending", ["provider", "disconnect_timeout", "cancel", "provider_error"]
 )
 @pytest.mark.parametrize("recording", [False, True])
+@pytest.mark.parametrize("played", [False, True])
 async def test_realtime_session_owns_tasks_and_cleans_browser_last(
-    monkeypatch, caplog, ending, recording
+    monkeypatch, caplog, ending, recording, played
 ):
     browser_ready = asyncio.Event()
     disconnect = asyncio.Event()
@@ -352,6 +658,10 @@ async def test_realtime_session_owns_tasks_and_cleans_browser_last(
 
     async def browser(*args):
         children.append(asyncio.current_task())
+        if played:
+            tracker = args[2]
+            await tracker.add_audio_delta("reply", "audio", b"\0\0")
+            await tracker.mark_audio_event_playback_started("reply", "audio")
         browser_ready.set()
         try:
             await disconnect.wait()
@@ -376,6 +686,12 @@ async def test_realtime_session_owns_tasks_and_cleans_browser_last(
         finally:
             cleanup.append("recorder")
 
+    async def finalize_recording(*, has_played_audio):
+        assert has_played_audio == played
+        assert "writer" in cleanup
+        assert "browser" in cleanup
+        cleanup.append("finalize")
+
     process_queue = realtime_module.process_queue_tasks
 
     async def writer(*args):
@@ -391,7 +707,12 @@ async def test_realtime_session_owns_tasks_and_cleans_browser_last(
     monkeypatch.setattr(
         realtime_module.RealtimeRecorder,
         "create",
-        AsyncMock(return_value=SimpleNamespace(handle_saving_buffer=save_recording)),
+        AsyncMock(
+            return_value=SimpleNamespace(
+                handle_saving_buffer=save_recording,
+                complete_audio_upload=finalize_recording,
+            )
+        ),
     )
     monkeypatch.setattr(
         realtime_module, "BROWSER_DISCONNECT_DRAIN_SECONDS", 0.02, raising=False
@@ -422,10 +743,13 @@ async def test_realtime_session_owns_tasks_and_cleans_browser_last(
         else:
             await asyncio.wait_for(task, timeout=1)
         assert all(child.done() for child in children)
-        if ending != "disconnect_timeout":
-            assert cleanup[-1] == "browser"
+        if ending != "disconnect_timeout" and played:
+            assert cleanup.index("writer") < cleanup.index("browser")
+        if not played:
+            assert cleanup.index("browser") < cleanup.index("writer")
         if recording:
             assert cleanup.index("recorder") < cleanup.index("writer")
+            assert cleanup[-1] == "finalize"
         if ending == "provider_error":
             assert "synthetic provider failure" in caplog.text
     finally:
