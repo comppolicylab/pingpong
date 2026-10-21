@@ -76,6 +76,7 @@ def make_recorder() -> RealtimeRecorder:
 @pytest.mark.parametrize("encoder_error", [False, True])
 async def test_unheard_recording_stops_writers_before_deleting(encoder_error):
     recorder = make_recorder()
+    await recorder.add_user_audio(ONE_SECOND_PCM16, 2_000)
     store = recorder.audio_store_obj
     encoder_finished = asyncio.Event()
     upload_finished = asyncio.Event()
@@ -110,6 +111,169 @@ async def test_unheard_recording_stops_writers_before_deleting(encoder_error):
     assert recorder.closed
     assert store.deleted
     assert not store.completed
+    assert get_write_count(recorder) == 0
+
+
+@pytest.mark.parametrize("periodic_save", [False, True])
+@pytest.mark.parametrize("overlap", [False, True])
+@pytest.mark.parametrize("unheard_reply", [False, True])
+async def test_complete_upload_preserves_trailing_user_audio(
+    db, periodic_save, overlap, unheard_reply
+):
+    recorder = make_recorder()
+    recorder.end_timestamp = None
+    initial_user = b"\x01\x00" * 24_000
+    assistant = b"\x02\x00" * 24_000
+    trailing_user = b"\x03\x00" * 24_000
+    tail_ends_at = 2_500 if overlap else 3_500
+    await recorder.add_user_audio(initial_user, 1_000)
+    await recorder.add_assistant_response_delta(assistant, "event-1", "item-1")
+    await recorder.started_playing_assistant_response_delta("item-1", "event-1", 1_000)
+    await recorder.ended_playing_assistant_response_delta("item-1", "event-1")
+    await recorder.stopped_playing_assistant_response("item-1", 1_000)
+    await recorder.add_user_audio(trailing_user, tail_ends_at)
+    if periodic_save:
+        await recorder.save_buffer()
+        assert "item-1" not in recorder.assistant_responses
+        assert recorder.end_timestamp == 2_000
+        # A later idle save must not consume the tail or extend the file.
+        await recorder.save_buffer()
+        assert recorder.end_timestamp == 2_000
+    if unheard_reply:
+        await recorder.add_assistant_response_delta(
+            b"\x09\x00" * 24_000, "event-unheard", "item-unheard"
+        )
+
+    async with db.async_session() as session:
+        thread = models.Thread(thread_id="thread-tail", version=3)
+        session.add(thread)
+        await session.flush()
+        recorder.thread_id = thread.id
+        recorder.session = session
+        await recorder.complete_audio_upload(has_played_audio=True)
+        await session.commit()
+        saved = await session.scalar(
+            select(VoiceModeRecording).where(VoiceModeRecording.thread_id == thread.id)
+        )
+        assert saved is not None
+        assert saved.duration == tail_ends_at
+
+    if overlap:
+        expected = (
+            initial_user
+            + assistant[:24_000]
+            + b"\x05\x00" * 12_000
+            + trailing_user[24_000:]
+        )
+    else:
+        expected = initial_user + assistant + ONE_SECOND_PCM16[:24_000] + trailing_user
+    assert b"".join(cast_fake_ffmpeg(recorder.ffmpeg).stdin.writes) == expected
+    assert recorder.audio_duration == tail_ends_at
+    assert recorder.end_timestamp == tail_ends_at
+    assert not recorder.user_audio
+    assert recorder.closed
+    assert recorder.audio_store_obj.completed
+
+
+@pytest.mark.parametrize(
+    "stage,error", [("write", BrokenPipeError), ("drain", ConnectionResetError)]
+)
+async def test_tail_write_failure_still_finalizes_previously_saved_audio(
+    db, monkeypatch, caplog, stage, error
+):
+    recorder = make_recorder()
+    recorder.end_timestamp = None
+    await recorder.add_user_audio(ONE_SECOND_PCM16, 1_000)
+    await recorder.add_assistant_response_delta(ONE_SECOND_PCM16, "audio", "reply")
+    await recorder.started_playing_assistant_response_delta("reply", "audio", 1_000)
+    await recorder.stopped_playing_assistant_response("reply", 1_000)
+    await recorder.save_buffer()
+    assert recorder.audio_duration == 2_000
+    saved_writes = list(cast_fake_ffmpeg(recorder.ffmpeg).stdin.writes)
+    await recorder.add_user_audio(ONE_SECOND_PCM16, 3_000)
+
+    def fail_write(data):
+        raise error("injected tail write failure")
+
+    async def fail_drain():
+        raise error("injected tail drain failure")
+
+    monkeypatch.setattr(
+        recorder.ffmpeg.stdin, stage, fail_write if stage == "write" else fail_drain
+    )
+    encoder_finished = asyncio.Event()
+    cleanup = []
+
+    async def finish_encoding():
+        assert recorder.ffmpeg.stdin.closed
+        cleanup.append("encoder")
+        encoder_finished.set()
+
+    async def upload():
+        await encoder_finished.wait()
+        cleanup.append("upload")
+
+    monkeypatch.setattr(recorder.ffmpeg, "wait", finish_encoding)
+    recorder.upload_task = asyncio.create_task(upload())
+    try:
+        async with db.async_session() as session:
+            thread = models.Thread(version=3)
+            session.add(thread)
+            await session.flush()
+            recorder.thread_id = thread.id
+            recorder.session = session
+            await asyncio.wait_for(
+                recorder.complete_audio_upload(has_played_audio=True), timeout=1
+            )
+            await session.commit()
+            recording = await session.scalar(
+                select(VoiceModeRecording).where(
+                    VoiceModeRecording.thread_id == thread.id
+                )
+            )
+            assert recording is not None
+            assert recording.duration == 2_000
+    finally:
+        recorder.upload_task.cancel()
+        await asyncio.gather(recorder.upload_task, return_exceptions=True)
+
+    assert cleanup == ["encoder", "upload"]
+    assert recorder.audio_store_obj.completed
+    assert not recorder.audio_store_obj.deleted
+    assert recorder.closed
+    assert recorder.audio_duration == 2_000
+    assert recorder.end_timestamp == 2_000
+    assert len(recorder.user_audio) == 1
+    assert (
+        cast_fake_ffmpeg(recorder.ffmpeg).stdin.writes[: len(saved_writes)]
+        == saved_writes
+    )
+    assert "Failed to save user audio tail." in caplog.text
+
+
+@pytest.mark.parametrize("saved_until", [None, 0, 1_000, 1_500, 2_000])
+async def test_final_user_audio_flush_respects_saved_boundary(db, saved_until):
+    recorder = make_recorder()
+    recorder.end_timestamp = saved_until
+    recorder.audio_duration = saved_until or 0
+    # An old late-arriving chunk must not be appended a second time. A chunk
+    # crossing the saved boundary must contribute only its unsaved suffix.
+    await recorder.add_user_audio(b"\x01\x00" * 24_000, 1_000)
+    await recorder.add_user_audio(b"\x02\x00" * 24_000, 2_000)
+    async with db.async_session() as session:
+        thread = models.Thread(thread_id="thread-tail-boundary", version=3)
+        session.add(thread)
+        await session.flush()
+        recorder.thread_id = thread.id
+        recorder.session = session
+        await recorder.complete_audio_upload(has_played_audio=True)
+
+    expected = b"\x01\x00" * 24_000 + b"\x02\x00" * 24_000
+    expected = expected[(saved_until or 0) * 48 :]
+    assert b"".join(cast_fake_ffmpeg(recorder.ffmpeg).stdin.writes) == expected
+    assert recorder.end_timestamp == 2_000
+    assert recorder.audio_duration == 2_000
+    assert not recorder.user_audio
 
 
 @pytest.mark.parametrize("first_start", [0, 1000])
