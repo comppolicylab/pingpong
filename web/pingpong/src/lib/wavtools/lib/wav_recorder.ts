@@ -289,7 +289,7 @@ export class WavRecorder {
 			// And we only want the most recent callback() to be executed
 			// if a few are operating at the same time
 			let lastId = 0;
-			let lastDevices: ExtendedMediaDeviceInfo[] = [];
+			let lastDevices: ExtendedMediaDeviceInfo[] | null = null;
 			const serializeDevices = (devices: ExtendedMediaDeviceInfo[]) =>
 				devices
 					.map((d) => JSON.stringify([d.deviceId, d.label]))
@@ -305,7 +305,7 @@ export class WavRecorder {
 					return;
 				}
 				if (this._deviceChangeCallback === cb && id === lastId) {
-					if (serializeDevices(lastDevices) !== serializeDevices(devices)) {
+					if (lastDevices === null || serializeDevices(lastDevices) !== serializeDevices(devices)) {
 						lastDevices = devices;
 						callback(devices.slice() as Array<ExtendedMediaDeviceInfo>);
 					}
@@ -600,12 +600,11 @@ export class WavRecorder {
 	}
 
 	/**
-	 * Performs a full cleanup of WavRecorder instance
-	 * Stops actively listening via microphone and removes existing listeners
+	 * Stops microphone capture and removes the device listener unless retained for retry
 	 * @returns {Promise<true>}
 	 */
-	async quit() {
-		this.listenForDeviceChange(null);
+	async quit({ keepDeviceListener = false } = {}) {
+		if (!keepDeviceListener) this.listenForDeviceChange(null);
 		if (this.processor) {
 			await this.end();
 		} else if (this.stream) {

@@ -1273,6 +1273,7 @@
 	let microphoneDevicesReady = false;
 	let checkingMicrophoneDevices = true;
 	let preparingMicrophone = false;
+	let microphoneInitializationId = 0;
 
 	/**
 	 * Select an audio device. If no device ID is provided, the first available device will be selected.
@@ -1379,8 +1380,16 @@
 					`Failed to set up audio output to your speakers. Error: ${errorMessage(error, "We're facing an unknown error. Check PingPong's status page for updates if this persists.")}`
 				);
 			}
-			await player.close();
-			await recorder.quit();
+			for (const cleanup of [
+				() => player.close(),
+				() => recorder.quit({ keepDeviceListener: true })
+			]) {
+				try {
+					await cleanup();
+				} catch (cleanupError) {
+					console.warn('Could not clean up failed voice setup.', cleanupError);
+				}
+			}
 			if (wavStreamPlayer === player) wavStreamPlayer = null;
 			return false;
 		}
@@ -1507,8 +1516,11 @@
 		const player = wavStreamPlayer;
 		wavRecorder = null;
 		wavStreamPlayer = null;
-		await recorder?.quit();
-		await player?.close();
+		try {
+			await recorder?.quit();
+		} finally {
+			await player?.close();
+		}
 	};
 
 	/**
@@ -1849,33 +1861,36 @@
 	}
 
 	onDestroy(() => {
+		microphoneInitializationId++;
 		resetAudioSession().catch((error) => console.warn('Could not clean up voice audio.', error));
 	});
 
 	afterNavigate(async () => {
-		await resetAudioSession(true);
-		if (
-			data.threadInteractionMode !== 'voice' ||
-			assistantInteractionMode !== 'voice' ||
-			$messages.length > 0
-		) {
-			checkingMicrophoneDevices = false;
-			return;
-		}
-		const recorder = new WavRecorder({ sampleRate: 24000, debug: true });
-		wavRecorder = recorder;
+		const initializationId = ++microphoneInitializationId;
 		try {
+			await resetAudioSession(true);
+			if (initializationId !== microphoneInitializationId) return;
+			if (
+				data.threadInteractionMode !== 'voice' ||
+				assistantInteractionMode !== 'voice' ||
+				$messages.length > 0
+			) {
+				return;
+			}
+			const recorder = new WavRecorder({ sampleRate: 24000, debug: true });
+			wavRecorder = recorder;
 			const devices = await recorder.listDevices();
-			if (wavRecorder !== recorder) return;
+			if (initializationId !== microphoneInitializationId || wavRecorder !== recorder) return;
 			if (!preparingMicrophone && !recorder.stream) handleDeviceChange(devices);
 			recorder.listenForDeviceChange((devices) => {
 				if (wavRecorder === recorder) handleDeviceChange(devices);
 			});
 		} catch (error) {
-			// Keep the explicit access step when the browser has not exposed device names.
-			console.warn('Could not list microphone devices.', error);
+			if (initializationId === microphoneInitializationId) {
+				console.warn('Could not initialize microphone devices.', error);
+			}
 		} finally {
-			if (wavRecorder === recorder) checkingMicrophoneDevices = false;
+			if (initializationId === microphoneInitializationId) checkingMicrophoneDevices = false;
 		}
 	});
 
@@ -2569,7 +2584,6 @@
 										class="flex flex-row gap-1 rounded-lg bg-blue-dark-40 px-3 py-2 text-center text-sm font-normal text-white transition-all hover:bg-blue-dark-50"
 										type="button"
 										onclick={handleSessionStart}
-										ontouchstart={handleSessionStart}
 										disabled={!selectedAudioDevice ||
 											preparingMicrophone ||
 											startingAudioSession ||

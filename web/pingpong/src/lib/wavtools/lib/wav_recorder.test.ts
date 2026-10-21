@@ -68,6 +68,39 @@ describe('microphone access and selection', () => {
 		expect(env.query).not.toHaveBeenCalled();
 	});
 
+	it('reports an empty first device change after the only microphone is removed', async () => {
+		const env = environment();
+		const recorder = new WavRecorder();
+		await recorder.listDevices();
+		const changed = vi.fn();
+		recorder.listenForDeviceChange(changed);
+		env.media.enumerateDevices.mockResolvedValue([]);
+		await env.notify();
+		expect(changed).toHaveBeenCalledExactlyOnceWith([]);
+		await env.notify();
+		expect(changed).toHaveBeenCalledTimes(1);
+		expect(env.media.getUserMedia).not.toHaveBeenCalled();
+	});
+
+	it('can stop capture for a setup retry while preserving device updates', async () => {
+		const env = environment();
+		const mic = microphone('usb');
+		env.media.getUserMedia.mockResolvedValue(mic.stream);
+		const recorder = new WavRecorder();
+		const changed = vi.fn();
+		recorder.listenForDeviceChange(changed);
+		await recorder.prepareMicrophone();
+		await recorder.quit({ keepDeviceListener: true });
+		expect(mic.track.stop).toHaveBeenCalledTimes(1);
+		expect(recorder.stream).toBeNull();
+		expect(env.media.removeEventListener).not.toHaveBeenCalled();
+		await env.notify();
+		expect(changed).toHaveBeenCalledExactlyOnceWith(env.devices);
+		expect(env.media.getUserMedia).toHaveBeenCalledTimes(1);
+		await recorder.quit();
+		expect(env.media.removeEventListener).toHaveBeenCalledTimes(1);
+	});
+
 	it('keeps the access stream paused and reuses it when Start selects the same microphone', async () => {
 		const env = environment();
 		audio();
