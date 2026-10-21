@@ -25,8 +25,9 @@ from pingpong.ai import (
     OpenAIClientType,
 )
 import pingpong.schemas as schemas
+from pingpong.config import config
 from pingpong.log_utils import sanitize_for_log
-from pingpong.models import Thread, MessagePart, Message, Run
+from pingpong.models import Class, Thread, MessagePart, Message, Run
 from pingpong.realtime_recorder import (
     AUDIO_CHANNELS,
     AUDIO_FRAME_RATE,
@@ -1502,6 +1503,9 @@ async def handle_openai_events(
     session_expiry: RealtimeSessionExpiry | None = None,
     on_provider_end: Callable[[], None] | None = None,
 ):
+    # Transcript savepoint rollbacks can expire the shared thread during a session.
+    thread_id = getattr(thread, "id", None)
+    class_id = getattr(thread, "class_id", None)
     initial_output_index = 0
     if thread.version == 3:
         try:
@@ -1749,6 +1753,46 @@ async def handle_openai_events(
                             thread,
                             realtime_recorder,
                         )
+                    if getattr(event.response, "status", None) == "failed":
+                        error = getattr(event.response.status_details, "error", None)
+                        openai_connection_logger.error(
+                            "Realtime response failed response_id=%s "
+                            "error_type=%s error_code=%s error_message=%s.",
+                            sanitize_for_log(event.response.id),
+                            sanitize_for_log(getattr(error, "type", None)),
+                            sanitize_for_log(getattr(error, "code", None)),
+                            sanitize_for_log(
+                                getattr(error, "message", None), max_len=512
+                            ),
+                        )
+                        if getattr(error, "code", None) == "rate_limit_exceeded":
+                            try:
+                                async with config.db.driver.async_session() as session:
+                                    await Class.log_rate_limit_error(
+                                        session, class_id=str(class_id)
+                                    )
+                                    await session.commit()
+                            except Exception:
+                                openai_connection_logger.exception(
+                                    "Failed to record realtime rate limit for thread_id=%s.",
+                                    thread_id,
+                                )
+                        if not (
+                            (shutdown_drain and shutdown_drain.stopping)
+                            or (session_expiry and session_expiry.stopping)
+                        ):
+                            # A failed reply is recoverable, unlike a startup error.
+                            await send_browser_event(
+                                {
+                                    "type": "error",
+                                    "error": {
+                                        "type": "server_error",
+                                        "code": "openai_realtime_response",
+                                        "message": "The assistant couldn't respond. Please try speaking to continue.",
+                                        "param": None,
+                                    },
+                                }
+                            )
                 case "response.output_audio.delta":
                     if session_expiry is not None and session_expiry.stopping:
                         continue

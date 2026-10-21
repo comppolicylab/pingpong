@@ -1928,6 +1928,206 @@ def assistant_response_snapshot(
     )
 
 
+@pytest.mark.parametrize("shutdown", [None, "drain", "expiry"])
+@pytest.mark.parametrize(
+    "error_code,logging_failure",
+    [
+        (None, None),
+        ("server_error", None),
+        ("rate_limit_exceeded", None),
+        ("rate_limit_exceeded", "open"),
+        ("rate_limit_exceeded", "write"),
+        ("rate_limit_exceeded", "commit"),
+    ],
+)
+async def test_failed_greeting_reports_error_and_keeps_processing(
+    monkeypatch, caplog, shutdown, error_code, logging_failure
+):
+    websocket = DummyWebSocket()
+    websocket.state["db"] = AsyncMock()
+    monkeypatch.setattr(
+        models.Thread, "get_max_output_sequence", AsyncMock(return_value=-1)
+    )
+    rate_limit_session = AsyncMock()
+    context = AsyncMock()
+    context.__aenter__.return_value = rate_limit_session
+    session_factory = Mock(return_value=context)
+    rate_limit_log = AsyncMock()
+    monkeypatch.setattr(
+        realtime_module.config.db.driver, "async_session", session_factory
+    )
+    monkeypatch.setattr(models.Class, "log_rate_limit_error", rate_limit_log)
+    if logging_failure == "open":
+        context.__aenter__.side_effect = RuntimeError("Database unavailable")
+    elif logging_failure == "write":
+        rate_limit_log.side_effect = RuntimeError("Database update failed")
+    elif logging_failure == "commit":
+        rate_limit_session.commit.side_effect = RuntimeError("Database commit failed")
+    response = {
+        "id": "failed-greeting",
+        "status": "failed",
+        "output": [],
+        "status_details": {
+            "type": "failed",
+            "error": {
+                "type": "server_error",
+                "code": error_code,
+                "message": "Internal provider details",
+            },
+        }
+        if error_code
+        else None,
+    }
+    failure = ResponseDoneEvent.model_validate(
+        {"type": "response.done", "event_id": "failure", "response": response}
+    )
+    ordering_buffer = realtime_module.ConversationItemOrderingBuffer(
+        realtime_module.openai_connection_logger
+    )
+    drain = realtime_module.RealtimeShutdownDrain()
+    drain.stopping = shutdown == "drain"
+    expiry = realtime_module.RealtimeSessionExpiry()
+    expiry.stopping = shutdown == "expiry"
+    provider_end = Mock()
+
+    await realtime_module.handle_openai_events(
+        websocket,
+        FakeRealtimeEventStream(
+            [
+                failure,
+                SimpleNamespace(
+                    type="conversation.item.added",
+                    previous_item_id=None,
+                    item=SimpleNamespace(id="next-turn", type="message", role="user"),
+                ),
+            ]
+        ),
+        object(),
+        SimpleNamespace(id=1, version=3, class_id=42),
+        asyncio.Queue(),
+        realtime_module.RealtimeAssistantAudioTracker(),
+        ordering_buffer=ordering_buffer,
+        shutdown_drain=drain,
+        session_expiry=expiry,
+        on_provider_end=provider_end,
+    )
+
+    assert not websocket.closed
+    provider_end.assert_not_called()
+    assert "next-turn" in ordering_buffer.items_by_id
+    assert "Realtime response failed response_id=failed-greeting" in caplog.text
+    if error_code:
+        assert f"error_code={error_code}" in caplog.text
+        assert "Internal_provider_details" in caplog.text
+    if error_code == "rate_limit_exceeded":
+        session_factory.assert_called_once_with()
+        if logging_failure == "open":
+            rate_limit_log.assert_not_awaited()
+        else:
+            rate_limit_log.assert_awaited_once_with(rate_limit_session, class_id="42")
+        if logging_failure in {None, "commit"}:
+            rate_limit_session.commit.assert_awaited_once()
+        else:
+            rate_limit_session.commit.assert_not_awaited()
+    else:
+        session_factory.assert_not_called()
+        rate_limit_log.assert_not_awaited()
+    if logging_failure:
+        assert "Failed to record realtime rate limit for thread_id=1" in caplog.text
+    websocket.state["db"].commit.assert_not_awaited()
+    websocket.state["db"].rollback.assert_not_awaited()
+    assert websocket.sent_json == (
+        [
+            {
+                "type": "error",
+                "error": {
+                    "type": "server_error",
+                    "code": "openai_realtime_response",
+                    "message": "The assistant couldn't respond. Please try speaking to continue.",
+                    "param": None,
+                },
+            }
+        ]
+        if shutdown is None
+        else []
+    )
+
+
+async def test_voice_rate_limit_is_committed_independently(db):
+    async with db.async_session() as setup:
+        setup.add_all(
+            [
+                models.Class(id=42, name="Rate limited group"),
+                models.Class(id=43, name="Other group"),
+            ]
+        )
+        thread = models.Thread(version=3, class_id=42, tools_available="[]")
+        setup.add(thread)
+        await setup.flush()
+        thread_id = thread.id
+        await setup.commit()
+
+    failure = ResponseDoneEvent.model_validate(
+        {
+            "type": "response.done",
+            "event_id": "rate-limit",
+            "response": {
+                "id": "failed-reply",
+                "status": "failed",
+                "output": [],
+                "status_details": {
+                    "type": "failed",
+                    "error": {"code": "rate_limit_exceeded"},
+                },
+            },
+        }
+    )
+    async with db.async_session() as conversation_session:
+        thread = await conversation_session.get(models.Thread, thread_id)
+        websocket = DummyWebSocket()
+        websocket.state["db"] = conversation_session
+        await realtime_module.handle_openai_events(
+            websocket,
+            FakeRealtimeEventStream([failure]),
+            object(),
+            thread,
+            asyncio.Queue(),
+            realtime_module.RealtimeAssistantAudioTracker(),
+        )
+        # Rolling back the conversation must not erase the admin-visible signal.
+        await conversation_session.rollback()
+
+    async with db.async_session() as reader:
+        affected = await reader.get(models.Class, 42)
+        other = await reader.get(models.Class, 43)
+        assert affected.last_rate_limited_at is not None
+        assert other.last_rate_limited_at is None
+
+
+@pytest.mark.parametrize("status", ["completed", "cancelled", "incomplete"])
+async def test_non_failed_response_does_not_report_failure(caplog, status):
+    websocket = DummyWebSocket()
+    event = ResponseDoneEvent.model_validate(
+        {
+            "type": "response.done",
+            "event_id": "finished",
+            "response": {"id": "reply", "status": status, "output": []},
+        }
+    )
+    await realtime_module.handle_openai_events(
+        websocket,
+        FakeRealtimeEventStream([event]),
+        object(),
+        SimpleNamespace(id=1, version=1),
+        asyncio.Queue(),
+        realtime_module.RealtimeAssistantAudioTracker(),
+    )
+
+    assert not websocket.closed
+    assert websocket.sent_json == []
+    assert "Realtime response failed" not in caplog.text
+
+
 @with_user(123)
 @pytest.mark.parametrize(
     "response_status", ["completed", "cancelled", "failed", "incomplete"]
