@@ -1330,7 +1330,7 @@
 				if (wavRecorder === recorder) handleDeviceChange(devices);
 			});
 		} catch (error) {
-			await recorder.quit();
+			await recorder.quit({ keepDeviceListener: wavRecorder === recorder });
 			if (wavRecorder === recorder) {
 				sadToast(
 					`Failed to access microphone. Error: ${errorMessage(error, 'Please check your microphone permissions.')}`
