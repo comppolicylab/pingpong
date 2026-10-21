@@ -1369,9 +1369,22 @@ async def test_realtime_session_stops_browser_before_final_queue_drain(
 
 
 @with_user(123)
-@pytest.mark.parametrize("ending", ["normal", "cancel"])
-@pytest.mark.parametrize("recording", ["disabled", "saved", "failed"])
-@pytest.mark.parametrize("version", [1, 2, 3])
+@pytest.mark.parametrize(
+    "version,recording,ending",
+    [
+        (version, recording, ending)
+        for version in (1, 2, 3)
+        for recording in ("disabled", "saved", "failed")
+        for ending in ("normal", "cancel")
+    ]
+    + [
+        (3, "saved", "cancel_producer"),
+        (3, "saved", "cancel_drain"),
+        (3, "saved", "cancel_finalize"),
+        (3, "failed", "cancel_health"),
+        (3, "saved", "cancel_commit"),
+    ],
+)
 async def test_shutdown_recovers_known_text_and_commits_through_db_middleware(
     db, user, monkeypatch, ending, recording, version
 ):
@@ -1390,6 +1403,21 @@ async def test_shutdown_recovers_known_text_and_commits_through_db_middleware(
     ready = asyncio.Event()
     release = asyncio.Event()
     browser_ready = asyncio.Event()
+    cleanup_started = asyncio.Event()
+    release_cleanup = asyncio.Event()
+
+    async def pause_cleanup(stage):
+        if ending == f"cancel_{stage}":
+            cleanup_started.set()
+            await release_cleanup.wait()
+
+    join = realtime_module.NamedQueue.join
+
+    async def join_queue(queue):
+        await join(queue)
+        await pause_cleanup("drain")
+
+    monkeypatch.setattr(realtime_module.NamedQueue, "join", join_queue)
     create_message = AsyncMock()
     websocket = DummyWebSocket()
     websocket.state["session"] = SimpleNamespace(user=user)
@@ -1411,7 +1439,10 @@ async def test_shutdown_recovers_known_text_and_commits_through_db_middleware(
         buffer.register_conversation_item("later", "reply", "user")
         buffer.register_transcription("later", "complete question", "user")
         ready.set()
-        await release.wait()
+        try:
+            await release.wait()
+        finally:
+            await pause_cleanup("producer")
 
     async def browser(*args, **kwargs):
         tracker = args[2]
@@ -1425,6 +1456,7 @@ async def test_shutdown_recovers_known_text_and_commits_through_db_middleware(
 
     async def finalize(*, has_played_audio):
         assert has_played_audio
+        await pause_cleanup("finalize")
         if recording == "saved":
             await models.VoiceModeRecording.create(
                 websocket.state["db"],
@@ -1444,6 +1476,13 @@ async def test_shutdown_recovers_known_text_and_commits_through_db_middleware(
             "synthetic.webm",
             thread_id,
         )
+    persist_health = health.persist
+
+    async def persist(*args):
+        await pause_cleanup("health")
+        await persist_health(*args)
+
+    monkeypatch.setattr(health, "persist", persist)
     monkeypatch.setattr(
         RealtimeRecorder,
         "create",
@@ -1467,6 +1506,13 @@ async def test_shutdown_recovers_known_text_and_commits_through_db_middleware(
         if session.bind.dialect.name == "sqlite":
             await session.execute(text("BEGIN"))
         ws.state["thread"] = await session.get(models.Thread, thread_id)
+        commit_session = session.commit
+
+        async def commit():
+            await pause_cleanup("commit")
+            await commit_session()
+
+        monkeypatch.setattr(session, "commit", commit)
         await handler(ws, *args)
 
     task = asyncio.create_task(
@@ -1475,15 +1521,27 @@ async def test_shutdown_recovers_known_text_and_commits_through_db_middleware(
     try:
         await asyncio.wait_for(ready.wait(), 2)
         await asyncio.wait_for(browser_ready.wait(), 1)
-        if ending == "cancel":
+        if ending in {"cancel", "cancel_producer", "cancel_commit"}:
             task.cancel()
+        else:
+            release.set()
+        if ending.startswith("cancel_"):
+            await asyncio.wait_for(cleanup_started.wait(), 2)
+            task.cancel()
+            await asyncio.sleep(0)
+            assert not task.done()
+            task.cancel()
+            await asyncio.sleep(0)
+            assert not task.done()
+            release_cleanup.set()
+        if ending.startswith("cancel"):
             with pytest.raises(asyncio.CancelledError):
                 await asyncio.wait_for(task, 2)
         else:
-            release.set()
             await asyncio.wait_for(task, 2)
     finally:
         release.set()
+        release_cleanup.set()
         task.cancel()
         await asyncio.gather(task, return_exceptions=True)
 
@@ -1533,6 +1591,57 @@ async def test_shutdown_recovers_known_text_and_commits_through_db_middleware(
                 for call in calls[:2]
             )
             assert "voice_transcript_incomplete" not in calls[2].kwargs["metadata"]
+
+
+@pytest.mark.parametrize("rollback_fails", [False, True])
+async def test_cancelled_voice_session_keeps_cancellation_if_commit_fails(
+    monkeypatch, caplog, rollback_fails
+):
+    browser_ready = asyncio.Event()
+    provider_ready = asyncio.Event()
+    children = []
+
+    async def browser(*args, **kwargs):
+        children.append(asyncio.current_task())
+        browser_ready.set()
+        await asyncio.Future()
+
+    async def provider(*args, **kwargs):
+        children.append(asyncio.current_task())
+        provider_ready.set()
+        await asyncio.Future()
+
+    monkeypatch.setattr(realtime_module, "handle_browser_messages", browser)
+    monkeypatch.setattr(realtime_module, "handle_openai_events", provider)
+    websocket = DummyWebSocket()
+    websocket.state["thread"] = SimpleNamespace(id=1, display_user_info=False)
+    websocket.state["realtime_connection"] = None
+    websocket.state["openai_client"] = None
+    session = AsyncMock()
+    session.commit.side_effect = RuntimeError("synthetic commit failure")
+    if rollback_fails:
+        session.rollback.side_effect = RuntimeError("synthetic rollback failure")
+    websocket.state["db"] = session
+    handler = inspect.unwrap(realtime_module.browser_realtime_websocket)
+    task = asyncio.create_task(handler(websocket, "1", "1"))
+    try:
+        await asyncio.wait_for(browser_ready.wait(), 1)
+        await asyncio.wait_for(provider_ready.wait(), 1)
+        task.cancel("session cancelled")
+        with pytest.raises(asyncio.CancelledError, match="session cancelled"):
+            await asyncio.wait_for(task, 2)
+        session.commit.assert_awaited_once()
+        session.rollback.assert_awaited_once()
+        assert "Error committing cancelled voice session" in caplog.text
+        assert "synthetic commit failure" in caplog.text
+        if rollback_fails:
+            assert "Error rolling back cancelled voice session" in caplog.text
+            assert "synthetic rollback failure" in caplog.text
+        assert websocket.closed
+        assert all(child.done() for child in children)
+    finally:
+        task.cancel()
+        await asyncio.gather(task, *children, return_exceptions=True)
 
 
 async def test_realtime_cleanup_does_not_close_browser_twice():

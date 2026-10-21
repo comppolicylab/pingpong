@@ -1729,13 +1729,7 @@ async def browser_realtime_websocket(
         else None
     )
 
-    cancelled = False
-    try:
-        await asyncio.wait(realtime_tasks, return_when=asyncio.FIRST_COMPLETED)
-    except asyncio.CancelledError:
-        cancelled = True
-        raise
-    finally:
+    async def finish_session():
         if recorder_task is not None:
             recorder_task.cancel()
         for task in realtime_tasks:
@@ -1806,7 +1800,48 @@ async def browser_realtime_websocket(
                 openai_connection_logger.error(
                     "Realtime session task failed during cleanup.", exc_info=result
                 )
-        if cancelled:
-            # The DB middleware commits only on normal return. Preserve the
-            # completed voice cleanup before propagating orderly cancellation.
-            await browser_connection.state["db"].commit()
+
+    async def commit_cancelled_session():
+        # The DB middleware commits only on normal return. Preserve completed
+        # cleanup before propagating cancellation, even if commit/rollback fail.
+        session = browser_connection.state["db"]
+        try:
+            await session.commit()
+        except Exception:
+            openai_connection_logger.exception(
+                "Error committing cancelled voice session for thread_id=%s", thread.id
+            )
+            try:
+                await session.rollback()
+            except Exception:
+                openai_connection_logger.exception(
+                    "Error rolling back cancelled voice session for thread_id=%s",
+                    thread.id,
+                )
+
+    cancelled: asyncio.CancelledError | None = None
+
+    async def await_cleanup(task: asyncio.Task):
+        nonlocal cancelled
+        while True:
+            try:
+                return await asyncio.shield(task)
+            except asyncio.CancelledError as error:
+                if task.cancelled():
+                    raise
+                # Retain and await the same task through repeated cancellation.
+                if cancelled is None:
+                    cancelled = error
+
+    try:
+        await asyncio.wait(realtime_tasks, return_when=asyncio.FIRST_COMPLETED)
+    except asyncio.CancelledError as error:
+        cancelled = error
+    finally:
+        try:
+            await await_cleanup(asyncio.create_task(finish_session()))
+        finally:
+            if cancelled is not None:
+                await await_cleanup(asyncio.create_task(commit_cancelled_session()))
+    if cancelled is not None:
+        raise cancelled
