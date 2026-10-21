@@ -1,6 +1,5 @@
 import asyncio
 import base64
-import contextlib
 import importlib
 import inspect
 import json
@@ -422,8 +421,7 @@ async def test_queued_writes_wait_for_session_retention_decision(played, ended):
         assert write.await_count == int(played)
     finally:
         worker.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await worker
+        await asyncio.gather(worker, return_exceptions=True)
 
 
 async def test_recording_finalization_waits_for_in_flight_transcript_write(monkeypatch):
