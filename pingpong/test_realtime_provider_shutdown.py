@@ -265,15 +265,12 @@ async def test_provider_shutdown_preserves_final_playback_and_confirms_commit(
     )
     await asyncio.wait_for(handler(browser, "1", "1"), 2)
     usage = request.getfixturevalue("mock_voice_usage_persistence").await_args.args[2]
-    assert usage.final_status == (
-        realtime.schemas.RunStatus.FAILED
-        if ending == "error"
-        else realtime.schemas.RunStatus.INCOMPLETE
-    )
+    assert usage.final_status == realtime.schemas.RunStatus.INCOMPLETE
+    assert usage.error_code is None
     if ending == "error":
-        assert usage.error_code == "provider_session_error"
-    else:
-        assert usage.error_code is None
+        assert usage.provider_metadata_to_json()["errors"][0]["error"]["code"] == (
+            "invalid_value"
+        )
     assert browser.closed
     assert connection.reader_stopped.is_set()
     assert [msg["type"] for msg in browser.sent_json].count("session.ended") == 1
