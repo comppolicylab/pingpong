@@ -886,6 +886,20 @@ async def test_complete_audio_upload_keeps_completed_object_on_metadata_error(
     assert audio_store_obj.completed
     assert not audio_store_obj.deleted
     assert recorder.closed
+    assert recorder.health.recording_issue
+    assert not recorder.health.upload_issue
+    details = recorder.health.details["recording"].copy()
+    assert details["phase"] == "save_metadata"
+    assert details["error_type"] == "RuntimeError"
+    assert details["recording_id"] == recorder.audio_recording_id
+    assert "metadata failed" not in str(details)
+
+    # A later finalize/cleanup must not delete the completed object or replace
+    # the original diagnostic details.
+    await recorder.complete_audio_upload(has_played_audio=True)
+    await recorder.abort()
+    assert not audio_store_obj.deleted
+    assert recorder.health.details["recording"] == details
 
 
 @pytest.mark.asyncio
@@ -894,7 +908,9 @@ async def test_recording_metadata_error_does_not_roll_back_transcript_messages(
     monkeypatch,
 ):
     async def fail_create_or_replace_for_thread(cls, session, data):
-        raise RuntimeError("metadata failed")
+        # Fail a real database flush inside the savepoint, leaving the outer
+        # transaction usable for both transcript and failure flag persistence.
+        return await cls.create(session, {**data, "duration": None})
 
     monkeypatch.setattr(
         VoiceModeRecording,
@@ -940,11 +956,21 @@ async def test_recording_metadata_error_does_not_roll_back_transcript_messages(
         recorder.audio_duration = 1000
 
         await recorder.complete_audio_upload(has_played_audio=True)
+        assert audio_store_obj.completed
+        assert not audio_store_obj.deleted
+        await recorder.health.persist(session, thread.id)
         await session.commit()
         message_id = message.id
         thread_id = thread.id
 
     async with db.async_session() as session:
+        saved_thread = await session.get(models.Thread, thread_id)
+        assert saved_thread.recording_issue
+        assert not saved_thread.upload_issue
+        assert saved_thread.recording_issue_details["phase"] == "save_metadata"
+        assert saved_thread.recording_issue_details["error_type"] == "IntegrityError"
+        assert saved_thread.recording_issue_details["recording_id"] == "test.webm"
+        assert saved_thread.upload_issue_details is None
         recording = await session.scalar(
             select(VoiceModeRecording).where(
                 VoiceModeRecording.thread_id == thread_id,

@@ -1096,14 +1096,15 @@ class RealtimeRecorder:
                         "duration": self.audio_duration,
                     },
                 )
-        except Exception as e:
-            realtime_recorder_logger.exception(
-                "Error saving VoiceModeRecording; keeping completed audio object. "
-                "thread_id=%s, recording_id=%s, duration_ms=%s, error=%s",
+        except Exception as error:
+            # The upload succeeded; distinguish the missing DB link from a
+            # storage failure and retain the completed object for recovery.
+            self.health.fail(
+                "recording",
+                "save_metadata",
+                error,
+                self.audio_recording_id,
                 self.thread_id,
-                sanitize_for_log(self.audio_recording_id, max_len=256),
-                self.audio_duration,
-                e,
             )
         else:
             if previous_recording_id:
@@ -1128,6 +1129,8 @@ class RealtimeRecorder:
                     self.audio_duration,
                 )
 
+        # Finalization is over even if metadata failed. Closing prevents failure
+        # cleanup from deleting the successfully uploaded audio object.
         self.closed = True
 
     async def handle_saving_buffer(self, every: int = 5):
