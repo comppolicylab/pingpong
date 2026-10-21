@@ -2131,7 +2131,7 @@ async def browser_realtime_websocket(
                 except Exception:
                     openai_connection_logger.exception(
                         "Error closing cancelled voice session for thread_id=%s",
-                        thread_id,
+                        sanitize_for_log(thread_id),
                     )
 
     cancelled: asyncio.CancelledError | None = None
