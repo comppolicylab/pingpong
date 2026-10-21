@@ -53,6 +53,83 @@ UNSET_PREVIOUS_ITEM_ID = "__UNSET_PREVIOUS_ITEM_ID__"
 BROWSER_DISCONNECT_DRAIN_SECONDS = 5.0
 
 
+class RealtimeShutdownDrain:
+    def __init__(self):
+        self.stopping = False
+        self.pending_transcripts: set[str] = set()
+        self._completed_transcripts: set[str] = set()
+        self._vad_disabled = False
+        self._changed = asyncio.Event()
+
+    def observe(self, event) -> None:
+        # Observe after normal handling so a completion cannot cut off its
+        # transcript recovery or queued database write.
+        if event.type in {
+            "input_audio_buffer.committed",
+            "input_audio_buffer.speech_stopped",
+            "conversation.item.input_audio_transcription.delta",
+        }:
+            if event.item_id not in self._completed_transcripts:
+                self.pending_transcripts.add(event.item_id)
+        elif event.type in {
+            "conversation.item.input_audio_transcription.completed",
+            "conversation.item.input_audio_transcription.failed",
+        }:
+            self._completed_transcripts.add(event.item_id)
+            self.pending_transcripts.discard(event.item_id)
+        elif self.stopping and event.type == "session.updated":
+            audio_input = getattr(getattr(event.session, "audio", None), "input", None)
+            self._vad_disabled = (
+                audio_input is not None
+                and hasattr(audio_input, "turn_detection")
+                and audio_input.turn_detection is None
+            )
+        self._changed.set()
+
+    async def wait(
+        self,
+        connection: AsyncRealtimeConnection,
+        ordering_buffer: "ConversationItemOrderingBuffer",
+    ) -> None:
+        self.stopping = True
+        tracker = ordering_buffer.assistant_audio_tracker
+        # The browser reader has stopped, so playback qualification is final.
+        heard_item_ids = tracker.played_item_ids if tracker is not None else frozenset()
+        try:
+            async with asyncio.timeout(BROWSER_DISCONNECT_DRAIN_SECONDS):
+                try:
+                    # Prevent new VAD turns before accepting an empty pending
+                    # set. Do not commit input, clear buffers, or create replies.
+                    await connection.session.update(
+                        session={
+                            "type": "realtime",
+                            "audio": {"input": {"turn_detection": None}},
+                        }
+                    )
+                except Exception:
+                    openai_connection_logger.exception(
+                        "Failed to disable turn detection during voice shutdown."
+                    )
+                while True:
+                    self._changed.clear()
+                    if (
+                        self._vad_disabled
+                        and not self.pending_transcripts
+                        and not ordering_buffer.has_pending_retained_items(
+                            heard_item_ids
+                        )
+                    ):
+                        return
+                    await self._changed.wait()
+        except TimeoutError:
+            openai_connection_logger.debug(
+                "Voice shutdown drain reached its deadline: "
+                "pending_transcripts=%s vad_disabled=%s.",
+                len(self.pending_transcripts),
+                self._vad_disabled,
+            )
+
+
 def _serialize_realtime_error(_error) -> dict[str, str | None]:
     # Keep internal OpenAI details out of browser-visible errors.
     return {
@@ -121,6 +198,10 @@ class RealtimeAssistantAudioTracker:
     @property
     def has_played_audio(self) -> bool:
         return bool(self._played_item_ids)
+
+    @property
+    def played_item_ids(self) -> frozenset[str]:
+        return frozenset(self._played_item_ids)
 
     def has_item_played_audio(self, item_id: str) -> bool:
         return item_id in self._played_item_ids
@@ -623,6 +704,38 @@ class ConversationItemOrderingBuffer:
             self.register_transcription(
                 item.item_id, item.transcription_text or "", item.role
             )
+
+    def has_pending_retained_items(self, heard_item_ids: frozenset[str]) -> bool:
+        retained_item_ids = set(heard_item_ids)
+        retained_item_ids.update(
+            item.item_id for item in self.items_by_id.values() if item.role == "user"
+        )
+        for item_id in retained_item_ids:
+            if item_id in self.pruned_saved_item_ids:
+                continue
+            item = self.items_by_id.get(item_id)
+            if item is None or (
+                not item.skip_persistence and not item.is_transcription_complete
+            ):
+                return True
+            # Unheard assistant ancestors need their ordering links, not text.
+            seen: set[str] = set()
+            current_item_id: str | None = item_id
+            while (
+                current_item_id is not None
+                and current_item_id not in self.pruned_saved_item_ids
+            ):
+                if current_item_id in seen:
+                    return True
+                seen.add(current_item_id)
+                item = self.items_by_id.get(current_item_id)
+                if (
+                    item is None
+                    or item.previous_item_id == self._UNSET_PREVIOUS_ITEM_ID
+                ):
+                    return True
+                current_item_id = item.previous_item_id
+        return False
 
     def _get_item(self, item_id: str) -> ConversationChainItem | None:
         return self.items_by_id.get(item_id)
@@ -1287,6 +1400,7 @@ async def handle_openai_events(
     assistant_audio_tracker: RealtimeAssistantAudioTracker,
     realtime_recorder: RealtimeRecorder | None = None,
     ordering_buffer: ConversationItemOrderingBuffer | None = None,
+    shutdown_drain: RealtimeShutdownDrain | None = None,
 ):
     initial_output_index = 0
     if thread.version == 3:
@@ -1402,15 +1516,18 @@ async def handle_openai_events(
                         f"Session successfully updated: {event.session}"
                     )
                     session_updated = True
-                    await send_browser_event(
-                        {
-                            "type": "session.updated",
-                            "message": "Connected to OpenAI.",
-                        }
-                    )
+                    if shutdown_drain is None or not shutdown_drain.stopping:
+                        await send_browser_event(
+                            {
+                                "type": "session.updated",
+                                "message": "Connected to OpenAI.",
+                            }
+                        )
                 case "session.error" | "error":
                     openai_connection_logger.exception(f"Session error: {event.error}")
-                    if _is_realtime_session_startup_error(event.error, session_updated):
+                    if _is_realtime_session_startup_error(
+                        event.error, session_updated
+                    ) and not (shutdown_drain and shutdown_drain.stopping):
                         await send_browser_event(
                             {
                                 "type": "error",
@@ -1586,11 +1703,13 @@ async def handle_openai_events(
                     | "conversation.item.input_audio_transcription.segment"
                 ):
                     # Making sure we don't miss any events
-                    continue
+                    pass
                 case _:
                     openai_connection_logger.warning(
                         f"Ignoring unknown event type... {event.type}"
                     )
+            if shutdown_drain is not None:
+                shutdown_drain.observe(event)
 
     except (asyncio.CancelledError, ClientDisconnect):
         openai_connection_logger.debug(
@@ -1646,6 +1765,7 @@ async def browser_realtime_websocket(
 
     openai_task_queue: NamedQueue = NamedQueue("openai_task_queue")
     assistant_audio_tracker = RealtimeAssistantAudioTracker()
+    shutdown_drain = RealtimeShutdownDrain()
     ordering_buffer = ConversationItemOrderingBuffer(
         openai_connection_logger, assistant_audio_tracker=assistant_audio_tracker
     )
@@ -1698,9 +1818,7 @@ async def browser_realtime_websocket(
     async def wait_for_browser_disconnect_drain():
         # asyncio.wait does not cancel browser_task when this watcher is cancelled.
         await asyncio.wait({browser_task})
-        # Realtime connections can otherwise stay open long after the browser
-        # leaves. Allow late transcripts a bounded window before cleanup.
-        await asyncio.sleep(BROWSER_DISCONNECT_DRAIN_SECONDS)
+        await shutdown_drain.wait(realtime_connection, ordering_buffer)
 
     realtime_tasks: list[asyncio.Task] = [
         asyncio.create_task(
@@ -1713,6 +1831,7 @@ async def browser_realtime_websocket(
                 assistant_audio_tracker,
                 realtime_recorder,
                 ordering_buffer=ordering_buffer,
+                shutdown_drain=shutdown_drain,
             )
         ),
         asyncio.create_task(wait_for_browser_disconnect_drain()),
