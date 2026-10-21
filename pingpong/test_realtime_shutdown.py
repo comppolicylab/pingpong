@@ -458,7 +458,7 @@ async def test_unheard_reply_does_not_delay_early_cleanup_or_get_saved(
         inspect.unwrap(realtime.browser_realtime_websocket)(websocket, "1", "1")
     )
     try:
-        await wait_until(lambda: write.await_count == 1)
+        await wait_until(lambda: write.await_count == 2)
         if when == "before_end":
             add_unheard_reply()
         end.set()
