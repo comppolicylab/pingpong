@@ -58,7 +58,7 @@
 	},
 	"type": "module",
 	"dependencies": {
-		"@sentry/sveltekit": "^10.75.1",
+		"@sentry/sveltekit": "^11.7.0",
 		"@zerodevx/svelte-toast": "^0.9.6",
 		"dayjs": "^1.11.23",
 		"dotenv": "^18.0.8",
