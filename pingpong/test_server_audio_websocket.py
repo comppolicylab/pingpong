@@ -754,7 +754,7 @@ async def test_heard_transcripts_save_before_settlement_and_enrich_later(
         await original_update(*args)
         updated.set()
 
-    async def provider(*args, ordering_buffer):
+    async def provider(*args, ordering_buffer, **kwargs):
         queue, tracker = args[4:6]
         await tracker.add_audio_delta("reply", "audio", b"\0" * 480)
         for item_id, previous, role in [
