@@ -625,7 +625,8 @@ async def test_add_message_to_thread_persists_version_3_voice_messages(
             .all()
         )
         assert len(runs) == 1
-        assert runs[0].status == schemas.RunStatus.COMPLETED
+        assert runs[0].status == schemas.RunStatus.IN_PROGRESS
+        assert runs[0].completed is None
         assert browser_connection.state["voice_mode_run_id"] == runs[0].id
 
         messages = (

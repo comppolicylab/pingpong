@@ -35,6 +35,7 @@ from pingpong.realtime_recorder import (
     RealtimeRecorder,
     VoiceRecordingHealth,
 )
+from pingpong.realtime_usage import RealtimeUsage
 from pingpong.websocket import (
     REALTIME_CONNECTION_ERRORS,
     ws_auth_middleware,
@@ -54,7 +55,7 @@ TaskFunc = Callable[[], Awaitable[object]]
 ConversationRole = Literal["user", "assistant"]
 VoicePlaybackOutcome = Literal["completed", "interrupted", "discarded", "unknown"]
 UNSET_PREVIOUS_ITEM_ID = "__UNSET_PREVIOUS_ITEM_ID__"
-BROWSER_DISCONNECT_DRAIN_SECONDS = 5.0
+BROWSER_DISCONNECT_DRAIN_SECONDS = 15.0
 REALTIME_SESSION_MAX_SECONDS = 60 * 60
 REALTIME_EXPIRY_MARGIN_SECONDS = 60.0
 BROWSER_EXPIRY_STOP_SECONDS = 5.0
@@ -133,11 +134,16 @@ class RealtimeShutdownDrain:
         self.pending_transcripts: set[str] = set()
         self._completed_transcripts: set[str] = set()
         self._vad_disabled = False
+        self._clear_requested = False
+        self._buffer_cleared = False
+        self._cancel_event_response_ids: dict[str, str] = {}
+        self.usage = RealtimeUsage()
         self._changed = asyncio.Event()
 
     def observe(self, event) -> None:
         # Observe after normal handling so a completion cannot cut off its
         # transcript recovery or queued database write.
+        self.usage.observe(event)
         if event.type in {
             "input_audio_buffer.committed",
             "input_audio_buffer.speech_stopped",
@@ -158,7 +164,31 @@ class RealtimeShutdownDrain:
                 and hasattr(audio_input, "turn_detection")
                 and audio_input.turn_detection is None
             )
+        elif self._clear_requested and event.type == "input_audio_buffer.cleared":
+            self._buffer_cleared = True
         self._changed.set()
+
+    def is_finished_cancellation_error(self, error) -> bool:
+        event_id = getattr(error, "event_id", None)
+        if not isinstance(event_id, str):
+            return False
+        response_id = self._cancel_event_response_ids.get(event_id)
+        return (
+            response_id is not None
+            and response_id not in self.usage.pending_response_ids
+        )
+
+    def is_complete(self, ordering_buffer: "ConversationItemOrderingBuffer") -> bool:
+        tracker = ordering_buffer.assistant_audio_tracker
+        heard_item_ids = tracker.played_item_ids if tracker is not None else frozenset()
+        return (
+            self.stopping
+            and self._vad_disabled
+            and self._buffer_cleared
+            and not self.usage.pending_response_ids
+            and not self.pending_transcripts
+            and not ordering_buffer.has_pending_retained_items(heard_item_ids)
+        )
 
     async def wait(
         self,
@@ -166,14 +196,12 @@ class RealtimeShutdownDrain:
         ordering_buffer: "ConversationItemOrderingBuffer",
     ) -> None:
         self.stopping = True
-        tracker = ordering_buffer.assistant_audio_tracker
-        # The browser reader has stopped, so playback qualification is final.
-        heard_item_ids = tracker.played_item_ids if tracker is not None else frozenset()
+        cancellation_requested: set[str] = set()
+        started_at = asyncio.get_running_loop().time()
         try:
             async with asyncio.timeout(BROWSER_DISCONNECT_DRAIN_SECONDS):
                 try:
-                    # Prevent new VAD turns before accepting an empty pending
-                    # set. Do not commit input, clear buffers, or create replies.
+                    # Stop new turns without committing unfinished input.
                     await connection.session.update(
                         session={
                             "type": "realtime",
@@ -184,23 +212,48 @@ class RealtimeShutdownDrain:
                     openai_connection_logger.exception(
                         "Failed to disable turn detection during voice shutdown."
                     )
+                self._clear_requested = True
+                try:
+                    await connection.input_audio_buffer.clear()
+                except Exception:
+                    openai_connection_logger.exception(
+                        "Failed to clear input audio during voice shutdown."
+                    )
                 while True:
                     self._changed.clear()
-                    if (
-                        self._vad_disabled
-                        and not self.pending_transcripts
-                        and not ordering_buffer.has_pending_retained_items(
-                            heard_item_ids
-                        )
+                    # Include responses announced during draining. Playback does
+                    # not gate provider usage, even when no reply was heard.
+                    for response_id in sorted(
+                        self.usage.pending_response_ids - cancellation_requested
                     ):
+                        if response_id not in self.usage.pending_response_ids:
+                            continue
+                        cancellation_requested.add(response_id)
+                        event_id = f"voice_shutdown_cancel_{response_id}"
+                        self._cancel_event_response_ids[event_id] = response_id
+                        try:
+                            await connection.response.cancel(
+                                response_id=response_id, event_id=event_id
+                            )
+                        except Exception:
+                            openai_connection_logger.exception(
+                                "Failed to cancel voice response_id=%s during shutdown.",
+                                sanitize_for_log(response_id),
+                            )
+                    if self.is_complete(ordering_buffer):
                         return
                     await self._changed.wait()
         except TimeoutError:
-            openai_connection_logger.debug(
+            self.usage.mark_incomplete("shutdown_drain_timeout")
+            openai_connection_logger.warning(
                 "Voice shutdown drain reached its deadline: "
-                "pending_transcripts=%s vad_disabled=%s.",
-                len(self.pending_transcripts),
+                "elapsed_seconds=%.2f pending_responses=%s "
+                "pending_transcripts=%s vad_disabled=%s buffer_cleared=%s.",
+                asyncio.get_running_loop().time() - started_at,
+                sanitize_for_log(sorted(self.usage.pending_response_ids), max_len=1024),
+                sanitize_for_log(sorted(self.pending_transcripts), max_len=1024),
                 self._vad_disabled,
+                self._buffer_cleared,
             )
 
 
@@ -929,6 +982,69 @@ class ConversationItemOrderingBuffer:
         return True
 
 
+def _new_voice_run(browser_connection: StateWebSocket, thread: Thread) -> Run:
+    assistant = (
+        browser_connection.state["assistant"]
+        if "assistant" in browser_connection.state
+        else None
+    )
+    return Run(
+        status=schemas.RunStatus.IN_PROGRESS,
+        thread_id=thread.id,
+        assistant_id=thread.assistant_id,
+        model=getattr(assistant, "model", None),
+        reasoning_effort=getattr(assistant, "reasoning_effort", None),
+        verbosity=getattr(assistant, "verbosity", None),
+        temperature=getattr(assistant, "temperature", None),
+        tools_available=thread.tools_available,
+        creator_id=browser_connection.state["session"].user.id,
+    )
+
+
+async def save_voice_usage(
+    browser_connection: StateWebSocket, thread: Thread, usage: RealtimeUsage
+) -> None:
+    run_id = browser_connection.state._state.get("voice_mode_run_id")
+    if not usage.has_records and run_id is None:
+        return
+    session = browser_connection.state["db"]
+    thread_id = None
+    try:
+        thread_id = thread.id
+        # Producers and the transcript writer must stop first: this shares
+        # their DB session, but usage is independent of playback qualification.
+        async with session.begin_nested():
+            run = await Run.get_by_id(session, run_id) if run_id is not None else None
+            if run is None or run.thread_id != thread_id:
+                run = _new_voice_run(browser_connection, thread)
+                session.add(run)
+            if usage.session_id is not None:
+                run.run_id = usage.session_id
+            run.status = usage.final_status
+            run.error_code = usage.error_code
+            run.error_message = usage.error_message
+            run.incomplete_reason = (
+                usage.incomplete_reason
+                if run.status == schemas.RunStatus.INCOMPLETE
+                else None
+            )
+            run.completed = func.now()
+            run.usage = usage.to_json()
+            await session.flush()
+        browser_connection.state["voice_mode_run_id"] = run.id
+    except Exception:
+        openai_connection_logger.exception(
+            "Failed to save voice usage for thread_id=%s.", thread_id
+        )
+        # Preserve earlier transcript writes after a failed usage savepoint.
+        try:
+            await session.refresh(thread)
+        except Exception:
+            openai_connection_logger.exception(
+                "Failed to reload thread after voice usage save failure."
+            )
+
+
 async def add_message_to_thread(
     openai_client: OpenAIClientType,
     browser_connection: StateWebSocket,
@@ -992,29 +1108,7 @@ async def add_message_to_thread(
                         run = None
 
                 if run is None:
-                    assistant = (
-                        browser_connection.state["assistant"]
-                        if "assistant" in browser_connection.state
-                        else None
-                    )
-                    conversation_instructions = (
-                        browser_connection.state["conversation_instructions"]
-                        if "conversation_instructions" in browser_connection.state
-                        else None
-                    )
-                    run = Run(
-                        status=schemas.RunStatus.COMPLETED,
-                        thread_id=thread.id,
-                        assistant_id=thread.assistant_id,
-                        model=getattr(assistant, "model", None),
-                        reasoning_effort=getattr(assistant, "reasoning_effort", None),
-                        verbosity=getattr(assistant, "verbosity", None),
-                        temperature=getattr(assistant, "temperature", None),
-                        tools_available=thread.tools_available,
-                        creator_id=browser_connection.state["session"].user.id,
-                        instructions=conversation_instructions or thread.instructions,
-                        completed=func.now(),
-                    )
+                    run = _new_voice_run(browser_connection, thread)
                     browser_connection.state["db"].add(run)
                     await browser_connection.state["db"].flush()
                     await browser_connection.state["db"].refresh(run)
@@ -1570,6 +1664,10 @@ async def handle_openai_events(
 
     try:
         async for event in realtime_connection:
+            if shutdown_drain is not None:
+                # Keep received usage even if cancellation interrupts a delivery
+                # await below. The post-handling observation is idempotent.
+                shutdown_drain.usage.observe(event)
             match event.type:
                 case "conversation.item.added":
                     item = getattr(event, "item", None)
@@ -1643,13 +1741,32 @@ async def handle_openai_events(
                             }
                         )
                 case "session.error" | "error":
-                    openai_connection_logger.exception(f"Session error: {event.error}")
+                    if shutdown_drain and shutdown_drain.is_finished_cancellation_error(
+                        event.error
+                    ):
+                        openai_connection_logger.debug(
+                            "Shutdown cancellation arrived after the response finished."
+                        )
+                    else:
+                        if shutdown_drain is not None:
+                            shutdown_drain.usage.record_error(event)
+                        openai_connection_logger.exception(
+                            f"Session error: {event.error}"
+                        )
                     # A rejected command does not end an established session,
                     # even when error.param identifies a session setting.
                     if not session_updated and not (
                         (shutdown_drain and shutdown_drain.stopping)
                         or (session_expiry and session_expiry.stopping)
                     ):
+                        if shutdown_drain is not None:
+                            shutdown_drain.usage.fail(
+                                getattr(event.error, "code", None)
+                                or getattr(event.error, "type", None)
+                                or "provider_session_error",
+                                getattr(event.error, "message", None)
+                                or "The provider ended the voice session with an error.",
+                            )
                         await send_browser_event(
                             {
                                 "type": "error",
@@ -1878,12 +1995,26 @@ async def handle_openai_events(
             if shutdown_drain is not None:
                 shutdown_drain.observe(event)
 
+        if shutdown_drain is not None and not shutdown_drain.is_complete(
+            ordering_buffer
+        ):
+            shutdown_drain.usage.mark_incomplete("provider_connection_closed")
+
     except (asyncio.CancelledError, ClientDisconnect):
         openai_connection_logger.debug(
             "Received task cancellation signal. Closing the OpenAI connection."
         )
         raise
     except Exception as e:
+        if shutdown_drain is not None:
+            if isinstance(e, REALTIME_CONNECTION_ERRORS):
+                if not shutdown_drain.is_complete(ordering_buffer):
+                    shutdown_drain.usage.mark_incomplete("provider_connection_closed")
+            else:
+                shutdown_drain.usage.fail(
+                    "voice_event_processing_error",
+                    "An internal error interrupted voice event processing.",
+                )
         openai_connection_logger.exception(f"Error handling OpenAI event: {e}")
 
 
@@ -2098,6 +2229,8 @@ async def browser_realtime_websocket(
                     browser_task.cancel()
                     await asyncio.wait({browser_task})
             if provider_unavailable.is_set():
+                if not shutdown_drain.is_complete(ordering_buffer):
+                    shutdown_drain.usage.mark_incomplete("provider_connection_closed")
                 # A terminal provider event can precede its last buffered text.
                 # A completed reader returns immediately; never send controls to
                 # a provider that has already ended or rejected a write.
@@ -2204,6 +2337,23 @@ async def browser_realtime_websocket(
                         "Error saving voice recording health flags for thread_id=%s",
                         thread.id,
                     )
+            for task in (provider_task, shutdown_task, browser_task):
+                if task.done() and not task.cancelled():
+                    task_error = task.exception()
+                    if task_error is not None and not isinstance(
+                        task_error, (WebSocketDisconnect, ClientDisconnect)
+                    ):
+                        if isinstance(task_error, REALTIME_CONNECTION_ERRORS):
+                            if not shutdown_drain.is_complete(ordering_buffer):
+                                shutdown_drain.usage.mark_incomplete(
+                                    "provider_connection_closed"
+                                )
+                        else:
+                            shutdown_drain.usage.fail(
+                                "voice_session_error",
+                                "An internal error interrupted the voice session.",
+                            )
+            await save_voice_usage(browser_connection, thread, shutdown_drain.usage)
         for result in results:
             if isinstance(result, Exception) and not isinstance(
                 result, (ClientDisconnect, WebSocketDisconnect)
@@ -2256,6 +2406,7 @@ async def browser_realtime_websocket(
                 # Retain and await the same task through repeated cancellation.
                 if cancelled is None:
                     cancelled = error
+                    shutdown_drain.usage.mark_incomplete("session_cancelled")
 
     try:
         # Provider completion starts the browser handshake rather than cancelling
@@ -2263,6 +2414,7 @@ async def browser_realtime_websocket(
         await asyncio.wait({shutdown_task})
     except asyncio.CancelledError as error:
         cancelled = error
+        shutdown_drain.usage.mark_incomplete("session_cancelled")
     finally:
         try:
             await await_cleanup(asyncio.create_task(finish_session()))
