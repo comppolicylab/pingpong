@@ -1687,6 +1687,13 @@
 							`Failed to start session. Error: ${errorMessage(message.error.message, "We're facing an unknown error. Check PingPong's status page for updates if this persists.")}`
 						);
 						await resetAudioSession();
+					} else if (message.error.code === 'openai_realtime_response') {
+						sadToast(
+							errorMessage(
+								message.error.message,
+								"The assistant couldn't respond. Please try speaking to continue."
+							)
+						);
 					} else {
 						sadToast(
 							`We faced an error. Error: ${errorMessage(

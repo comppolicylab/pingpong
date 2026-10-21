@@ -25,8 +25,9 @@ from pingpong.ai import (
     OpenAIClientType,
 )
 import pingpong.schemas as schemas
+from pingpong.config import config
 from pingpong.log_utils import sanitize_for_log
-from pingpong.models import Thread, MessagePart, Message, Run
+from pingpong.models import Class, Thread, MessagePart, Message, Run
 from pingpong.realtime_recorder import (
     AUDIO_CHANNELS,
     AUDIO_FRAME_RATE,
@@ -1761,6 +1762,18 @@ async def handle_openai_events(
                                 getattr(error, "message", None), max_len=512
                             ),
                         )
+                        if getattr(error, "code", None) == "rate_limit_exceeded":
+                            try:
+                                async with config.db.driver.async_session() as session:
+                                    await Class.log_rate_limit_error(
+                                        session, class_id=str(thread.class_id)
+                                    )
+                                    await session.commit()
+                            except Exception:
+                                openai_connection_logger.exception(
+                                    "Failed to record realtime rate limit for thread_id=%s.",
+                                    thread.id,
+                                )
                         if not (
                             (shutdown_drain and shutdown_drain.stopping)
                             or (session_expiry and session_expiry.stopping)
