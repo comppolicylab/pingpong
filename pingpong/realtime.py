@@ -35,6 +35,7 @@ from pingpong.realtime_recorder import (
     RealtimeRecorder,
     VoiceRecordingHealth,
 )
+from pingpong.ai_error import get_ai_error_message
 from pingpong.realtime_usage import RealtimeUsage
 from pingpong.websocket import (
     REALTIME_CONNECTION_ERRORS,
@@ -272,12 +273,14 @@ class RealtimeShutdownDrain:
             )
 
 
-def _serialize_realtime_error(_error) -> dict[str, str | None]:
+def _serialize_realtime_error(error) -> dict[str, str | None]:
     # Keep internal OpenAI details out of browser-visible errors.
     return {
         "type": "invalid_request_error",
         "code": "openai_realtime_session",
-        "message": "We were unable to start the voice session.",
+        "message": get_ai_error_message(
+            error, "We were unable to start the voice session."
+        ),
         "param": None,
     }
 
@@ -1970,7 +1973,10 @@ async def handle_openai_events(
                                     "error": {
                                         "type": "server_error",
                                         "code": "openai_realtime_response",
-                                        "message": "The assistant couldn't respond. Please try speaking to continue.",
+                                        "message": get_ai_error_message(
+                                            error,
+                                            "The assistant couldn't respond. Please try speaking to continue.",
+                                        ),
                                         "param": None,
                                     },
                                 }

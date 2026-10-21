@@ -16,6 +16,7 @@ from starlette.websockets import WebSocketDisconnect, WebSocketState
 from websockets.exceptions import ConnectionClosed
 
 from pingpong import models, schemas
+from pingpong.ai_error import get_ai_error_message
 from pingpong.ai_models import get_reasoning_effort_map
 from pingpong.ai import (
     OpenAIClientType,
@@ -643,7 +644,7 @@ def ws_with_realtime_connection(func):
                     )
             await _reject_realtime_session(
                 browser_connection,
-                "We were unable to connect to OpenAI.",
+                get_ai_error_message(e, "We were unable to connect to OpenAI."),
                 code="openai_realtime_connection",
             )
             raise e
