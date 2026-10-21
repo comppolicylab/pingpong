@@ -4318,6 +4318,7 @@ async def list_class_models(
                 "type": KNOWN_MODELS[model_id]["type"],
                 "description": KNOWN_MODELS[model_id]["description"],
                 "is_latest": KNOWN_MODELS[model_id]["is_latest"],
+                "is_available": True,
                 "is_new": KNOWN_MODELS[model_id]["is_new"],
                 "highlight": KNOWN_MODELS[model_id]["highlight"],
                 "supports_vision": KNOWN_MODELS[model_id]["supports_vision"],
@@ -4414,6 +4415,24 @@ async def list_class_models(
                 "supports_mcp_server": False,
                 "description": "The latest GPT-4 Turbo preview model.",
             }
+        )
+
+    # Keep registered legacy models available as metadata even after the provider
+    # stops listing them. The shared editor retains only an assistant's saved
+    # hidden model and displays its Legacy Model warning; new selections remain
+    # blocked by hide_in_model_selector.
+    for model_id in HIDDEN_MODELS:
+        if model_id in included_model_ids or model_id not in KNOWN_MODELS:
+            continue
+        filtered.append(
+            schemas.AssistantModel(
+                **KNOWN_MODELS[model_id],
+                id=model_id,
+                created=datetime.fromtimestamp(0),
+                owner="",
+                hide_in_model_selector=True,
+                is_available=False,
+            ).model_dump()
         )
 
     if not (
