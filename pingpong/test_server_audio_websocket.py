@@ -389,11 +389,14 @@ async def test_session_retention_depends_on_playback_not_transcripts(
             assert recorder.closed
             assert store.complete_upload.await_count == int(played)
             assert store.delete_file.await_count == int(not played)
-            recorder.ffmpeg.stdin.close.assert_called_once()
-            recorder.ffmpeg.wait.assert_awaited()
             if played:
+                recorder.ffmpeg.stdin.close.assert_called_once()
+                recorder.ffmpeg.wait.assert_awaited()
                 assert recorder.audio_duration > 0
                 recorder.ffmpeg.stdin.write.assert_called()
+            else:
+                recorder.ffmpeg.kill.assert_called_once()
+                recorder.ffmpeg.communicate.assert_awaited_once()
 
     async with db.async_session() as session:
         assert await websocket_module._thread_has_messages(session, thread_id) == (

@@ -29,6 +29,7 @@ AUDIO_APPLICATION = "voip"
 MIN_AUDIO_CHUNK_SIZE = 5 * 1024 * 1024  # S3 multipart minimum (except last)
 AUDIO_SIZE_TO_READ = 4_096
 STDIN_CHUNK_SIZE = 32_768
+ENCODER_FINALIZATION_TIMEOUT_SECONDS = 5.0
 
 
 @dataclass
@@ -219,7 +220,9 @@ class RealtimeRecorder:
         self.session = session
         self.health = health if health is not None else VoiceRecordingHealth()
         self._failure_event = asyncio.Event()
+        self._upload_failure_event = asyncio.Event()
         self._cleanup_lock = asyncio.Lock()
+        self._encoder_finished = False
 
     @property
     def failed(self) -> bool:
@@ -230,9 +233,11 @@ class RealtimeRecorder:
     ) -> None:
         self.health.fail(kind, phase, error, self.audio_recording_id, self.thread_id)
         self._failure_event.set()
+        if kind == "upload":
+            self._upload_failure_event.set()
 
     async def abort(self) -> None:
-        """Retire failed recording resources without affecting the conversation."""
+        """Stop recording resources and discard the unfinished upload."""
         async with self._cleanup_lock:
             if self.closed:
                 return
@@ -247,7 +252,9 @@ class RealtimeRecorder:
                     # a child with a full stdout pipe can otherwise hang.
                     await self.ffmpeg.communicate()
                 except ProcessLookupError:
-                    pass
+                    realtime_recorder_logger.debug(
+                        "FFmpeg process already exited during recording abort."
+                    )
                 except Exception as error:
                     self._fail("recording", "close_encoder", error)
             async with self.save_lock:
@@ -259,6 +266,45 @@ class RealtimeRecorder:
             except Exception as error:
                 self._fail("upload", "abort_upload", error)
             self.closed = True
+
+    async def _finish_encoder(self) -> bool:
+        if self._encoder_finished:
+            return not (self.health.upload_issue or self._upload_failure_event.is_set())
+        try:
+            if not self.ffmpeg or not self.ffmpeg.stdin:
+                raise RuntimeError("FFmpeg process is not running.")
+            if self.ffmpeg.returncode is None:
+                self.ffmpeg.stdin.close()
+            returncode = await asyncio.wait_for(
+                self._await_recording_io(
+                    self.ffmpeg.wait(), allow_recording_failure=True
+                ),
+                timeout=ENCODER_FINALIZATION_TIMEOUT_SECONDS,
+            )
+            if returncode:
+                raise CalledProcessError(returncode, "ffmpeg")
+            self._encoder_finished = True
+            return True
+        except Exception as error:
+            if not self.health.upload_issue:
+                self._fail("recording", "finish_encoder", error)
+            return False
+
+    async def _retire_failed_recording(self) -> None:
+        # Keep encoding/uploading the accepted prefix, but leave database writes
+        # and the browser-playback retention decision to the session supervisor.
+        if (
+            self.audio_duration > 0
+            and not self.health.upload_issue
+            and not self._upload_failure_event.is_set()
+            and await self._finish_encoder()
+        ):
+            async with self.save_lock:
+                self.user_audio.clear()
+                self.assistant_responses.clear()
+                self.latest_active_assistant_response_item_id = None
+            return
+        await self.abort()
 
     def _discard_assistant_response(self, item_id: str) -> AssistantResponse | None:
         response = self.assistant_responses.pop(item_id, None)
@@ -345,7 +391,7 @@ class RealtimeRecorder:
         )
         self.upload_task = asyncio.create_task(self._upload_ffmpeg_output())
 
-    async def _upload_ffmpeg_output(self) -> None:
+    async def _upload_ffmpeg_output(self) -> bool:
         """
         Reads FFmpeg stdout, buffers ≥5 MiB, and uploads each as one part.
         """
@@ -364,10 +410,12 @@ class RealtimeRecorder:
                     buf.seek(0)
             if buf.tell() > 0:
                 await self._upload_part(buf)
+            return True
         except Exception as error:
             if not self.failed:
                 self._fail("recording", "read_encoder_output", error)
-            return
+            self._upload_failure_event.set()
+            return False
 
     async def _upload_part(self, buf: BytesIO) -> None:
         try:
@@ -388,15 +436,25 @@ class RealtimeRecorder:
             await self._await_recording_io(self.ffmpeg.stdin.drain())
             await asyncio.sleep(0)
 
-    async def _await_recording_io(self, operation):
+    async def _await_recording_io(self, operation, *, allow_recording_failure=False):
         # A failed uploader stops consuming stdout. Do not leave a writer or
         # final encoder wait blocked behind that full pipe after the worker has
         # stopped for normal session cleanup.
         pending = asyncio.create_task(operation)
-        failure = asyncio.create_task(self._failure_event.wait())
+        failure_event = (
+            self._upload_failure_event
+            if allow_recording_failure
+            else self._failure_event
+        )
+        failure = asyncio.create_task(failure_event.wait())
         try:
             await asyncio.wait({pending, failure}, return_when=asyncio.FIRST_COMPLETED)
-            if self.failed:
+            failed = (
+                (self.health.upload_issue or self._upload_failure_event.is_set())
+                if allow_recording_failure
+                else self.failed
+            )
+            if failed:
                 raise RuntimeError("Recording has failed")
             return await pending
         finally:
@@ -966,13 +1024,12 @@ class RealtimeRecorder:
         if self.closed:
             return
         try:
-            if not self.failed:
-                await self._complete_audio_upload(has_played_audio=has_played_audio)
+            await self._complete_audio_upload(has_played_audio=has_played_audio)
         except Exception as error:
             if not self.failed:
                 self._fail("recording", "finalize_recording", error)
         finally:
-            if self.failed:
+            if not self.closed:
                 await self.abort()
 
     async def _complete_audio_upload(self, *, has_played_audio: bool):
@@ -983,54 +1040,37 @@ class RealtimeRecorder:
             realtime_recorder_logger.info(
                 "No confirmed model playback; discarding the recording."
             )
-            # Stop all writers before deleting/aborting the upload, including
-            # any WebM header or periodic data already buffered by the encoder.
+            # Cancel the uploader before stopping the encoder. Discarded audio
+            # must not trigger another multipart upload just to delete it.
+            await self.abort()
+            return
+
+        if not self.failed:
             try:
-                if self.ffmpeg and self.ffmpeg.stdin:
-                    self.ffmpeg.stdin.close()
-                if self.ffmpeg:
-                    await self._await_recording_io(self.ffmpeg.wait())
-                if self.upload_task:
-                    await self.upload_task
+                await self.finalize()
+                await self.save_buffer()
+                if not self.failed:
+                    await self._save_user_audio_tail()
             except Exception as error:
                 if not self.failed:
-                    self._fail("recording", "discard_recording", error)
-            finally:
-                if self.upload_task:
-                    self.upload_task.cancel()
-                    await asyncio.gather(self.upload_task, return_exceptions=True)
-                if not self.failed:
-                    try:
-                        await self.audio_store_obj.delete_file()
-                    except Exception as error:
-                        self._fail("upload", "discard_upload", error)
-                    else:
-                        self.closed = True
-            return
+                    self._fail("recording", "finalize_recording", error)
 
-        # Finish bundling any responses or user audio still in RAM
-        await self.finalize()
-        await self.save_buffer()
-        if self.failed:
+        if (
+            self.health.upload_issue
+            or self._upload_failure_event.is_set()
+            or (self.failed and self.audio_duration <= 0)
+        ):
             return
-        await self._save_user_audio_tail()
-
-        # Close FFmpeg's stdin so it processes the remaining clusters
-        if not self.ffmpeg or not self.ffmpeg.stdin:
-            raise RuntimeError("FFmpeg process is not running.")
-        self.ffmpeg.stdin.close()
-        returncode = await self._await_recording_io(self.ffmpeg.wait())
-        if returncode:
-            self._fail(
-                "recording", "encoder_exit", CalledProcessError(returncode, "ffmpeg")
-            )
+        if not await self._finish_encoder():
             return
 
         # Wait for the upload task to upload any tail data
         if self.upload_task:
-            await self.upload_task
+            upload_completed = await self.upload_task
+            if upload_completed is False:
+                return
 
-        if self.failed:
+        if self.health.upload_issue or self._upload_failure_event.is_set():
             return
 
         # Complete the upload
@@ -1112,10 +1152,10 @@ class RealtimeRecorder:
                     )
                 if not self.failed:
                     await self.save_buffer()
-            await self.abort()
+            await self._retire_failed_recording()
         except Exception as error:
             self._fail("recording", "recording_worker", error)
-            await self.abort()
+            await self._retire_failed_recording()
         finally:
             encoder.cancel()
             failure.cancel()
