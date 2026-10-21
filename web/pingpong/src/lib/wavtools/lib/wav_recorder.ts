@@ -80,7 +80,6 @@ export class WavRecorder {
 	node: AudioNode | null;
 	analyser: AnalyserNode | undefined;
 	recording: boolean;
-	allowedMicrophoneAccess: boolean;
 
 	private _lastEventId: number;
 	private eventReceipts: { [key: number]: any }; // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -107,7 +106,6 @@ export class WavRecorder {
 		this.debug = !!debug;
 		this._deviceChangeCallback = null;
 		// State variables
-		this.allowedMicrophoneAccess = false;
 		this.stream = null;
 		this.processor = null;
 		this.source = null;
@@ -282,86 +280,50 @@ export class WavRecorder {
 	listenForDeviceChange(
 		callback: ((devices: Array<ExtendedMediaDeviceInfo>) => void) | null
 	): true {
-		if (callback === null && this._deviceChangeCallback) {
+		if (this._deviceChangeCallback) {
 			navigator.mediaDevices.removeEventListener('devicechange', this._deviceChangeCallback);
 			this._deviceChangeCallback = null;
-		} else if (callback !== null) {
+		}
+		if (callback !== null) {
 			// Basically a debounce; we only want this called once when devices change
 			// And we only want the most recent callback() to be executed
 			// if a few are operating at the same time
 			let lastId = 0;
-			let lastDevices: ExtendedMediaDeviceInfo[] = [];
+			let lastDevices: ExtendedMediaDeviceInfo[] | null = null;
 			const serializeDevices = (devices: ExtendedMediaDeviceInfo[]) =>
 				devices
-					.map((d) => d.deviceId)
+					.map((d) => JSON.stringify([d.deviceId, d.label]))
 					.sort()
 					.join(',');
 			const cb = async () => {
 				const id = ++lastId;
-				const devices = await this.listDevices();
-				if (id === lastId) {
-					if (serializeDevices(lastDevices) !== serializeDevices(devices)) {
+				let devices: ExtendedMediaDeviceInfo[];
+				try {
+					devices = await this.listDevices();
+				} catch (error) {
+					console.warn('Could not refresh microphone devices.', error);
+					return;
+				}
+				if (this._deviceChangeCallback === cb && id === lastId) {
+					if (lastDevices === null || serializeDevices(lastDevices) !== serializeDevices(devices)) {
 						lastDevices = devices;
 						callback(devices.slice() as Array<ExtendedMediaDeviceInfo>);
 					}
 				}
 			};
 			navigator.mediaDevices.addEventListener('devicechange', cb);
-			cb();
 			this._deviceChangeCallback = cb;
 		}
 		return true;
 	}
 
 	/**
-	 * Manually request permission to use the microphone
-	 * @returns {Promise<boolean>}
-	 */
-	async requestPermission(): Promise<boolean> {
-		if (navigator.permissions && navigator.permissions.query) {
-			try {
-				const permissionStatus = await navigator.permissions.query({
-					name: 'microphone' as PermissionName
-				});
-				if (permissionStatus.state === 'denied') {
-					window.alert('You must grant microphone access to use this feature.');
-					this.allowedMicrophoneAccess = false;
-					return false;
-				} else if (permissionStatus.state === 'granted') {
-					this.allowedMicrophoneAccess = true;
-					return true;
-				}
-			} catch {
-				// Some browsers do not support permissions.query
-				// and will throw an error
-			}
-		}
-		try {
-			const stream = await navigator.mediaDevices.getUserMedia({
-				audio: true
-			});
-			const tracks = stream.getTracks();
-			tracks.forEach((track) => track.stop());
-			this.allowedMicrophoneAccess = true;
-			return true;
-		} catch {
-			window.alert('You must grant microphone access to use this feature.');
-			this.allowedMicrophoneAccess = false;
-			return false;
-		}
-	}
-
-	/**
-	 * List all eligible devices for recording, will request permission to use microphone
+	 * List eligible recording devices without requesting microphone access
 	 * @returns {Promise<Array<ExtendedMediaDeviceInfo>>}
 	 */
 	async listDevices(): Promise<Array<ExtendedMediaDeviceInfo>> {
 		if (!navigator.mediaDevices || !('enumerateDevices' in navigator.mediaDevices)) {
 			throw new Error('Could not request user devices');
-		}
-		const microphoneAccess = await this.requestPermission();
-		if (!microphoneAccess) {
-			throw new Error('Could not access microphone. Please check permissions.');
 		}
 		const devices = await navigator.mediaDevices.enumerateDevices();
 		const audioDevices = devices.filter((device) => device.kind === 'audioinput');
@@ -382,6 +344,21 @@ export class WavRecorder {
 	}
 
 	/**
+	 * Open a paused microphone stream so the user can choose a named device.
+	 * Reuse it at Start when it matches the selected microphone. When switching
+	 * devices, acquire the replacement before releasing the temporary grant.
+	 */
+	async prepareMicrophone(deviceId?: string): Promise<void> {
+		const track = this.stream?.getAudioTracks().find((track) => track.readyState === 'live');
+		if (track && (!deviceId || track.getSettings().deviceId === deviceId)) return;
+		const stream = await navigator.mediaDevices.getUserMedia({
+			audio: deviceId ? { deviceId: { exact: deviceId } } : true
+		});
+		this.stream?.getTracks().forEach((track) => track.stop());
+		this.stream = stream;
+	}
+
+	/**
 	 * Begins a recording session and requests microphone permissions if not already granted
 	 * Microphone recording indicator will appear on browser tab but status will be "paused"
 	 * @param {string} [deviceId] if no device provided, default device will be used
@@ -399,21 +376,20 @@ export class WavRecorder {
 			throw new Error('Could not request user media');
 		}
 		try {
-			const config: MediaStreamConstraints = { audio: true };
-			if (deviceId) {
-				config.audio = { deviceId: { exact: deviceId } };
-			}
-			this.stream = await navigator.mediaDevices.getUserMedia(config);
+			await this.prepareMicrophone(deviceId);
 		} catch {
 			throw new Error('Could not start media stream');
 		}
 
+		const stream = this.stream;
+		if (!stream) throw new Error('Microphone setup was cancelled');
 		const context = new AudioContext({ sampleRate: this.sampleRate });
-		const source = context.createMediaStreamSource(this.stream);
+		const source = context.createMediaStreamSource(stream);
 		// Load and execute the module script.
 		try {
 			await context.audioWorklet.addModule(this.scriptSrc);
 		} catch (e) {
+			await context.close();
 			throw new Error(`Could not add audioWorklet module: ${this.scriptSrc}`, { cause: e });
 		}
 		const processor = new AudioWorkletNode(context, 'audio_processor');
@@ -624,14 +600,16 @@ export class WavRecorder {
 	}
 
 	/**
-	 * Performs a full cleanup of WavRecorder instance
-	 * Stops actively listening via microphone and removes existing listeners
+	 * Stops microphone capture and removes the device listener unless retained for retry
 	 * @returns {Promise<true>}
 	 */
-	async quit() {
-		this.listenForDeviceChange(null);
+	async quit({ keepDeviceListener = false } = {}) {
+		if (!keepDeviceListener) this.listenForDeviceChange(null);
 		if (this.processor) {
 			await this.end();
+		} else if (this.stream) {
+			this.stream.getTracks().forEach((track) => track.stop());
+			this.stream = null;
 		}
 		return true;
 	}

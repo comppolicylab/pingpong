@@ -72,7 +72,7 @@
 	import Sanitize from '$lib/components/Sanitize.svelte';
 	import AudioPlayer from '$lib/components/AudioPlayer.svelte';
 	import OptimisticImageAttachment from '$lib/components/OptimisticImageAttachment.svelte';
-	import { tick } from 'svelte';
+	import { onDestroy, tick } from 'svelte';
 	import FileCitation from './FileCitation.svelte';
 	import StatusErrors from './StatusErrors.svelte';
 	import FileSearchCallItem from './FileSearchCallItem.svelte';
@@ -1267,10 +1267,13 @@
 
 	let wavRecorder: WavRecorder | null = null;
 	let wavStreamPlayer: WavStreamPlayer | null = null;
-	let microphoneAccess = false;
 	let audioDevices: ExtendedMediaDeviceInfo[] = [];
 	let selectedAudioDevice: ExtendedMediaDeviceInfo | null = null;
 	let openMicrophoneModal = false;
+	let microphoneDevicesReady = false;
+	let checkingMicrophoneDevices = true;
+	let preparingMicrophone = false;
+	let microphoneInitializationId = 0;
 
 	/**
 	 * Select an audio device. If no device ID is provided, the first available device will be selected.
@@ -1303,17 +1306,48 @@
 	 * @param devices The updated list of available audio devices.
 	 */
 	const handleDeviceChange = (devices: ExtendedMediaDeviceInfo[]) => {
-		audioDevices = devices;
+		audioDevices = devices.filter((device) => device.deviceId && device.label);
+		microphoneDevicesReady = audioDevices.length > 0;
 		selectAudioDevice();
+	};
+
+	const enableMicrophoneAccess = async () => {
+		if (preparingMicrophone) return;
+		preparingMicrophone = true;
+		const recorder = wavRecorder ?? new WavRecorder({ sampleRate: 24000, debug: true });
+		wavRecorder = recorder;
+		try {
+			await recorder.prepareMicrophone();
+			if (wavRecorder !== recorder) {
+				await recorder.quit();
+				return;
+			}
+			const devices = await recorder.listDevices();
+			if (wavRecorder !== recorder) return;
+			handleDeviceChange(devices);
+			if (!microphoneDevicesReady) throw new Error('No selectable microphones are available.');
+			recorder.listenForDeviceChange((devices) => {
+				if (wavRecorder === recorder) handleDeviceChange(devices);
+			});
+		} catch (error) {
+			await recorder.quit({ keepDeviceListener: wavRecorder === recorder });
+			if (wavRecorder === recorder) {
+				sadToast(
+					`Failed to access microphone. Error: ${errorMessage(error, 'Please check your microphone permissions.')}`
+				);
+			}
+		} finally {
+			if (wavRecorder === recorder) preparingMicrophone = false;
+		}
 	};
 
 	/**
 	 * Handle the setup of a session.
-	 * This function initializes the WavRecorder and updates available audio devices.
-	 * The user will be asked to allow microphone access.
+	 * Initialize audio output from the Start Session user action.
 	 */
 	const handleSessionSetup = async () => {
-		wavRecorder = new WavRecorder({ sampleRate: 24000, debug: true });
+		const recorder = wavRecorder ?? new WavRecorder({ sampleRate: 24000, debug: true });
+		wavRecorder = recorder;
 		const player = new WavStreamPlayer({
 			sampleRate: 24000,
 			stopOnEmptyBuffer: false,
@@ -1346,31 +1380,24 @@
 					`Failed to set up audio output to your speakers. Error: ${errorMessage(error, "We're facing an unknown error. Check PingPong's status page for updates if this persists.")}`
 				);
 			}
-			wavRecorder.quit();
-			wavRecorder = null;
-			wavStreamPlayer = null;
-			return;
+			for (const cleanup of [
+				() => player.close(),
+				() => recorder.quit({ keepDeviceListener: true })
+			]) {
+				try {
+					await cleanup();
+				} catch (cleanupError) {
+					console.warn('Could not clean up failed voice setup.', cleanupError);
+				}
+			}
+			if (wavStreamPlayer === player) wavStreamPlayer = null;
+			return false;
 		}
-		try {
-			audioDevices = await wavRecorder.listDevices();
-			wavRecorder.listenForDeviceChange(handleDeviceChange);
-			microphoneAccess = true;
-		} catch (error) {
-			sadToast(
-				`Failed to access microphone. Error: ${errorMessage(error, "We're facing an unknown error. Check PingPong's status page for updates if this persists.")}`
-			);
-			wavRecorder.quit();
-			wavRecorder = null;
-			wavStreamPlayer = null;
-			return;
+		if (wavRecorder !== recorder || wavStreamPlayer !== player) {
+			await player.close();
+			return false;
 		}
-
-		// handleDeviceChange is called when set
-		// when listenForDeviceChange is called,
-		// but just in case
-		if (!selectedAudioDevice) {
-			selectAudioDevice();
-		}
+		return true;
 	};
 
 	let socket: WebSocket | null = null;
@@ -1471,7 +1498,8 @@
 	 * Reset the audio session.
 	 * This function closes the WebSocket connection and resets the state of the audio session.
 	 */
-	const resetAudioSession = async () => {
+	const resetAudioSession = async (checkingDevices = false) => {
+		checkingMicrophoneDevices = checkingDevices;
 		audioSessionWarning = null;
 		if (socket) {
 			socket.close();
@@ -1480,16 +1508,18 @@
 		startingAudioSession = false;
 		audioSessionStarted = false;
 		openMicrophoneModal = false;
-		microphoneAccess = false;
 		audioDevices = [];
 		selectedAudioDevice = null;
-		if (wavRecorder) {
-			await wavRecorder.quit();
-			wavRecorder = null;
-		}
-		if (wavStreamPlayer) {
-			await wavStreamPlayer.interrupt();
-			wavStreamPlayer = null;
+		microphoneDevicesReady = false;
+		preparingMicrophone = false;
+		const recorder = wavRecorder;
+		const player = wavStreamPlayer;
+		wavRecorder = null;
+		wavStreamPlayer = null;
+		try {
+			await recorder?.quit();
+		} finally {
+			await player?.close();
 		}
 	};
 
@@ -1497,29 +1527,53 @@
 	 * Handle the start of a session.
 	 */
 	const handleSessionStart = async () => {
-		if (startingAudioSession) {
+		if (preparingMicrophone || startingAudioSession || audioSessionStarted || endingAudioSession)
 			return;
-		}
+		if (!microphoneDevicesReady || !selectedAudioDevice) return;
+		const selectedDeviceId = selectedAudioDevice.deviceId;
 		audioSessionWarning = null;
 		startingAudioSession = true;
-		if (!wavRecorder) {
-			sadToast('We failed to start the session. Please try again.');
+		const sessionRecorder = wavRecorder ?? new WavRecorder({ sampleRate: 24000, debug: true });
+		wavRecorder = sessionRecorder;
+		if (!(await handleSessionSetup())) {
+			if (wavRecorder === sessionRecorder) startingAudioSession = false;
 			return;
 		}
-		if (!selectedAudioDevice) {
-			sadToast('No audio device selected. Please select a microphone.');
+		const sessionPlayer = wavStreamPlayer;
+		try {
+			// Acquire once, from the user's Start action, before opening a provider session.
+			await sessionRecorder.begin(selectedDeviceId);
+		} catch (error) {
+			await sessionRecorder.quit();
+			if (wavRecorder !== sessionRecorder || wavStreamPlayer !== sessionPlayer) return;
+			sadToast(
+				`Failed to start recording. Error: ${errorMessage(error, 'Please check your microphone and its permissions.')}`
+			);
+			await resetAudioSession();
 			return;
 		}
-		if (!wavStreamPlayer) {
-			sadToast('Failed to set up audio output to your speakers.');
+		if (
+			wavRecorder !== sessionRecorder ||
+			wavStreamPlayer !== sessionPlayer ||
+			endingAudioSession
+		) {
+			await endingAudioSessionWork;
+			await sessionRecorder.quit();
 			return;
 		}
-
+		// Permission may expose device names for the first time. Enumeration never prompts.
+		try {
+			const devices = await sessionRecorder.listDevices();
+			if (wavRecorder === sessionRecorder) handleDeviceChange(devices);
+		} catch (error) {
+			console.warn('Could not refresh microphone devices.', error);
+		}
+		if (wavRecorder !== sessionRecorder || wavStreamPlayer !== sessionPlayer || endingAudioSession)
+			return;
 		socket = api.createAudioWebsocket(classId, threadId);
 		socket.binaryType = 'arraybuffer';
 		const sessionSocket = socket;
-		const sessionPlayer = wavStreamPlayer;
-		const sessionRecorder = wavRecorder;
+		let recordingStarted = false;
 
 		socket.addEventListener('message', async (event) => {
 			if (socket !== sessionSocket || wavStreamPlayer !== sessionPlayer || endingAudioSession)
@@ -1540,35 +1594,8 @@
 					await handleSessionEnd();
 					break;
 				case 'session.updated':
-					if (!wavRecorder) {
-						sadToast('We failed to start the session. Please try again.');
-						return;
-					}
-					if (!selectedAudioDevice) {
-						sadToast('No audio device selected. Please select a microphone.');
-						return;
-					}
-					try {
-						await sessionRecorder.begin(selectedAudioDevice.deviceId);
-					} catch (error) {
-						if (socket !== sessionSocket || endingAudioSession) return;
-						if (error instanceof Error && error.message === AUDIO_WORKLET_UNSUPPORTED_MESSAGE) {
-							sadToast(
-								'Voice mode is unavailable in this browser or LMS iframe. Please use the latest Chrome, Edge, or Safari.'
-							);
-						} else {
-							sadToast(
-								`Failed to start recording. Error: ${errorMessage(error, "We're facing an unknown error. Check PingPong's status page for updates if this persists.")}`
-							);
-						}
-						await resetAudioSession();
-						return;
-					}
-					if (socket !== sessionSocket || endingAudioSession) {
-						await endingAudioSessionWork;
-						await sessionRecorder.quit();
-						return;
-					}
+					if (recordingStarted) return;
+					recordingStarted = true;
 					await sessionRecorder.record(chunkProcessor);
 					if (socket !== sessionSocket || endingAudioSession) {
 						await endingAudioSessionWork;
@@ -1664,6 +1691,8 @@
 			}
 			audioDevices = [];
 			selectedAudioDevice = null;
+			microphoneDevicesReady = false;
+			preparingMicrophone = false;
 			if (wavRecorder) {
 				try {
 					await wavRecorder.quit();
@@ -1676,7 +1705,6 @@
 			startingAudioSession = false;
 			audioSessionStarted = false;
 			openMicrophoneModal = false;
-			microphoneAccess = false;
 			endingAudioSession = false;
 			endingAudioSessionWork = null;
 			audioSessionWarning = null;
@@ -1832,8 +1860,38 @@
 		}
 	}
 
+	onDestroy(() => {
+		microphoneInitializationId++;
+		resetAudioSession().catch((error) => console.warn('Could not clean up voice audio.', error));
+	});
+
 	afterNavigate(async () => {
-		await resetAudioSession();
+		const initializationId = ++microphoneInitializationId;
+		try {
+			await resetAudioSession(true);
+			if (initializationId !== microphoneInitializationId) return;
+			if (
+				data.threadInteractionMode !== 'voice' ||
+				assistantInteractionMode !== 'voice' ||
+				$messages.length > 0
+			) {
+				return;
+			}
+			const recorder = new WavRecorder({ sampleRate: 24000, debug: true });
+			wavRecorder = recorder;
+			const devices = await recorder.listDevices();
+			if (initializationId !== microphoneInitializationId || wavRecorder !== recorder) return;
+			if (!preparingMicrophone && !recorder.stream) handleDeviceChange(devices);
+			recorder.listenForDeviceChange((devices) => {
+				if (wavRecorder === recorder) handleDeviceChange(devices);
+			});
+		} catch (error) {
+			if (initializationId === microphoneInitializationId) {
+				console.warn('Could not initialize microphone devices.', error);
+			}
+		} finally {
+			if (initializationId === microphoneInitializationId) checkingMicrophoneDevices = false;
+		}
 	});
 
 	beforeNavigate((nav) => {
@@ -2416,7 +2474,12 @@
 			</div>
 		</Modal>
 		{#if !$loading}
-			{#if data.threadInteractionMode === 'voice' && !microphoneAccess && $messages.length === 0 && assistantInteractionMode === 'voice'}
+			{#if data.threadInteractionMode === 'voice' && checkingMicrophoneDevices && !$isFirefox && $messages.length === 0 && assistantInteractionMode === 'voice'}
+				<div class="flex h-full w-full flex-col items-center justify-center gap-4" role="status">
+					<Spinner size="6" />
+					<p class="text-sm text-gray-600">Checking microphones...</p>
+				</div>
+			{:else if data.threadInteractionMode === 'voice' && !microphoneDevicesReady && !audioSessionStarted && !startingAudioSession && !endingAudioSession && $messages.length === 0 && assistantInteractionMode === 'voice'}
 				{#if $isFirefox}
 					<div class="flex h-full w-full flex-col items-center justify-center gap-4">
 						<div class="rounded-lg bg-blue-light-50 p-3">
@@ -2446,13 +2509,14 @@
 						<Button
 							class="flex flex-row gap-1.5 rounded-sm bg-blue-dark-40 px-4 py-1.5 text-center text-sm text-xs font-normal text-white transition-all hover:bg-blue-dark-50 hover:text-blue-light-50"
 							type="button"
-							onclick={handleSessionSetup}
+							onclick={enableMicrophoneAccess}
+							disabled={preparingMicrophone}
 						>
 							Enable access
 						</Button>
 					</div>
 				{/if}
-			{:else if data.threadInteractionMode === 'voice' && microphoneAccess && $messages.length === 0 && assistantInteractionMode === 'voice'}
+			{:else if data.threadInteractionMode === 'voice' && (microphoneDevicesReady || audioSessionStarted || startingAudioSession || endingAudioSession) && $messages.length === 0 && assistantInteractionMode === 'voice'}
 				{#if $isFirefox}
 					<div class="flex h-full w-full flex-col items-center justify-center gap-4">
 						<div class="rounded-lg bg-blue-light-50 p-3">
@@ -2520,8 +2584,10 @@
 										class="flex flex-row gap-1 rounded-lg bg-blue-dark-40 px-3 py-2 text-center text-sm font-normal text-white transition-all hover:bg-blue-dark-50"
 										type="button"
 										onclick={handleSessionStart}
-										ontouchstart={handleSessionStart}
-										disabled={!microphoneAccess}
+										disabled={!selectedAudioDevice ||
+											preparingMicrophone ||
+											startingAudioSession ||
+											endingAudioSession}
 									>
 										{#if startingAudioSession}
 											<Spinner color="custom" customColor="fill-white" class="mr-1 h-4 w-4" />
@@ -2536,7 +2602,7 @@
 										type="button"
 										onclick={handleSessionEnd}
 										ontouchstart={handleSessionEnd}
-										disabled={!microphoneAccess}
+										disabled={endingAudioSession}
 									>
 										{#if endingAudioSession}
 											<Spinner color="custom" customColor="fill-white" class="mr-1 h-4 w-4" />
@@ -2549,7 +2615,7 @@
 								<Button
 									id="top-dd"
 									class="flex max-w-56 min-w-56 shrink-0 grow-0 flex-row justify-between gap-2 rounded-lg px-3 py-2 text-sm font-normal text-gray-800 transition-all hover:bg-gray-300"
-									disabled={!microphoneAccess ||
+									disabled={!microphoneDevicesReady ||
 										audioSessionStarted ||
 										startingAudioSession ||
 										endingAudioSession}
