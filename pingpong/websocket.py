@@ -294,7 +294,10 @@ async def _thread_has_messages(db, thread_id: int) -> bool:
 
 
 async def _reject_realtime_session(
-    browser_connection: StateWebSocket, message: str
+    browser_connection: StateWebSocket,
+    message: str,
+    *,
+    code: str = "voice_session_unavailable",
 ) -> None:
     try:
         await browser_connection.send_json(
@@ -302,7 +305,7 @@ async def _reject_realtime_session(
                 "type": "error",
                 "error": {
                     "type": "invalid_request_error",
-                    "code": "voice_session_unavailable",
+                    "code": code,
                     "message": message,
                 },
             }
@@ -310,7 +313,7 @@ async def _reject_realtime_session(
         await browser_connection.close()
     except (WebSocketDisconnect, ClientDisconnect, OSError):
         browser_connection_logger.debug(
-            "Browser disconnected while rejecting an unavailable voice session."
+            "Browser disconnected while rejecting a voice session."
         )
     except RuntimeError:
         if (
@@ -321,7 +324,7 @@ async def _reject_realtime_session(
         ):
             raise
         browser_connection_logger.debug(
-            "Browser websocket already closed while rejecting an unavailable voice session."
+            "Browser websocket already closed while rejecting a voice session."
         )
 
 
@@ -443,17 +446,9 @@ def ws_check_realtime_permissions(func):
                 raise ValueError(ARCHIVED_DETAIL)
             await check_realtime_permissions(browser_connection, thread_id)
         except ValueError as e:
-            await browser_connection.send_json(
-                {
-                    "type": "error",
-                    "error": {
-                        "type": "invalid_request_error",
-                        "code": "permissions",
-                        "message": str(e),
-                    },
-                }
+            await _reject_realtime_session(
+                browser_connection, str(e), code="permissions"
             )
-            await browser_connection.close()
             raise e
         return await func(browser_connection, class_id, thread_id, *args, **kwargs)
 
@@ -474,17 +469,11 @@ def ws_with_openai_client(func):
                 browser_connection.state["db"], int(class_id)
             )
         except Exception:
-            await browser_connection.send_json(
-                {
-                    "type": "error",
-                    "error": {
-                        "type": "invalid_request_error",
-                        "code": "openai_client",
-                        "message": "We were unable to connect to OpenAI.",
-                    },
-                }
+            await _reject_realtime_session(
+                browser_connection,
+                "We were unable to connect to OpenAI.",
+                code="openai_client",
             )
-            await browser_connection.close()
             raise
         browser_connection.state["openai_client"] = openai_client
         return await func(browser_connection, class_id, thread_id, *args, **kwargs)
@@ -640,17 +629,11 @@ def ws_with_realtime_connection(func):
                     )
         except Exception as e:
             openai_connection_logger.exception(f"Error in Realtime connection: {e}")
-            await browser_connection.send_json(
-                {
-                    "type": "error",
-                    "error": {
-                        "type": "invalid_request_error",
-                        "code": "openai_realtime_connection",
-                        "message": "We were unable to connect to OpenAI.",
-                    },
-                }
+            await _reject_realtime_session(
+                browser_connection,
+                "We were unable to connect to OpenAI.",
+                code="openai_realtime_connection",
             )
-            await browser_connection.close()
             raise e
 
     return wrapper
