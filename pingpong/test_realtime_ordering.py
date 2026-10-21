@@ -70,30 +70,23 @@ async def test_finished_playback_resolves_pending_and_future_reply_decisions():
 
 @pytest.mark.parametrize("outcome", ["completed", "interrupted", "unknown"])
 @pytest.mark.parametrize("start_before_wait", [False, True])
-async def test_playback_outcome_waits_for_terminal_evidence_or_shutdown(
+async def test_playback_outcome_is_unknown_until_terminal_evidence(
     outcome, start_before_wait
 ):
     tracker = RealtimeAssistantAudioTracker()
     await tracker.add_audio_delta("reply", "part", b"\0\0")
     if start_before_wait:
         await tracker.mark_audio_event_playback_started("reply", "part")
-    pending = asyncio.create_task(tracker.wait_for_item_playback_outcome("reply"))
-    try:
-        await asyncio.sleep(0)
-        if not start_before_wait:
-            await tracker.mark_audio_event_playback_started("reply", "part")
-        await asyncio.sleep(0)
-        assert not pending.done()
-        if outcome == "unknown":
-            tracker.finish_playback_tracking()
-        else:
-            await tracker.mark_item_audio_done("reply")
-            assert await tracker.mark_item_playback_settled("reply", outcome, True)
-        assert await asyncio.wait_for(pending, timeout=1) == outcome
-        assert await tracker.wait_for_item_playback_outcome("reply") == outcome
-    finally:
-        pending.cancel()
-        await asyncio.gather(pending, return_exceptions=True)
+    assert tracker.get_item_playback_outcome("reply") == "unknown"
+    if not start_before_wait:
+        await tracker.mark_audio_event_playback_started("reply", "part")
+    assert tracker.get_item_playback_outcome("reply") == "unknown"
+    if outcome == "unknown":
+        tracker.finish_playback_tracking()
+    else:
+        await tracker.mark_item_audio_done("reply")
+        assert await tracker.mark_item_playback_settled("reply", outcome, True)
+    assert tracker.get_item_playback_outcome("reply") == outcome
 
 
 @pytest.mark.parametrize("played", [False, True])

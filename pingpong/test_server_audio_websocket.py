@@ -693,17 +693,151 @@ async def test_each_assistant_write_waits_for_its_own_playback(
                 await asyncio.wait_for(queue.join(), timeout=0.02)
             write.assert_not_awaited()
             await callback("held", "held")
-        with pytest.raises(TimeoutError):
-            await asyncio.wait_for(queue.join(), timeout=0.02)
-        write.assert_not_awaited()
-        await tracker.mark_item_playback_settled("held", "interrupted", True)
         await asyncio.wait_for(queue.join(), timeout=1)
         assert [call.args[3] for call in write.await_args_list] == ["held", "later"]
-        assert write.await_args_list[0].kwargs["playback_outcome"] == "interrupted"
+        assert write.await_args_list[0].kwargs["playback_outcome"] == "unknown"
+        await tracker.mark_item_playback_settled("held", "interrupted", True)
+        assert tracker.get_item_playback_outcome("held") == "interrupted"
         assert not await callback("held", "held")
     finally:
         worker.cancel()
         await asyncio.gather(worker, return_exceptions=True)
+
+
+@with_user(123)
+@pytest.mark.parametrize("settlement", ["during_write", "after_write", "missing"])
+async def test_heard_transcripts_save_before_settlement_and_enrich_later(
+    db, user, monkeypatch, settlement
+):
+    ready = asyncio.Event()
+    writing = asyncio.Event()
+    following_saved = asyncio.Event()
+    settled = asyncio.Event()
+    updated = asyncio.Event()
+    finish = asyncio.Event()
+    incoming = asyncio.Queue()
+    initial_outcomes = []
+    original_write = realtime_module.add_message_to_thread
+    original_update = realtime_module.update_message_playback_outcome
+
+    async def write(*args, **kwargs):
+        if args[3] == "reply":
+            initial_outcomes.append(kwargs["playback_outcome"])
+            writing.set()
+            if settlement == "during_write":
+                await settled.wait()
+        saved = await original_write(*args, **kwargs)
+        if args[3] == "following":
+            following_saved.set()
+        return saved
+
+    async def update(*args):
+        await original_update(*args)
+        updated.set()
+
+    async def provider(*args, ordering_buffer):
+        queue, tracker = args[4:6]
+        await tracker.add_audio_delta("reply", "audio", b"\0" * 480)
+        for item_id, previous, role in [
+            ("reply", None, "assistant"),
+            ("following", "reply", "user"),
+        ]:
+            ordering_buffer.register_conversation_item(item_id, previous, role)
+            ordering_buffer.register_transcription(item_id, f"text for {item_id}", role)
+        await realtime_module.enqueue_ready_thread_message_tasks(
+            ordering_buffer, queue, args[2], args[0], args[3], None
+        )
+        ready.set()
+        await finish.wait()
+
+    monkeypatch.setattr(realtime_module, "add_message_to_thread", write)
+    monkeypatch.setattr(realtime_module, "update_message_playback_outcome", update)
+    monkeypatch.setattr(realtime_module, "handle_openai_events", provider)
+    async with db.async_session() as session:
+        thread = models.Thread(
+            version=3,
+            user_message_ct=0,
+            tools_available="[]",
+            display_user_info=False,
+        )
+        session.add(thread)
+        await session.flush()
+        websocket = DummyWebSocket()
+        websocket.state = State(
+            {
+                "db": session,
+                "session": SimpleNamespace(user=user),
+                "thread": thread,
+                "anonymous_share_token": None,
+                "anonymous_session_token": None,
+                "openai_client": None,
+                "realtime_connection": None,
+            }
+        )
+        last_settlement = False
+
+        async def receive():
+            nonlocal last_settlement
+            if last_settlement:
+                settled.set()
+            data = await incoming.get()
+            last_settlement = data["type"] == "response.audio.playback.settled"
+            return {"text": json.dumps(data)}
+
+        websocket.receive = receive
+        websocket._raise_on_disconnect = lambda message: None
+        task = asyncio.create_task(
+            inspect.unwrap(realtime_module.browser_realtime_websocket)(
+                websocket, "1", str(thread.id)
+            )
+        )
+        try:
+            await asyncio.wait_for(ready.wait(), timeout=2)
+            await incoming.put(
+                {
+                    "type": "response.audio.delta.started",
+                    "item_id": "reply",
+                    "event_id": "audio",
+                    "started_playing_at": 1000,
+                }
+            )
+            if settlement == "during_write":
+                await asyncio.wait_for(writing.wait(), timeout=2)
+            else:
+                await asyncio.wait_for(following_saved.wait(), timeout=2)
+            assert initial_outcomes == ["unknown"]
+            if settlement != "missing":
+                await incoming.put(
+                    {
+                        "type": "response.audio.playback.settled",
+                        "item_id": "reply",
+                        "outcome": "interrupted",
+                        "played": True,
+                    }
+                )
+                await asyncio.wait_for(updated.wait(), timeout=2)
+            await asyncio.wait_for(following_saved.wait(), timeout=2)
+            finish.set()
+            await asyncio.wait_for(task, timeout=2)
+            messages = (
+                await session.scalars(
+                    select(models.Message)
+                    .where(models.Message.thread_id == thread.id)
+                    .order_by(models.Message.output_index)
+                )
+            ).all()
+            assert [message.message_id for message in messages] == [
+                "reply",
+                "following",
+            ]
+            assert messages[0].message_metadata["voice_playback_outcome"] == (
+                "unknown" if settlement == "missing" else "interrupted"
+            )
+            await session.commit()
+        finally:
+            finish.set()
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
 
 
 @pytest.mark.parametrize("played", [False, True])

@@ -140,19 +140,7 @@ class RealtimeAssistantAudioTracker:
             await decision.wait()
         return self.has_item_played_audio(item_id)
 
-    async def wait_for_item_playback_outcome(
-        self, item_id: str
-    ) -> VoicePlaybackOutcome:
-        # Playback start qualifies retention, but it does not tell us whether
-        # the whole reply was heard. Save the terminal outcome with the text.
-        while (
-            item_id not in self._playback_outcomes
-            and not self._playback_tracking_finished
-        ):
-            decision = self._item_retention_decisions.setdefault(
-                item_id, asyncio.Event()
-            )
-            await decision.wait()
+    def get_item_playback_outcome(self, item_id: str) -> VoicePlaybackOutcome:
         return self._playback_outcomes.get(item_id, "unknown")
 
     def register_item(self, item_id: str | None) -> None:
@@ -966,6 +954,41 @@ async def add_message_to_thread(
     return True
 
 
+async def update_message_playback_outcome(
+    browser_connection: StateWebSocket,
+    thread: Thread,
+    item_id: str,
+    playback_outcome: VoicePlaybackOutcome,
+) -> None:
+    if thread.version != 3 or playback_outcome not in {"completed", "interrupted"}:
+        return
+    session = browser_connection.state["db"]
+    try:
+        async with session.begin_nested():
+            message = await session.scalar(
+                select(Message).where(
+                    Message.thread_id == thread.id,
+                    Message.message_id == item_id,
+                    Message.role == schemas.MessageRole.ASSISTANT,
+                )
+            )
+            if message is None:
+                return
+            metadata = dict(message.message_metadata or {})
+            if metadata.get("voice_playback_outcome") == playback_outcome:
+                return
+            message.message_metadata = {
+                **metadata,
+                "voice_playback_outcome": playback_outcome,
+            }
+            await session.flush()
+    except Exception:
+        openai_connection_logger.exception(
+            "Failed to update realtime playback metadata item_id=%s.",
+            sanitize_for_log(item_id, max_len=256),
+        )
+
+
 async def enqueue_ready_thread_message_tasks(
     ordering_buffer: ConversationItemOrderingBuffer,
     openai_task_queue: asyncio.Queue,
@@ -996,8 +1019,10 @@ async def enqueue_ready_thread_message_tasks(
                     item_id
                 ):
                     return
-                playback_outcome = await ordering_buffer.assistant_audio_tracker.wait_for_item_playback_outcome(
-                    item_id
+                playback_outcome = (
+                    ordering_buffer.assistant_audio_tracker.get_item_playback_outcome(
+                        item_id
+                    )
                 )
             # Retry in place so later writes cannot overtake this item. Classic
             # provider-side writes have no local idempotency guarantee.
@@ -1616,6 +1641,17 @@ async def browser_realtime_websocket(
             thread,
             realtime_recorder,
         )
+        if assistant_audio_tracker.has_item_played_audio(item_id):
+
+            async def update_playback_metadata():
+                await update_message_playback_outcome(
+                    browser_connection,
+                    thread,
+                    item_id,
+                    assistant_audio_tracker.get_item_playback_outcome(item_id),
+                )
+
+            await openai_task_queue.put(update_playback_metadata)
 
     browser_task = asyncio.create_task(
         handle_browser_messages(

@@ -18,6 +18,87 @@ from pingpong.testutil import with_authz, with_user
 
 
 @with_user(123)
+@pytest.mark.parametrize("fail_update", [False, True])
+async def test_playback_metadata_update_is_scoped_and_does_not_rollback_text(
+    db, user, monkeypatch, fail_update
+):
+    async with db.async_session() as session:
+        threads = [
+            models.Thread(version=3, user_message_ct=0, tools_available="[]")
+            for _ in range(2)
+        ]
+        session.add_all(threads)
+        await session.flush()
+        websocket = SimpleNamespace(
+            state=State({"db": session, "session": SimpleNamespace(user=user)})
+        )
+        for thread in threads:
+            assert await add_message_to_thread(
+                None,
+                websocket,
+                thread,
+                "reply",
+                "original transcript",
+                "assistant",
+                playback_outcome="unknown",
+            )
+        first = await session.scalar(
+            select(models.Message).where(
+                models.Message.thread_id == threads[0].id,
+                models.Message.message_id == "reply",
+            )
+        )
+        first.message_metadata = {**first.message_metadata, "other_flag": True}
+        await session.flush()
+        original_flush = session.flush
+        failed = False
+
+        async def flush(*args, **kwargs):
+            nonlocal failed
+            if fail_update and not failed and session.in_nested_transaction():
+                failed = True
+                raise RuntimeError("metadata update failed")
+            await original_flush(*args, **kwargs)
+
+        monkeypatch.setattr(session, "flush", flush)
+        await realtime_module.update_message_playback_outcome(
+            websocket, threads[0], "reply", "interrupted"
+        )
+        assert session.is_active
+        assert await add_message_to_thread(
+            None, websocket, threads[0], "following", "next user transcript", "user"
+        )
+        thread_ids = [thread.id for thread in threads]
+        await session.commit()
+
+    async with db.async_session() as session:
+        for index, thread_id in enumerate(thread_ids):
+            reply = await session.scalar(
+                select(models.Message)
+                .where(
+                    models.Message.thread_id == thread_id,
+                    models.Message.message_id == "reply",
+                )
+                .options(selectinload(models.Message.content))
+            )
+            assert reply.message_metadata["voice_playback_outcome"] == (
+                "interrupted" if index == 0 and not fail_update else "unknown"
+            )
+            assert reply.content[0].text == "original transcript"
+            if index == 0:
+                assert reply.message_metadata["other_flag"] is True
+        assert (
+            await session.scalar(
+                select(models.Message.id).where(
+                    models.Message.thread_id == thread_ids[0],
+                    models.Message.message_id == "following",
+                )
+            )
+            is not None
+        )
+
+
+@with_user(123)
 @pytest.mark.parametrize(
     "failure_stage, permanent_failure",
     [
