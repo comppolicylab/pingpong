@@ -1953,13 +1953,13 @@
 			const devices = await recorder.listDevices();
 			if (initializationId !== microphoneInitializationId || wavRecorder !== recorder) return;
 			if (!preparingMicrophone && !recorder.stream) handleDeviceChange(devices);
+			recorder.listenForDeviceChange((devices) => {
+				if (wavRecorder === recorder) handleDeviceChange(devices);
+			});
 			if (!microphoneDevicesReady) {
 				await enableMicrophoneAccess();
 				return;
 			}
-			recorder.listenForDeviceChange((devices) => {
-				if (wavRecorder === recorder) handleDeviceChange(devices);
-			});
 		} catch (error) {
 			if (initializationId === microphoneInitializationId) {
 				console.warn('Could not initialize microphone devices.', error);
