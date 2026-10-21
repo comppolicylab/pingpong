@@ -349,9 +349,10 @@ class RealtimeRecorder:
                     sanitize_for_log(event_id, max_len=256),
                 )
                 return
-            self.assistant_responses[item_id].audio_chunks[
-                event_id
-            ].starts_at = started_playing_at_ms
+            chunk = self.assistant_responses[item_id].audio_chunks[event_id]
+            if chunk.starts_at is not None:
+                return
+            chunk.starts_at = started_playing_at_ms
             if self.assistant_responses[item_id].first_audio_chunk_event_id == event_id:
                 self.assistant_responses[item_id].starts_at = started_playing_at_ms
 
