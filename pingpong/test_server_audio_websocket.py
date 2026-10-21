@@ -42,6 +42,12 @@ class DummyWebSocket:
         self.closed = True
 
 
+@pytest.fixture(autouse=True)
+def short_browser_shutdown_timeout(monkeypatch):
+    # Older browser mocks never acknowledge a provider-initiated stop.
+    monkeypatch.setattr(realtime_module, "BROWSER_EXPIRY_STOP_SECONDS", 0.02)
+
+
 async def test_audio_stream_uses_lti_session_when_cookie_missing(monkeypatch):
     browser_realtime_websocket = AsyncMock()
     monkeypatch.setattr(

@@ -1523,10 +1523,9 @@
 		voiceSessionEndError = null;
 		checkingMicrophoneDevices = checkingDevices;
 		audioSessionWarning = null;
-		if (socket) {
-			socket.close();
-			socket = null;
-		}
+		const sessionSocket = socket;
+		socket = null;
+		sessionSocket?.close();
 		startingAudioSession = false;
 		audioSessionStarted = false;
 		openMicrophoneModal = false;
@@ -1596,6 +1595,18 @@
 		const sessionSocket = socket;
 		let recordingStarted = false;
 
+		const handleConnectionEnd = () => {
+			if (!recordingStarted) {
+				sadToast('The voice connection closed before the session started. Please try again.');
+			}
+			return endAudioSession(recordingStarted);
+		};
+
+		sessionSocket.addEventListener('close', () => {
+			if (socket !== sessionSocket || endingAudioSession) return;
+			void handleConnectionEnd();
+		});
+
 		socket.addEventListener('message', async (event) => {
 			if (socket !== sessionSocket || wavStreamPlayer !== sessionPlayer || endingAudioSession)
 				return;
@@ -1613,6 +1624,9 @@
 					audioSessionWarning =
 						'The session time limit has been reached. Finishing your session...';
 					await handleSessionEnd();
+					break;
+				case 'session.ended':
+					await handleConnectionEnd();
 					break;
 				case 'session.updated':
 					if (recordingStarted) return;
@@ -1686,16 +1700,18 @@
 	/**
 	 * Handle session end.
 	 */
-	const handleSessionEnd = () => {
+	const handleSessionEnd = () => endAudioSession(true);
+
+	const endAudioSession = (sessionEstablished: boolean) => {
 		if (endingAudioSession) {
 			return endingAudioSessionWork;
 		}
 		endingAudioSession = true;
-		endingAudioSessionWork = finishAudioSession();
+		endingAudioSessionWork = finishAudioSession(sessionEstablished);
 		return endingAudioSessionWork;
 	};
 
-	const finishAudioSession = async () => {
+	const finishAudioSession = async (sessionEstablished: boolean) => {
 		const generation = audioSessionGeneration;
 		const sessionSocket = socket;
 		const player = wavStreamPlayer;
@@ -1727,19 +1743,23 @@
 			}
 			if (generation !== audioSessionGeneration) return;
 			preparingMicrophone = false;
-			if (!sessionSocket) throw new Error('The voice connection is no longer available.');
-			// Final playback reports precede the stop. Recorder teardown must not
-			// delay the handshake or prevent it when the worklet fails to stop.
-			const stopWork = stopVoiceSession(sessionSocket);
-			void cleanupAudio();
-			await stopWork;
-			saveConfirmed = true;
-			if (generation !== audioSessionGeneration) return;
-			loadingVoiceTranscript = true;
+			if (sessionEstablished) {
+				if (!sessionSocket) throw new Error('The voice connection is no longer available.');
+				// Final playback reports precede the stop. Recorder teardown must not
+				// delay the handshake or prevent it when the worklet fails to stop.
+				const stopWork = stopVoiceSession(sessionSocket);
+				void cleanupAudio();
+				await stopWork;
+				saveConfirmed = true;
+				if (generation !== audioSessionGeneration) return;
+				loadingVoiceTranscript = true;
+			}
 			await cleanupAudio();
 			if (generation !== audioSessionGeneration) return;
-			await invalidateAll();
-			if (generation !== audioSessionGeneration) return;
+			if (sessionEstablished) {
+				await invalidateAll();
+				if (generation !== audioSessionGeneration) return;
+			}
 			if ($messages.length === 0) {
 				const recorder = new WavRecorder({ sampleRate: 24000, debug: true });
 				wavRecorder = recorder;

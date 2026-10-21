@@ -35,6 +35,7 @@ from pingpong.realtime_recorder import (
     VoiceRecordingHealth,
 )
 from pingpong.websocket import (
+    REALTIME_CONNECTION_ERRORS,
     ws_auth_middleware,
     ws_check_realtime_permissions,
     ws_db_middleware,
@@ -210,14 +211,6 @@ def _serialize_realtime_error(_error) -> dict[str, str | None]:
         "message": "We were unable to start the voice session.",
         "param": None,
     }
-
-
-def _is_realtime_session_startup_error(error, session_updated: bool) -> bool:
-    if not session_updated:
-        return True
-
-    param = getattr(error, "param", None)
-    return isinstance(param, str) and param.startswith("session.")
 
 
 def _has_non_empty_transcript(transcript_text: str | None) -> bool:
@@ -1287,7 +1280,26 @@ async def handle_browser_messages(
     on_playback_settled: Callable[[str], Awaitable[None]] | None = None,
     session_expiry: RealtimeSessionExpiry | None = None,
     on_session_stop: Callable[[], None] | None = None,
+    provider_unavailable: asyncio.Event | None = None,
 ):
+    async def send_to_provider(operation: Callable[[], Awaitable[None]]) -> bool:
+        if provider_unavailable is not None and provider_unavailable.is_set():
+            return False
+        try:
+            await operation()
+            return True
+        except REALTIME_CONNECTION_ERRORS:
+            if provider_unavailable is None:
+                raise
+            provider_unavailable.set()
+            if session_expiry is not None:
+                session_expiry.stopping = True
+            openai_connection_logger.warning(
+                "Provider connection closed while forwarding browser audio.",
+                exc_info=True,
+            )
+            return False
+
     try:
         while True:
             message = await browser_connection.receive()
@@ -1344,7 +1356,7 @@ async def handle_browser_messages(
                             ),
                         )
                         browser_connection_logger.debug(
-                            "Forwarding browser truncate item_id=%s event_id=%s "
+                            "Applying browser truncate item_id=%s event_id=%s "
                             "requested_audio_end_ms=%s forwarded_audio_end_ms=%s.",
                             sanitize_for_log(item_id, max_len=256),
                             sanitize_for_log(str(event_id), max_len=256),
@@ -1354,10 +1366,12 @@ async def handle_browser_messages(
                         # Truncate the audio buffer for the specified item
                         # NOTE: This does not impact the transcription process,
                         # which might affect the quality of the transcription.
-                        await realtime_connection.conversation.item.truncate(
-                            audio_end_ms=audio_end_ms,
-                            content_index=0,
-                            item_id=item_id,
+                        await send_to_provider(
+                            lambda: realtime_connection.conversation.item.truncate(
+                                audio_end_ms=audio_end_ms,
+                                content_index=0,
+                                item_id=item_id,
+                            )
                         )
                         await assistant_audio_tracker.forget_item(item_id)
                         if realtime_recorder:
@@ -1444,10 +1458,14 @@ async def handle_browser_messages(
                 if len(buffer) >= timestamp_size:
                     timestamp = struct.unpack(">d", buffer[:8])[0]
                     audio_chunk = buffer[8:]
-                    await realtime_connection.input_audio_buffer.append(
-                        audio=base64.b64encode(cast(bytes, audio_chunk)).decode("utf-8")
+                    sent = await send_to_provider(
+                        lambda: realtime_connection.input_audio_buffer.append(
+                            audio=base64.b64encode(cast(bytes, audio_chunk)).decode(
+                                "utf-8"
+                            )
+                        )
                     )
-                    if realtime_recorder:
+                    if sent and realtime_recorder:
                         await realtime_recorder.add_user_audio(
                             audio_chunk=audio_chunk,
                             timestamp=timestamp,
@@ -1482,6 +1500,7 @@ async def handle_openai_events(
     ordering_buffer: ConversationItemOrderingBuffer | None = None,
     shutdown_drain: RealtimeShutdownDrain | None = None,
     session_expiry: RealtimeSessionExpiry | None = None,
+    on_provider_end: Callable[[], None] | None = None,
 ):
     initial_output_index = 0
     if thread.version == 3:
@@ -1621,9 +1640,12 @@ async def handle_openai_events(
                         )
                 case "session.error" | "error":
                     openai_connection_logger.exception(f"Session error: {event.error}")
-                    if _is_realtime_session_startup_error(
-                        event.error, session_updated
-                    ) and not (shutdown_drain and shutdown_drain.stopping):
+                    # A rejected command does not end an established session,
+                    # even when error.param identifies a session setting.
+                    if not session_updated and not (
+                        (shutdown_drain and shutdown_drain.stopping)
+                        or (session_expiry and session_expiry.stopping)
+                    ):
                         await send_browser_event(
                             {
                                 "type": "error",
@@ -1634,6 +1656,9 @@ async def handle_openai_events(
                         return
                 case "session.ended":
                     openai_connection_logger.debug(f"Session ended: {event.session}")
+                    if on_provider_end is not None:
+                        on_provider_end()
+                        continue
                     await send_browser_event(
                         {
                             "type": "session.ended",
@@ -1904,6 +1929,11 @@ async def browser_realtime_websocket(
             await openai_task_queue.put(update_playback_metadata)
 
     stop_requested = False
+    provider_unavailable = asyncio.Event()
+
+    def provider_ended() -> None:
+        session_expiry.stopping = True
+        provider_unavailable.set()
 
     async def acknowledge_stop(saved: bool) -> None:
         try:
@@ -1954,8 +1984,29 @@ async def browser_realtime_websocket(
             on_playback_settled=on_playback_settled,
             session_expiry=session_expiry,
             on_session_stop=request_stop,
+            provider_unavailable=provider_unavailable,
         )
     )
+
+    async def read_provider_events() -> None:
+        try:
+            await handle_openai_events(
+                browser_connection,
+                realtime_connection,
+                openai_client,
+                thread,
+                openai_task_queue,
+                assistant_audio_tracker,
+                realtime_recorder,
+                ordering_buffer=ordering_buffer,
+                shutdown_drain=shutdown_drain,
+                session_expiry=session_expiry,
+                on_provider_end=provider_ended,
+            )
+        finally:
+            provider_ended()
+
+    provider_task = asyncio.create_task(read_provider_events())
 
     async def wait_for_browser_disconnect_drain():
         async def warn_browser(seconds_remaining: int) -> None:
@@ -1967,23 +2018,29 @@ async def browser_realtime_websocket(
             )
 
         expiry_task = asyncio.create_task(session_expiry.wait(warn_browser))
+        provider_end_task = asyncio.create_task(provider_unavailable.wait())
+        drain_task = None
         try:
             # Keep the browser reader alive for the final played offsets, even
             # after microphone input and new playback have been cut off.
             await asyncio.wait(
-                {browser_task, expiry_task}, return_when=asyncio.FIRST_COMPLETED
+                {browser_task, expiry_task, provider_end_task},
+                return_when=asyncio.FIRST_COMPLETED,
             )
             if not browser_task.done():
-                openai_connection_logger.info(
-                    "Ending voice session before provider expiry."
+                event_type = (
+                    "session.ended"
+                    if provider_unavailable.is_set()
+                    else "session.expiring"
                 )
+                session_expiry.stopping = True
                 try:
                     async with asyncio.timeout(BROWSER_EXPIRY_STOP_SECONDS):
-                        await browser_connection.send_json({"type": "session.expiring"})
+                        await browser_connection.send_json({"type": event_type})
                         await asyncio.wait({browser_task})
                 except (TimeoutError, WebSocketDisconnect, ClientDisconnect, OSError):
                     browser_connection_logger.debug(
-                        "Browser did not finish the expiry shutdown handshake."
+                        "Browser did not finish the server-requested shutdown handshake."
                     )
                 except RuntimeError:
                     if (
@@ -1996,28 +2053,36 @@ async def browser_realtime_websocket(
                 if not browser_task.done():
                     browser_task.cancel()
                     await asyncio.wait({browser_task})
+            if provider_unavailable.is_set():
+                # A terminal provider event can precede its last buffered text.
+                # A completed reader returns immediately; never send controls to
+                # a provider that has already ended or rejected a write.
+                await asyncio.wait(
+                    {provider_task}, timeout=BROWSER_DISCONNECT_DRAIN_SECONDS
+                )
+            else:
+                drain_task = asyncio.create_task(
+                    shutdown_drain.wait(realtime_connection, ordering_buffer)
+                )
+                await asyncio.wait(
+                    {drain_task, provider_task}, return_when=asyncio.FIRST_COMPLETED
+                )
+                if drain_task.done() and not drain_task.cancelled():
+                    drain_task.result()
         finally:
             expiry_task.cancel()
-            await asyncio.gather(expiry_task, return_exceptions=True)
-        await shutdown_drain.wait(realtime_connection, ordering_buffer)
-
-    realtime_tasks: list[asyncio.Task] = [
-        asyncio.create_task(
-            handle_openai_events(
-                browser_connection,
-                realtime_connection,
-                openai_client,
-                thread,
-                openai_task_queue,
-                assistant_audio_tracker,
-                realtime_recorder,
-                ordering_buffer=ordering_buffer,
-                shutdown_drain=shutdown_drain,
-                session_expiry=session_expiry,
+            provider_end_task.cancel()
+            if drain_task is not None:
+                drain_task.cancel()
+            await asyncio.gather(
+                expiry_task,
+                provider_end_task,
+                *([drain_task] if drain_task is not None else []),
+                return_exceptions=True,
             )
-        ),
-        asyncio.create_task(wait_for_browser_disconnect_drain()),
-    ]
+
+    shutdown_task = asyncio.create_task(wait_for_browser_disconnect_drain())
+    realtime_tasks = [provider_task, shutdown_task]
     openai_queue_processor = asyncio.create_task(
         process_queue_tasks(
             openai_task_queue, openai_connection_logger, assistant_audio_tracker
@@ -2149,7 +2214,9 @@ async def browser_realtime_websocket(
                     cancelled = error
 
     try:
-        await asyncio.wait(realtime_tasks, return_when=asyncio.FIRST_COMPLETED)
+        # Provider completion starts the browser handshake rather than cancelling
+        # its playback reader before the final heard-audio offsets arrive.
+        await asyncio.wait({shutdown_task})
     except asyncio.CancelledError as error:
         cancelled = error
     finally:
