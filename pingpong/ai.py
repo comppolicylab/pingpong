@@ -191,7 +191,7 @@ from openai.types.beta.threads.message_create_params import Attachment
 from openai.types.beta.threads.runs import ToolCallsStepDetails, CodeInterpreterToolCall
 from openai.types.beta.threads.text_content_block import TextContentBlock
 from pingpong.now import NowFn, utcnow
-from pingpong.ai_error import get_details_from_api_error
+from pingpong.ai_error import get_ai_error_message, get_details_from_api_error
 from pingpong.schemas import (
     CodeInterpreterMessage,
     DownloadExport,
@@ -3808,7 +3808,9 @@ class BufferedResponseStreamHandler:
             response_error_code=data.response.error.code
             if data.response.error
             else None,
-            response_error_message=data.response.error.message
+            response_error_message=get_ai_error_message(
+                data.response.error, data.response.error.message
+            )
             if data.response.error
             else None,
             response_incomplete_reason=data.response.incomplete_details.reason
@@ -3834,16 +3836,17 @@ class BufferedResponseStreamHandler:
         if data.code == "rate_limit_exceeded":
             await log_rate_limit_error_on_response_error()
 
+        error_message = get_ai_error_message(data, data.message)
         await self.cleanup(
             run_status=RunStatus.FAILED,
             response_error_code=data.code,
-            response_error_message=data.message,
+            response_error_message=error_message,
         )
 
         self.enqueue(
             {
                 "type": "error",
-                "detail": str(data.message),
+                "detail": error_message,
             }
         )
 
@@ -4719,6 +4722,15 @@ async def run_response(
                 return
             except openai.APIError as openai_error:
                 await _tts_cleanup()
+                error_message = get_ai_error_message(
+                    openai_error,
+                    "OpenAI was unable to process your request. If the issue persists, check <a class='underline' href='https://pingpong-hks.statuspage.io' target='_blank'>PingPong's status page</a> for updates."
+                    if openai_error.type == "server_error"
+                    else "OpenAI was unable to process your request. "
+                    + get_details_from_api_error(
+                        openai_error, "Please try again later."
+                    ),
+                )
                 if openai_error.type == "server_error":
                     try:
                         logger.exception(
@@ -4728,7 +4740,7 @@ async def run_response(
                             await handler.cleanup(
                                 run_status=RunStatus.FAILED,
                                 response_error_code=openai_error.code,
-                                response_error_message="OpenAI was unable to process your request. If the issue persists, check <a class='underline' href='https://pingpong-hks.statuspage.io' target='_blank'>PingPong's status page</a> for updates.",
+                                response_error_message=error_message,
                                 send_error_message_only_if_active=False,
                             )
                             yield handler.flush()
@@ -4736,8 +4748,9 @@ async def run_response(
                             async with config.db.driver.async_session() as session_:
                                 run.status = RunStatus.FAILED
                                 run.error_code = openai_error.type
-                                run.error_message = (
-                                    f"Error in response stream: {openai_error}"
+                                run.error_message = get_ai_error_message(
+                                    openai_error,
+                                    f"Error in response stream: {openai_error}",
                                 )
                                 session_.add(run)
                                 await session_.commit()
@@ -4746,7 +4759,7 @@ async def run_response(
                                 orjson.dumps(
                                     {
                                         "type": "error",
-                                        "detail": "OpenAI was unable to process your request. If the issue persists, check <a class='underline' href='https://pingpong-hks.statuspage.io' target='_blank'>PingPong's status page</a> for updates.",
+                                        "detail": error_message,
                                     }
                                 )
                                 + b"\n"
@@ -4761,10 +4774,7 @@ async def run_response(
                             await handler.cleanup(
                                 run_status=RunStatus.FAILED,
                                 response_error_code=openai_error.code,
-                                response_error_message="OpenAI was unable to process your request. "
-                                + get_details_from_api_error(
-                                    openai_error, "Please try again later."
-                                ),
+                                response_error_message=error_message,
                                 send_error_message_only_if_active=False,
                             )
 
@@ -4773,8 +4783,9 @@ async def run_response(
                             async with config.db.driver.async_session() as session_:
                                 run.status = RunStatus.FAILED
                                 run.error_code = openai_error.type
-                                run.error_message = (
-                                    f"Error in response stream: {openai_error}"
+                                run.error_message = get_ai_error_message(
+                                    openai_error,
+                                    f"Error in response stream: {openai_error}",
                                 )
                                 session_.add(run)
                                 await session_.commit()
@@ -4783,10 +4794,7 @@ async def run_response(
                                 orjson.dumps(
                                     {
                                         "type": "error",
-                                        "detail": "OpenAI was unable to process your request. "
-                                        + get_details_from_api_error(
-                                            openai_error, "Please try again later."
-                                        ),
+                                        "detail": error_message,
                                     }
                                 )
                                 + b"\n"
@@ -4990,7 +4998,9 @@ async def run_thread(
                         orjson.dumps(
                             {
                                 "type": "error",
-                                "detail": f"{event.data.last_error.message}",
+                                "detail": get_ai_error_message(
+                                    event.data.last_error, event.data.last_error.message
+                                ),
                             }
                         )
                         + b"\n"
@@ -5036,9 +5046,12 @@ async def run_thread(
                     orjson.dumps(
                         {
                             "type": "presend_error",
-                            "detail": "OpenAI was unable to process your request. "
-                            + get_details_from_api_error(
-                                openai_error, "Please try again later."
+                            "detail": get_ai_error_message(
+                                openai_error,
+                                "OpenAI was unable to process your request. "
+                                + get_details_from_api_error(
+                                    openai_error, "Please try again later."
+                                ),
                             ),
                         }
                     )

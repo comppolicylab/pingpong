@@ -9454,7 +9454,7 @@ class Run(Base):
         session: AsyncSession,
         id: int,
         status: schemas.RunStatus,
-        error_code: str | None,
+        error_code: str | int | None,
         error_message: str | None,
         incomplete_reason: str | None,
         moderation: dict[str, Any] | None | _UnsetType = _UNSET,
@@ -9463,7 +9463,7 @@ class Run(Base):
     ) -> None:
         values: dict[str, Any] = {
             "status": status,
-            "error_code": error_code,
+            "error_code": str(error_code) if error_code is not None else None,
             "error_message": error_message,
             "incomplete_reason": incomplete_reason,
             "completed": func.now() if completed else None,
