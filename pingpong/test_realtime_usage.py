@@ -10,7 +10,10 @@ from openai.types.realtime import (
     ConversationItemInputAudioTranscriptionFailedEvent,
     ResponseDoneEvent,
 )
-from sqlalchemy import select
+from sqlalchemy import event as sqlalchemy_event, select
+from sqlalchemy.orm import Session
+from websockets.exceptions import ConnectionClosedError
+from websockets.frames import Close
 
 from pingpong import models, realtime, schemas, websocket as websocket_module
 from pingpong.realtime_usage import RealtimeUsage
@@ -30,6 +33,21 @@ from pingpong.test_server_audio_websocket import (
     synthetic_assistant_audio,
 )
 from pingpong.testutil import with_user
+
+
+@pytest.fixture(autouse=True)
+def require_text_run_error_codes():
+    # SQLite coerces integer VARCHAR values; asyncpg rejects them before insert.
+    def check_error_codes(session, flush_context, instances):
+        for obj in session.new.union(session.dirty):
+            if isinstance(obj, models.Run):
+                assert obj.error_code is None or isinstance(obj.error_code, str)
+
+    sqlalchemy_event.listen(Session, "before_flush", check_error_codes)
+    try:
+        yield
+    finally:
+        sqlalchemy_event.remove(Session, "before_flush", check_error_codes)
 
 
 RESPONSE_USAGE = {
@@ -239,6 +257,17 @@ def test_transcription_failure_diagnostics_are_separate_and_idempotent():
         == failure.error.message
     )
     assert usage.final_status == schemas.RunStatus.COMPLETED
+
+
+@pytest.mark.parametrize("code", [4013, 0, "provider_error"])
+def test_terminal_error_code_is_text_and_preserves_first_cause(code):
+    usage = RealtimeUsage()
+    usage.fail(code, "Synthetic failure.")
+    assert usage.error_code == str(code)
+    usage.fail("later_disconnect", "Later failure.")
+    assert usage.error_code == str(code)
+    assert usage.error_message == "Synthetic failure."
+    assert usage.final_status == schemas.RunStatus.FAILED
 
 
 def test_missing_usage_stays_unknown_and_zero_usage_is_preserved():
@@ -610,8 +639,9 @@ async def test_failed_response_without_usage_or_playback_is_retained(db, user, v
 
 @with_user(123)
 @pytest.mark.parametrize("event_type", ["error", "session.error"])
+@pytest.mark.parametrize("code", ["model_not_found", 4013])
 async def test_startup_error_without_provider_operations_is_retained(
-    db, user, event_type
+    db, user, event_type, code
 ):
     async with db.async_session() as session:
         thread = models.Thread(version=3, user_message_ct=0, tools_available="[]")
@@ -626,7 +656,7 @@ async def test_startup_error_without_provider_operations_is_retained(
             event_id="event_failure",
             error=SimpleNamespace(
                 type="invalid_request_error",
-                code="model_not_found",
+                code=code,
                 message="Synthetic startup failure.",
                 param="session.model",
                 event_id="client_update",
@@ -655,7 +685,7 @@ async def test_startup_error_without_provider_operations_is_retained(
         run = (await session.scalars(select(models.Run))).one()
         assert run.run_id == "sess_failed"
         assert run.status == schemas.RunStatus.FAILED
-        assert run.error_code == "model_not_found"
+        assert run.error_code == str(code)
         assert run.error_message == "Synthetic startup failure."
         assert run.incomplete_reason is None
         assert run.completed is not None
@@ -667,7 +697,7 @@ async def test_startup_error_without_provider_operations_is_retained(
                 "event_id": "event_failure",
                 "error": {
                     "type": "invalid_request_error",
-                    "code": "model_not_found",
+                    "code": code,
                     "message": "Synthetic startup failure.",
                     "param": "session.model",
                     "event_id": "client_update",
@@ -680,8 +710,9 @@ async def test_startup_error_without_provider_operations_is_retained(
 @with_user(123)
 @pytest.mark.parametrize("stage", ["connect", "update", "greeting", "handler"])
 @pytest.mark.parametrize("save_fails", [False, True])
+@pytest.mark.parametrize("numeric_code", [False, True])
 async def test_provider_startup_failure_survives_transaction_rollback(
-    db, user, monkeypatch, caplog, stage, save_fails
+    db, user, monkeypatch, caplog, stage, save_fails, numeric_code
 ):
     async with db.async_session() as session:
         thread = models.Thread(version=3, user_message_ct=0, tools_available="[]")
@@ -694,7 +725,12 @@ async def test_provider_startup_failure_survives_transaction_rollback(
     browser.state["session"] = SimpleNamespace(user=user)
     browser.state["assistant"] = realtime_assistant(assistant_should_message_first=True)
     browser.state["conversation_instructions"] = "Speak clearly."
-    failure = RuntimeError("Synthetic provider startup failure.")
+    failure = (
+        ConnectionClosedError(Close(4013, "Synthetic provider startup failure."), None)
+        if numeric_code
+        else RuntimeError("Synthetic provider startup failure.")
+    )
+    expected_code = 4013 if numeric_code else "provider_startup_error"
     connection = FakeRealtimeConnection()
     client = FakeOpenAIClient(connection)
     if stage == "connect":
@@ -724,7 +760,7 @@ async def test_provider_startup_failure_survives_transaction_rollback(
             "async_session",
             Mock(side_effect=RuntimeError("Error run save failed.")),
         )
-    with pytest.raises(RuntimeError) as raised:
+    with pytest.raises(type(failure)) as raised:
         await websocket_module.ws_db_middleware(load_thread)(
             browser, "1", str(thread_id)
         )
@@ -749,7 +785,7 @@ async def test_provider_startup_failure_survives_transaction_rollback(
             run = runs[0]
             assert run.status == schemas.RunStatus.FAILED
             assert run.completed is not None
-            assert run.error_code == "provider_startup_error"
+            assert run.error_code == str(expected_code)
             assert run.error_message == str(failure)
             assert run.model == browser.state["assistant"].model
             assert run.creator_id == user.id
@@ -759,8 +795,8 @@ async def test_provider_startup_failure_survives_transaction_rollback(
                 {
                     "event_id": None,
                     "error": {
-                        "type": "RuntimeError",
-                        "code": "provider_startup_error",
+                        "type": type(failure).__name__,
+                        "code": expected_code,
                         "message": str(failure),
                         "param": None,
                         "event_id": None,
@@ -947,7 +983,7 @@ async def test_failed_usage_save_does_not_rollback_saved_transcripts(
         usage = RealtimeUsage()
         usage.observe(response_done())
         if ending == "failed":
-            usage.fail("provider_error", "Synthetic provider failure.")
+            usage.fail(4013, "Synthetic provider failure.")
         elif ending == "incomplete":
             usage.mark_incomplete("provider_connection_closed")
         flush = session.flush
