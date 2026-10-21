@@ -71,12 +71,97 @@ const processOnce = (processor: ReturnType<typeof createProcessor>) => {
 	return processor.process([], [[new Float32Array(128)]], {});
 };
 
+const finishTrack = (processor: ReturnType<typeof createProcessor>, trackId: string) => {
+	processor.port.onmessage?.({ data: { event: 'finish_track', trackId } });
+};
+
+const settlements = (processor: ReturnType<typeof createProcessor>) =>
+	postedMessages(processor).filter((message) => message.event === 'track_settled');
+
 const postedMessages = (processor: ReturnType<typeof createProcessor>) =>
 	(processor.port.postMessage.mock.calls as [Record<string, unknown>][]).map(
 		([message]) => message
 	);
 
 describe('StreamProcessor worklet', () => {
+	it('settles a completed reply only after generation finishes and its partial buffer drains', () => {
+		const processor = createProcessor();
+		configureProcessor(processor, { stopOnEmptyBuffer: false });
+		writePcm(processor, 129, 'reply', 'part');
+		finishTrack(processor, 'reply');
+		for (let i = 0; i < 3; i++) {
+			processOnce(processor);
+			expect(settlements(processor)).toEqual([]);
+		}
+		processOnce(processor);
+		expect(settlements(processor)).toEqual([
+			{ event: 'track_settled', trackId: 'reply', outcome: 'completed', played: true }
+		]);
+		finishTrack(processor, 'reply');
+		writePcm(processor, 128, 'reply', 'late-part');
+		processOnce(processor);
+		expect(settlements(processor)).toHaveLength(1);
+		expect(postedMessages(processor).some((message) => message.eventId === 'late-part')).toBe(
+			false
+		);
+	});
+
+	it('does not settle a drained reply while generation can still append audio', () => {
+		const processor = createProcessor();
+		configureProcessor(processor, { stopOnEmptyBuffer: false });
+		writePcm(processor, 128, 'reply', 'part-1');
+		processOnce(processor);
+		processOnce(processor);
+		expect(settlements(processor)).toEqual([]);
+		writePcm(processor, 128, 'reply', 'part-2');
+		processOnce(processor);
+		finishTrack(processor, 'reply');
+		processOnce(processor);
+		expect(settlements(processor)).toHaveLength(1);
+	});
+
+	it('reports played and all queued replies before acknowledging an interrupt', () => {
+		const processor = createProcessor();
+		writePcm(processor, 256, 'playing', 'part-1');
+		writePcm(processor, 128, 'queued', 'part-2');
+		writePcm(processor, 12, 'partial-queued', 'part-3');
+		processOnce(processor);
+		processor.port.onmessage?.({ data: { event: 'interrupt', requestId: 'interrupt' } });
+		expect(settlements(processor)).toEqual([
+			{ event: 'track_settled', trackId: 'playing', outcome: 'interrupted', played: true },
+			{ event: 'track_settled', trackId: 'queued', outcome: 'discarded', played: false },
+			{ event: 'track_settled', trackId: 'partial-queued', outcome: 'discarded', played: false }
+		]);
+		expect(postedMessages(processor).at(-1)).toMatchObject({
+			event: 'offset',
+			trackId: 'playing',
+			offset: 128,
+			eventId: 'part-1'
+		});
+		processor.port.onmessage?.({ data: { event: 'interrupt', requestId: 'duplicate' } });
+		expect(settlements(processor)).toHaveLength(3);
+		writePcm(processor, 128, 'queued', 'late');
+		expect(processOnce(processor)).toBe(false);
+	});
+
+	it('discards a reply interrupted before any samples render', () => {
+		const processor = createProcessor();
+		writePcm(processor, 1, 'queued', 'part');
+		processor.port.onmessage?.({ data: { event: 'interrupt', requestId: 'interrupt' } });
+		expect(settlements(processor)).toEqual([
+			{ event: 'track_settled', trackId: 'queued', outcome: 'discarded', played: false }
+		]);
+	});
+
+	it('settles a reply with no audio without qualifying it as played', () => {
+		const processor = createProcessor();
+		finishTrack(processor, 'empty');
+		processOnce(processor);
+		expect(settlements(processor)).toEqual([
+			{ event: 'track_settled', trackId: 'empty', outcome: 'discarded', played: false }
+		]);
+	});
+
 	it('does not count padded render frames as played audio samples', () => {
 		const processor = createProcessor();
 

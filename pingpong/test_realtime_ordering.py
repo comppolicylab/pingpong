@@ -1,3 +1,4 @@
+import asyncio
 import logging
 
 import pytest
@@ -15,6 +16,175 @@ def _drain_ready_messages(buffer: ConversationItemOrderingBuffer):
         if next_message is None:
             return ready_messages
         ready_messages.append(next_message)
+
+
+@pytest.mark.parametrize("previous_known", [False, True])
+@pytest.mark.parametrize("played", [False, True])
+@pytest.mark.parametrize("partial_text", [None, "partial reply"])
+async def test_finalization_skips_only_unheard_replies_and_preserves_chain_checks(
+    previous_known, played, partial_text
+):
+    tracker = RealtimeAssistantAudioTracker()
+    buffer = ConversationItemOrderingBuffer(
+        logging.getLogger(__name__), assistant_audio_tracker=tracker
+    )
+    if previous_known:
+        buffer.register_conversation_item("question", None, "user")
+        buffer.register_transcription("question", "question", "user")
+    buffer.register_conversation_item("reply", "question", "assistant")
+    if partial_text:
+        buffer.register_transcription_delta("reply", partial_text, "assistant")
+    buffer.register_conversation_item("later", "reply", "user")
+    buffer.register_transcription("later", "later", "user")
+    assert [message[0] for message in _drain_ready_messages(buffer)] == (
+        ["question"] if previous_known else []
+    )
+    if played:
+        await tracker.add_audio_delta("reply", "audio", b"\0\0")
+        await tracker.mark_audio_event_playback_started("reply", "audio")
+    tracker.finish_playback_tracking()
+    buffer.discard_unheard_assistant_transcripts()
+    assert [message[0] for message in _drain_ready_messages(buffer)] == (
+        ["later"] if previous_known and not played else []
+    )
+    if played:
+        # A heard reply with missing transcript completion must not be silently
+        # omitted by the unheard-reply policy.
+        assert not buffer.items_by_id["reply"].skip_persistence
+
+
+async def test_finished_playback_resolves_pending_and_future_reply_decisions():
+    tracker = RealtimeAssistantAudioTracker()
+    await tracker.add_audio_delta("unheard", "audio", b"\0\0")
+    pending = asyncio.create_task(tracker.wait_for_item_retention_decision("unheard"))
+    await asyncio.sleep(0)
+    assert not pending.done()
+    tracker.finish_playback_tracking()
+    assert not await asyncio.wait_for(pending, timeout=1)
+    assert not await asyncio.wait_for(
+        tracker.wait_for_item_retention_decision("later"), timeout=1
+    )
+    assert not await tracker.mark_audio_event_playback_started("unheard", "audio")
+    assert not tracker.has_played_audio
+
+
+@pytest.mark.parametrize("played", [False, True])
+async def test_explicit_settlement_resolves_pending_and_future_decisions(played):
+    tracker = RealtimeAssistantAudioTracker()
+    await tracker.add_audio_delta("reply", "part", b"\0" * 480)
+    pending = asyncio.create_task(tracker.wait_for_item_retention_decision("reply"))
+    await asyncio.sleep(0)
+    assert not pending.done()
+    outcome = "interrupted" if played else "discarded"
+    assert await tracker.mark_item_playback_settled("reply", outcome, played)
+    assert await asyncio.wait_for(pending, timeout=1) == played
+    assert (
+        await asyncio.wait_for(
+            tracker.wait_for_item_retention_decision("reply"), timeout=1
+        )
+        == played
+    )
+    assert tracker.has_played_audio == played
+    assert not await tracker.mark_item_playback_settled("reply", outcome, played)
+    assert not await tracker.mark_item_playback_settled("reply", "discarded", False)
+    assert not await tracker.mark_audio_event_playback_started("reply", "part")
+
+
+@pytest.mark.parametrize("played", [False, True])
+async def test_settlement_releases_chunk_records_but_keeps_truncate_boundaries(played):
+    tracker = RealtimeAssistantAudioTracker()
+    await tracker.add_audio_delta("reply", "part-1", b"\0" * 480)
+    await tracker.add_audio_delta("reply", "part-2", b"\0" * 480)
+    await tracker.add_audio_delta("pending", "part-3", b"\0" * 480)
+    if played:
+        await tracker.mark_audio_event_playback_started("reply", "part-1")
+    outcome = "interrupted" if played else "discarded"
+    assert await tracker.mark_item_playback_settled("reply", outcome, played)
+
+    assert "reply" not in tracker._playback_events_by_item_id
+    assert "pending" in tracker._playback_events_by_item_id
+    assert tracker.has_item_played_audio("reply") == played
+    assert tracker.has_played_audio == played
+    assert await tracker.clamp_truncate_audio_end_ms("reply", 1000, "part-1") == 10
+    assert await tracker.clamp_truncate_audio_end_ms("reply", 1000) == 20
+    assert not await tracker.mark_audio_event_playback_started("reply", "part-2")
+    assert not await tracker.mark_audio_event_playback_ended("reply", "part-1")
+
+
+async def test_finish_playback_tracking_releases_all_pending_chunk_records():
+    tracker = RealtimeAssistantAudioTracker()
+    await tracker.add_audio_delta("heard", "part-1", b"\0" * 480)
+    await tracker.add_audio_delta("unheard", "part-2", b"\0" * 480)
+    await tracker.mark_audio_event_playback_started("heard", "part-1")
+    tracker.finish_playback_tracking()
+
+    assert not tracker._playback_events_by_item_id
+    assert tracker.has_item_played_audio("heard")
+    assert tracker.has_played_audio
+    assert not tracker.has_item_played_audio("unheard")
+    assert not await tracker.mark_audio_event_playback_started("unheard", "part-2")
+    assert not await tracker.mark_audio_event_playback_ended("heard", "part-1")
+    assert await tracker.clamp_truncate_audio_end_ms("heard", 1000, "part-1") == 10
+
+
+@pytest.mark.parametrize(
+    "item_id,outcome,played",
+    [
+        ("unknown", "discarded", False),
+        ([], "discarded", False),
+        ("reply", [], False),
+        ("reply", "invalid", False),
+        ("reply", "discarded", 0),
+        ("reply", "discarded", None),
+        ("reply", "discarded", True),
+        ("reply", "completed", False),
+        ("reply", "completed", True),
+    ],
+)
+async def test_invalid_settlements_do_not_resolve_item(item_id, outcome, played):
+    tracker = RealtimeAssistantAudioTracker()
+    await tracker.add_audio_delta("reply", "part", b"\0\0")
+    assert not await tracker.mark_item_playback_settled(item_id, outcome, played)
+    assert not tracker.is_item_playback_settled("reply")
+    assert not tracker.has_played_audio
+
+
+async def test_settlement_cannot_erase_known_playback_or_invent_audio():
+    tracker = RealtimeAssistantAudioTracker()
+    tracker.register_item("empty")
+    assert not await tracker.mark_item_playback_settled("empty", "completed", True)
+    assert await tracker.mark_item_playback_settled("empty", "discarded", False)
+    await tracker.add_audio_delta("heard", "part", b"\0\0")
+    await tracker.mark_audio_event_playback_started("heard", "part")
+    await tracker.mark_audio_event_playback_ended("heard", "part")
+    await tracker.mark_item_audio_done("heard")
+    assert not await tracker.mark_item_playback_settled("heard", "discarded", False)
+    assert await tracker.mark_item_playback_settled("heard", "completed", True)
+    assert tracker.has_item_played_audio("heard")
+
+
+async def test_skipping_unheard_reply_releases_later_heard_reply_in_order():
+    tracker = RealtimeAssistantAudioTracker()
+    await tracker.add_audio_delta("heard", "audio", b"\0\0")
+    await tracker.mark_audio_event_playback_started("heard", "audio")
+    buffer = ConversationItemOrderingBuffer(
+        logging.getLogger(__name__), assistant_audio_tracker=tracker
+    )
+    for item_id, previous, role in [
+        ("unheard", None, "assistant"),
+        ("question", "unheard", "user"),
+        ("heard", "question", "assistant"),
+    ]:
+        buffer.register_conversation_item(item_id, previous, role)
+        if item_id != "unheard":
+            buffer.register_transcription(item_id, item_id, role)
+    assert not _drain_ready_messages(buffer)
+    tracker.finish_playback_tracking()
+    buffer.discard_unheard_assistant_transcripts()
+    assert _drain_ready_messages(buffer) == [
+        ("question", "question", "user", "0"),
+        ("heard", "heard", "assistant", "1"),
+    ]
 
 
 @pytest.mark.parametrize("end_first", [False, True])

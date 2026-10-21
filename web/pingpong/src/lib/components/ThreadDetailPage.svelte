@@ -1313,11 +1313,26 @@
 	 */
 	const handleSessionSetup = async () => {
 		wavRecorder = new WavRecorder({ sampleRate: 24000, debug: true });
-		wavStreamPlayer = new WavStreamPlayer({
+		const player = new WavStreamPlayer({
 			sampleRate: 24000,
-			onAudioPartStarted: onAudioPartStartedProcessor,
-			onAudioPartEnded: onAudioPartEndedProcessor
+			stopOnEmptyBuffer: false,
+			onAudioPartStarted: (data) => {
+				if (wavStreamPlayer === player) onAudioPartStartedProcessor(data);
+			},
+			onAudioPartEnded: (data) => {
+				if (wavStreamPlayer === player) onAudioPartEndedProcessor(data);
+			},
+			onPlaybackSettled: (data) => {
+				if (wavStreamPlayer !== player) return;
+				sendRealtimeEvent({
+					type: 'response.audio.playback.settled',
+					item_id: data.trackId,
+					outcome: data.outcome,
+					played: data.played
+				});
+			}
 		});
+		wavStreamPlayer = player;
 		try {
 			await wavStreamPlayer.connect();
 		} catch (error) {
@@ -1498,8 +1513,12 @@
 
 		socket = api.createAudioWebsocket(classId, threadId);
 		socket.binaryType = 'arraybuffer';
+		const sessionSocket = socket;
+		const sessionPlayer = wavStreamPlayer;
 
 		socket.addEventListener('message', async (event) => {
+			if (socket !== sessionSocket || wavStreamPlayer !== sessionPlayer || endingAudioSession)
+				return;
 			const message = JSON.parse(event.data);
 			switch (message.type) {
 				case 'session.updated':
@@ -1549,6 +1568,9 @@
 					}
 					break;
 				}
+				case 'response.audio.done':
+					wavStreamPlayer?.finishTrack(message.item_id);
+					break;
 				case 'response.audio.delta':
 					if (!wavStreamPlayer) {
 						sadToast('Failed to set up audio output to your speakers.');

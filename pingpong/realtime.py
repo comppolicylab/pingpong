@@ -85,6 +85,7 @@ class ConversationChainItem:
     previous_item_id: str | None = UNSET_PREVIOUS_ITEM_ID
     transcription_text: str | None = None
     role: ConversationRole | None = None
+    skip_persistence: bool = False
 
 
 @dataclass
@@ -108,6 +109,12 @@ class RealtimeAssistantAudioTracker:
         ] = {}
         self._played_item_ids: set[str] = set()
         self._retention_decided = asyncio.Event()
+        self._playback_tracking_finished = False
+        self._item_retention_decisions: dict[str, asyncio.Event] = {}
+        self._known_item_ids: set[str] = set()
+        self._items_with_audio: set[str] = set()
+        self._settled_item_ids: set[str] = set()
+        self._generation_done_item_ids: set[str] = set()
 
     @property
     def has_played_audio(self) -> bool:
@@ -120,9 +127,74 @@ class RealtimeAssistantAudioTracker:
         await self._retention_decided.wait()
         return self.has_played_audio
 
+    async def wait_for_item_retention_decision(self, item_id: str) -> bool:
+        if (
+            not self.has_item_played_audio(item_id)
+            and not self._playback_tracking_finished
+            and item_id not in self._settled_item_ids
+        ):
+            decision = self._item_retention_decisions.setdefault(
+                item_id, asyncio.Event()
+            )
+            await decision.wait()
+        return self.has_item_played_audio(item_id)
+
+    def register_item(self, item_id: str | None) -> None:
+        if isinstance(item_id, str) and item_id:
+            self._known_item_ids.add(item_id)
+
+    def is_item_playback_settled(self, item_id: str) -> bool:
+        return item_id in self._settled_item_ids
+
+    async def mark_item_playback_settled(
+        self, item_id: str | None, outcome: str | None, played: bool | None
+    ) -> bool:
+        if (
+            not isinstance(item_id, str)
+            or not isinstance(outcome, str)
+            or outcome not in {"completed", "interrupted", "discarded"}
+            or not isinstance(played, bool)
+        ):
+            return False
+        async with self._lock:
+            if (
+                self._playback_tracking_finished
+                or item_id not in self._known_item_ids
+                or item_id in self._settled_item_ids
+                or (played and item_id not in self._items_with_audio)
+                or (not played and self.has_item_played_audio(item_id))
+                or (outcome == "completed" and not played)
+                or (
+                    outcome == "completed"
+                    and item_id not in self._generation_done_item_ids
+                )
+                or (outcome == "discarded" and played)
+            ):
+                return False
+            self._settled_item_ids.add(item_id)
+            self._playback_events_by_item_id.pop(item_id, None)
+            if played:
+                self._played_item_ids.add(item_id)
+                self._retention_decided.set()
+            decision = self._item_retention_decisions.pop(item_id, None)
+            if decision is not None:
+                decision.set()
+            browser_connection_logger.debug(
+                "Confirmed browser playback settled item_id=%s outcome=%s played=%s.",
+                sanitize_for_log(item_id, max_len=256),
+                sanitize_for_log(outcome),
+                sanitize_for_log(played),
+            )
+            return True
+
     def finish_playback_tracking(self) -> None:
-        # The browser reader must be stopped before resolving an unheard session.
+        # Stop the browser reader first: absent playback is now a final decision.
+        self._playback_tracking_finished = True
+        self._playback_events_by_item_id.clear()
         self._retention_decided.set()
+        for decision in self._item_retention_decisions.values():
+            decision.set()
+        self._item_retention_decisions.clear()
 
     async def add_audio_delta(
         self,
@@ -144,6 +216,8 @@ class RealtimeAssistantAudioTracker:
                     event_id
                 ] = item_sample_count
                 if sample_count > 0:
+                    self.register_item(item_id)
+                    self._items_with_audio.add(item_id)
                     self._playback_events_by_item_id.setdefault(item_id, {}).setdefault(
                         event_id, _AssistantAudioPlaybackEvent()
                     )
@@ -200,6 +274,8 @@ class RealtimeAssistantAudioTracker:
     def _mark_playback_event(self, item_id: str, event_id: str, *, ended: bool) -> bool:
         # Called under _lock. Keep pending callbacks independent of duration
         # cleanup: browser telemetry may arrive after generation or truncation.
+        if self._playback_tracking_finished or item_id in self._settled_item_ids:
+            return False
         events = self._playback_events_by_item_id.get(item_id)
         event = events.get(event_id) if events is not None else None
         if event is None:
@@ -214,6 +290,9 @@ class RealtimeAssistantAudioTracker:
             event.started = True
         self._played_item_ids.add(item_id)
         self._retention_decided.set()
+        decision = self._item_retention_decisions.pop(item_id, None)
+        if decision is not None:
+            decision.set()
         if event.started and event.ended:
             del self._playback_events_by_item_id[item_id][event_id]
             if not self._playback_events_by_item_id[item_id]:
@@ -225,6 +304,7 @@ class RealtimeAssistantAudioTracker:
             return
 
         async with self._lock:
+            self._generation_done_item_ids.add(item_id)
             self._audio_done_item_ids.add(item_id)
             self._forget_item_if_audio_is_done(item_id)
 
@@ -308,8 +388,14 @@ class ConversationItemOrderingBuffer:
 
     _UNSET_PREVIOUS_ITEM_ID = UNSET_PREVIOUS_ITEM_ID
 
-    def __init__(self, logger: logging.Logger, initial_output_index: int = 0):
+    def __init__(
+        self,
+        logger: logging.Logger,
+        initial_output_index: int = 0,
+        assistant_audio_tracker: RealtimeAssistantAudioTracker | None = None,
+    ):
         self._logger = logger
+        self.assistant_audio_tracker = assistant_audio_tracker
         self.items_by_id: dict[str, ConversationChainItem] = {}
         self.children_by_previous_item_id: dict[str, set[str]] = {}
         self.ready_item_heap: list[tuple[int, str]] = []
@@ -475,6 +561,11 @@ class ConversationItemOrderingBuffer:
                 continue
             if not self._is_item_ready_to_dispatch(item):
                 continue
+            if item.skip_persistence:
+                item.is_message_saved = True
+                self._mark_item_and_descendants_for_readiness(item.item_id)
+                self._prune_saved_items()
+                continue
             if item.transcription_text is None or item.role is None:
                 continue
             if not _has_non_empty_transcript(item.transcription_text):
@@ -494,6 +585,20 @@ class ConversationItemOrderingBuffer:
             return item.item_id, item.transcription_text, item.role, output_index
 
         return None
+
+    def discard_unheard_assistant_transcripts(self, item_id: str | None = None) -> None:
+        if self.assistant_audio_tracker is None:
+            return
+        for item in self.items_by_id.values():
+            if item_id is not None and item.item_id != item_id:
+                continue
+            if item.role == "assistant" and not (
+                self.assistant_audio_tracker.has_item_played_audio(item.item_id)
+            ):
+                # This is terminal for ordering even if transcript.done never
+                # arrived. Keep predecessor checks so unknown links fail closed.
+                item.skip_persistence = True
+                self._mark_item_and_descendants_for_readiness(item.item_id)
 
     def _get_item(self, item_id: str) -> ConversationChainItem | None:
         return self.items_by_id.get(item_id)
@@ -605,9 +710,9 @@ class ConversationItemOrderingBuffer:
             return False
         if item.is_message_saved:
             return False
-        if not item.is_transcription_complete:
+        if not item.is_transcription_complete and not item.skip_persistence:
             return False
-        if item.transcription_text is None:
+        if item.transcription_text is None and not item.skip_persistence:
             return False
 
         is_resolved, previous_relevant_item = self._resolve_previous_relevant_item(item)
@@ -859,6 +964,14 @@ async def enqueue_ready_thread_message_tasks(
             role: ConversationRole = role,
             output_index: str = output_index,
         ):
+            if (
+                role == "assistant"
+                and ordering_buffer.assistant_audio_tracker is not None
+            ):
+                if not await ordering_buffer.assistant_audio_tracker.wait_for_item_retention_decision(
+                    item_id
+                ):
+                    return
             # Retry in place so later writes cannot overtake this item. Classic
             # provider-side writes have no local idempotency guarantee.
             max_attempts = 2 if thread.version == 3 else 1
@@ -888,11 +1001,25 @@ async def enqueue_ready_thread_message_tasks(
         await openai_task_queue.put(task)
 
 
+async def _close_browser_connection(browser_connection: StateWebSocket) -> None:
+    try:
+        if (
+            getattr(browser_connection, "application_state", None)
+            != WebSocketState.DISCONNECTED
+        ):
+            await browser_connection.close()
+    except (WebSocketDisconnect, ClientDisconnect, OSError):
+        browser_connection_logger.debug("Browser disconnected during close.")
+
+
 async def handle_browser_messages(
     browser_connection: StateWebSocket,
     realtime_connection: AsyncRealtimeConnection,
     assistant_audio_tracker: RealtimeAssistantAudioTracker,
     realtime_recorder: RealtimeRecorder | None = None,
+    *,
+    close_on_cancel: bool = True,
+    on_playback_settled: Callable[[str], Awaitable[None]] | None = None,
 ):
     try:
         while True:
@@ -967,6 +1094,13 @@ async def handle_browser_messages(
                                 item_id=item_id,
                                 final_duration_ms=audio_end_ms,
                             )
+                    elif type == "response.audio.playback.settled":
+                        item_id = data.get("item_id")
+                        if await assistant_audio_tracker.mark_item_playback_settled(
+                            item_id, data.get("outcome"), data.get("played")
+                        ):
+                            if on_playback_settled is not None:
+                                await on_playback_settled(item_id)
                     elif type == "response.audio.delta.started":
                         item_id = data.get("item_id")
                         event_id = data.get("event_id")
@@ -983,6 +1117,8 @@ async def handle_browser_messages(
                             browser_connection_logger.warning(
                                 "Received invalid response.audio.delta.started metadata."
                             )
+                            continue
+                        if assistant_audio_tracker.is_item_playback_settled(item_id):
                             continue
                         await assistant_audio_tracker.mark_audio_event_playback_started(
                             item_id, event_id
@@ -1008,6 +1144,10 @@ async def handle_browser_messages(
                                     json.dumps(data, sort_keys=True), max_len=512
                                 ),
                             )
+                            continue
+                        if isinstance(
+                            item_id, str
+                        ) and assistant_audio_tracker.is_item_playback_settled(item_id):
                             continue
                         await assistant_audio_tracker.mark_audio_event_playback_ended(
                             item_id=item_id,
@@ -1052,17 +1192,9 @@ async def handle_browser_messages(
     except WebSocketDisconnect:
         browser_connection_logger.debug("Browser closed the websocket connection.")
     except (asyncio.CancelledError, ClientDisconnect):
-        browser_connection_logger.debug(
-            "Received task cancellation signal. Closing the browser websocket."
-        )
-        try:
-            if (
-                getattr(browser_connection, "application_state", None)
-                != WebSocketState.DISCONNECTED
-            ):
-                await browser_connection.close()
-        except (WebSocketDisconnect, ClientDisconnect, OSError):
-            browser_connection_logger.debug("Browser disconnected during close.")
+        browser_connection_logger.debug("Browser message reader was cancelled.")
+        if close_on_cancel:
+            await _close_browser_connection(browser_connection)
         raise
 
 
@@ -1074,6 +1206,7 @@ async def handle_openai_events(
     openai_task_queue: asyncio.Queue,
     assistant_audio_tracker: RealtimeAssistantAudioTracker,
     realtime_recorder: RealtimeRecorder | None = None,
+    ordering_buffer: ConversationItemOrderingBuffer | None = None,
 ):
     initial_output_index = 0
     if thread.version == 3:
@@ -1090,9 +1223,9 @@ async def handle_openai_events(
                 e,
             )
 
-    ordering_buffer = ConversationItemOrderingBuffer(
-        openai_connection_logger, initial_output_index=initial_output_index
-    )
+    if ordering_buffer is None:
+        ordering_buffer = ConversationItemOrderingBuffer(openai_connection_logger)
+    ordering_buffer.next_output_index = max(0, initial_output_index)
 
     session_updated = False
     browser_delivery_available = True
@@ -1146,6 +1279,8 @@ async def handle_openai_events(
                         getattr(event, "previous_item_id", None),
                         role,
                     )
+                    if role == "assistant":
+                        assistant_audio_tracker.register_item(getattr(item, "id", None))
                     await enqueue_ready_thread_message_tasks(
                         ordering_buffer=ordering_buffer,
                         openai_task_queue=openai_task_queue,
@@ -1169,6 +1304,12 @@ async def handle_openai_events(
                         realtime_recorder=realtime_recorder,
                     )
                 case "response.output_audio_transcript.delta":
+                    if assistant_audio_tracker.is_item_playback_settled(
+                        event.item_id
+                    ) and not assistant_audio_tracker.has_item_played_audio(
+                        event.item_id
+                    ):
+                        continue
                     ordering_buffer.register_transcription_delta(
                         event.item_id, event.delta, "assistant"
                     )
@@ -1246,8 +1387,14 @@ async def handle_openai_events(
                             not item_id
                             or getattr(item, "role", None) != "assistant"
                             or getattr(item, "type", None) != "message"
-                            or ordering_buffer.has_completed_transcription(item_id)
                         ):
+                            continue
+                        assistant_audio_tracker.register_item(item_id)
+                        await assistant_audio_tracker.mark_item_audio_done(item_id)
+                        await send_browser_event(
+                            {"type": "response.audio.done", "item_id": item_id}
+                        )
+                        if ordering_buffer.has_completed_transcription(item_id):
                             continue
                         transcripts = []
                         for content in getattr(item, "content", None) or []:
@@ -1285,6 +1432,8 @@ async def handle_openai_events(
                             realtime_recorder,
                         )
                 case "response.output_audio.delta":
+                    if assistant_audio_tracker.is_item_playback_settled(event.item_id):
+                        continue
                     delta_audio_b64 = event.delta
                     try:
                         delta_audio_bytes = pybase64.b64decode(delta_audio_b64)
@@ -1316,9 +1465,13 @@ async def handle_openai_events(
                         }
                     )
                 case "response.output_audio.done" | "response.audio.done":
-                    await assistant_audio_tracker.mark_item_audio_done(
-                        getattr(event, "item_id", None)
-                    )
+                    item_id = getattr(event, "item_id", None)
+                    assistant_audio_tracker.register_item(item_id)
+                    await assistant_audio_tracker.mark_item_audio_done(item_id)
+                    if item_id:
+                        await send_browser_event(
+                            {"type": "response.audio.done", "item_id": item_id}
+                        )
                 case "input_audio_buffer.speech_started":
                     await send_browser_event(
                         {
@@ -1413,6 +1566,9 @@ async def browser_realtime_websocket(
 
     openai_task_queue: NamedQueue = NamedQueue("openai_task_queue")
     assistant_audio_tracker = RealtimeAssistantAudioTracker()
+    ordering_buffer = ConversationItemOrderingBuffer(
+        openai_connection_logger, assistant_audio_tracker=assistant_audio_tracker
+    )
 
     realtime_recorder: RealtimeRecorder | None = None
     if thread.display_user_info:
@@ -1422,12 +1578,25 @@ async def browser_realtime_websocket(
             session=browser_connection.state["db"],
         )
 
+    async def on_playback_settled(item_id: str) -> None:
+        ordering_buffer.discard_unheard_assistant_transcripts(item_id)
+        await enqueue_ready_thread_message_tasks(
+            ordering_buffer,
+            openai_task_queue,
+            openai_client,
+            browser_connection,
+            thread,
+            realtime_recorder,
+        )
+
     browser_task = asyncio.create_task(
         handle_browser_messages(
             browser_connection,
             realtime_connection,
             assistant_audio_tracker,
             realtime_recorder,
+            close_on_cancel=False,
+            on_playback_settled=on_playback_settled,
         )
     )
 
@@ -1448,6 +1617,7 @@ async def browser_realtime_websocket(
                 openai_task_queue,
                 assistant_audio_tracker,
                 realtime_recorder,
+                ordering_buffer=ordering_buffer,
             )
         ),
         asyncio.create_task(wait_for_browser_disconnect_drain()),
@@ -1470,12 +1640,20 @@ async def browser_realtime_websocket(
             task.cancel()
         results = await asyncio.gather(*realtime_tasks, return_exceptions=True)
         try:
-            if not assistant_audio_tracker.has_played_audio:
-                # No writes have qualified yet. Stop telemetry before deciding
-                # to discard; a final callback during cancellation still counts.
-                browser_task.cancel()
-                await asyncio.wait({browser_task})
+            # Per-reply decisions cannot finish while playback callbacks can
+            # still arrive. Settle the reader before releasing unheard replies.
+            browser_task.cancel()
+            await asyncio.wait({browser_task})
             assistant_audio_tracker.finish_playback_tracking()
+            ordering_buffer.discard_unheard_assistant_transcripts()
+            await enqueue_ready_thread_message_tasks(
+                ordering_buffer,
+                openai_task_queue,
+                openai_client,
+                browser_connection,
+                thread,
+                realtime_recorder,
+            )
             # Stop producers first, then save qualified messages or discard the
             # queued writes without touching local or provider-side history.
             await openai_task_queue.join()
@@ -1487,6 +1665,12 @@ async def browser_realtime_websocket(
             if not browser_task.done():
                 browser_task.cancel()
             results.extend(await asyncio.gather(browser_task, return_exceptions=True))
+            # Stop reading before deciding which replies were heard, but keep
+            # the socket open until queued history writes have finished.
+            try:
+                await _close_browser_connection(browser_connection)
+            except Exception as error:
+                results.append(error)
             # The recorder shares the transcript writer's DB session. Finalize
             # only after writes and browser buffer mutations have stopped.
             if realtime_recorder:

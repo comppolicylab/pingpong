@@ -393,6 +393,298 @@ async def test_session_retention_depends_on_playback_not_transcripts(
         ) == (version == 3 and played and transcribed)
 
 
+@with_user(123)
+@pytest.mark.parametrize("version", [1, 2, 3])
+@pytest.mark.parametrize("recording", [False, True])
+@pytest.mark.parametrize("transcript_kind", ["done", "delta", "missing", "snapshot"])
+@pytest.mark.parametrize("ending", ["provider", "disconnect", "cancel", "settled"])
+async def test_unheard_reply_does_not_save_or_block_later_user_transcripts(
+    db, user, monkeypatch, version, recording, transcript_kind, ending
+):
+    monkeypatch.setattr(realtime_module, "BROWSER_DISCONNECT_DRAIN_SECONDS", 0.01)
+    first_played = asyncio.Event()
+    provider_ready = asyncio.Event()
+    finish_provider = asyncio.Event()
+    prefix_saved = asyncio.Event()
+    trailing_saved = asyncio.Event()
+    incoming = asyncio.Queue()
+    saved_ids = []
+    original_write = realtime_module.add_message_to_thread
+
+    async def write(*args, **kwargs):
+        saved = await original_write(*args, **kwargs)
+        if saved:
+            saved_ids.append(args[3])
+            if args[3] == "followup":
+                prefix_saved.set()
+            if args[3] == "trailing":
+                trailing_saved.set()
+        return saved
+
+    monkeypatch.setattr(realtime_module, "add_message_to_thread", write)
+
+    def item(item_id, previous_item_id, role):
+        return SimpleNamespace(
+            type="conversation.item.added",
+            previous_item_id=previous_item_id,
+            item=SimpleNamespace(id=item_id, type="message", role=role),
+        )
+
+    def transcript(item_id, role):
+        return SimpleNamespace(
+            type=(
+                "conversation.item.input_audio_transcription.completed"
+                if role == "user"
+                else "response.output_audio_transcript.done"
+            ),
+            item_id=item_id,
+            transcript=f"text for {item_id}",
+        )
+
+    class Stream:
+        input_audio_buffer = SimpleNamespace(append=AsyncMock())
+
+        async def __aiter__(self):
+            yield item("question", None, "user")
+            yield transcript("question", "user")
+            yield item("reply", "question", "assistant")
+            yield transcript("reply", "assistant")
+            yield synthetic_assistant_audio()
+            await first_played.wait()
+            yield item("followup", "reply", "user")
+            yield transcript("followup", "user")
+            yield item("unheard", "followup", "assistant")
+            audio = synthetic_assistant_audio("audio-2")
+            audio.item_id = "unheard"
+            yield audio
+            if transcript_kind == "done":
+                yield transcript("unheard", "assistant")
+            elif transcript_kind == "delta":
+                yield SimpleNamespace(
+                    type="response.output_audio_transcript.delta",
+                    item_id="unheard",
+                    delta="partial unheard text",
+                )
+            elif transcript_kind == "snapshot":
+                yield SimpleNamespace(
+                    type="response.done",
+                    response=SimpleNamespace(
+                        output=[
+                            SimpleNamespace(
+                                id="unheard",
+                                type="message",
+                                role="assistant",
+                                content=[
+                                    SimpleNamespace(
+                                        type="audio", transcript="unheard snapshot"
+                                    )
+                                ],
+                            )
+                        ]
+                    ),
+                )
+            yield item("trailing", "unheard", "user")
+            yield transcript("trailing", "user")
+            provider_ready.set()
+            await finish_provider.wait()
+            if ending == "settled":
+                yield audio  # A discarded reply cannot resume after settlement.
+                yield transcript("unheard", "assistant")
+
+    async with db.async_session() as session:
+        thread = models.Thread(
+            version=version,
+            user_message_ct=0,
+            tools_available="[]",
+            thread_id="classic-thread" if version < 3 else None,
+            display_user_info=recording,
+        )
+        session.add(thread)
+        await session.flush()
+        thread_id = thread.id
+        recorder = buffering_recorder(thread_id, session)
+        recorder.audio_store_obj = SimpleNamespace(
+            complete_upload=AsyncMock(), delete_file=AsyncMock()
+        )
+        recorder.ffmpeg = SimpleNamespace(
+            stdin=SimpleNamespace(close=Mock(), write=Mock(), drain=AsyncMock()),
+            wait=AsyncMock(),
+        )
+        monkeypatch.setattr(
+            RealtimeRecorder, "create", AsyncMock(return_value=recorder)
+        )
+        create_message = AsyncMock()
+        websocket = DummyWebSocket()
+        websocket.state["db"] = session
+        websocket.state["session"] = SimpleNamespace(user=user)
+        websocket.state["thread"] = thread
+        websocket.state["anonymous_share_token"] = None
+        websocket.state["anonymous_session_token"] = None
+        websocket.state["openai_client"] = SimpleNamespace(
+            beta=SimpleNamespace(
+                threads=SimpleNamespace(messages=SimpleNamespace(create=create_message))
+            )
+        )
+        websocket.state["realtime_connection"] = Stream()
+        await incoming.put({"bytes": struct.pack(">d", 1000) + b"\0" * 480})
+        playback_received = False
+
+        async def send_json(data):
+            websocket.sent_json.append(data)
+            if (
+                data.get("type") == "response.audio.delta"
+                and data["item_id"] == "reply"
+            ):
+                await incoming.put(
+                    {
+                        "text": json.dumps(
+                            {
+                                "type": "response.audio.delta.started",
+                                "item_id": "reply",
+                                "event_id": "audio-1",
+                                "started_playing_at": 1000,
+                            }
+                        )
+                    }
+                )
+
+        async def receive():
+            nonlocal playback_received
+            if playback_received:
+                first_played.set()
+            message = await incoming.get()
+            if message.get("type") == "websocket.disconnect":
+                raise WebSocketDisconnect(code=1000)
+            if "text" in message:
+                playback_received = True
+            return message
+
+        websocket.send_json = send_json
+        websocket.receive = receive
+        websocket._raise_on_disconnect = lambda message: None
+        task = asyncio.create_task(
+            inspect.unwrap(realtime_module.browser_realtime_websocket)(
+                websocket, "1", str(thread_id)
+            )
+        )
+        try:
+            await asyncio.wait_for(provider_ready.wait(), timeout=2)
+            await asyncio.wait_for(prefix_saved.wait(), timeout=2)
+            assert saved_ids == ["question", "reply", "followup"]
+            if ending == "settled":
+                await incoming.put(
+                    {
+                        "text": json.dumps(
+                            {
+                                "type": "response.audio.playback.settled",
+                                "item_id": "unheard",
+                                "outcome": "discarded",
+                                "played": False,
+                            }
+                        )
+                    }
+                )
+                await asyncio.wait_for(trailing_saved.wait(), timeout=2)
+                assert saved_ids == ["question", "reply", "followup", "trailing"]
+                assert not task.done()
+            if ending == "cancel":
+                task.cancel()
+                with pytest.raises(asyncio.CancelledError):
+                    await asyncio.wait_for(task, timeout=2)
+            else:
+                if ending == "disconnect":
+                    await incoming.put({"type": "websocket.disconnect"})
+                else:
+                    finish_provider.set()
+                await asyncio.wait_for(task, timeout=2)
+            assert saved_ids == ["question", "reply", "followup", "trailing"]
+            assert (
+                sum(
+                    event.get("item_id") == "unheard"
+                    and event["type"] == "response.audio.delta"
+                    for event in websocket.sent_json
+                )
+                == 1
+            )
+            assert thread.user_message_ct == 3
+            await session.commit()
+        finally:
+            finish_provider.set()
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+        if version < 3:
+            assert [
+                call.kwargs["metadata"]["item_id"]
+                for call in create_message.await_args_list
+            ] == saved_ids
+        if recording:
+            recorder.audio_store_obj.complete_upload.assert_awaited_once()
+            recorder.audio_store_obj.delete_file.assert_not_awaited()
+
+    if version == 3:
+        async with db.async_session() as session:
+            messages = (
+                await session.scalars(
+                    select(models.Message)
+                    .where(models.Message.thread_id == thread_id)
+                    .order_by(models.Message.output_index)
+                )
+            ).all()
+            assert [message.message_id for message in messages] == saved_ids
+
+
+@pytest.mark.parametrize("playback_first", [False, True])
+@pytest.mark.parametrize("ended", [False, True])
+async def test_each_assistant_write_waits_for_its_own_playback(
+    monkeypatch, playback_first, ended
+):
+    tracker = realtime_module.RealtimeAssistantAudioTracker()
+    for item_id in ("earlier", "held", "unrelated"):
+        await tracker.add_audio_delta(item_id, item_id, b"\0\0")
+    await tracker.mark_audio_event_playback_started("earlier", "earlier")
+    callback = (
+        tracker.mark_audio_event_playback_ended
+        if ended
+        else tracker.mark_audio_event_playback_started
+    )
+    if playback_first:
+        await callback("held", "held")
+    buffer = realtime_module.ConversationItemOrderingBuffer(
+        logging.getLogger(__name__), assistant_audio_tracker=tracker
+    )
+    for item_id, previous, role in [
+        ("held", None, "assistant"),
+        ("later", "held", "user"),
+    ]:
+        buffer.register_conversation_item(item_id, previous, role)
+        buffer.register_transcription(item_id, item_id, role)
+    write = AsyncMock(return_value=True)
+    monkeypatch.setattr(realtime_module, "add_message_to_thread", write)
+    queue = realtime_module.NamedQueue("per-reply-retention")
+    await realtime_module.enqueue_ready_thread_message_tasks(
+        buffer, queue, None, DummyWebSocket(), SimpleNamespace(version=3), None
+    )
+    worker = asyncio.create_task(
+        realtime_module.process_queue_tasks(queue, logging.getLogger(__name__), tracker)
+    )
+    try:
+        if not playback_first:
+            with pytest.raises(TimeoutError):
+                await asyncio.wait_for(queue.join(), timeout=0.02)
+            write.assert_not_awaited()
+            await callback("unrelated", "unrelated")
+            with pytest.raises(TimeoutError):
+                await asyncio.wait_for(queue.join(), timeout=0.02)
+            write.assert_not_awaited()
+            await callback("held", "held")
+        await asyncio.wait_for(queue.join(), timeout=1)
+        assert [call.args[3] for call in write.await_args_list] == ["held", "later"]
+        assert not await callback("held", "held")
+    finally:
+        worker.cancel()
+        await asyncio.gather(worker, return_exceptions=True)
+
+
 @pytest.mark.parametrize("played", [False, True])
 @pytest.mark.parametrize("ended", [False, True])
 async def test_queued_writes_wait_for_session_retention_decision(played, ended):
@@ -436,14 +728,14 @@ async def test_recording_finalization_waits_for_in_flight_transcript_write(monke
         await release_write.wait()
         write_finished = True
 
-    async def provider(*args):
+    async def provider(*args, **kwargs):
         queue, tracker = args[4:6]
         await tracker.add_audio_delta("reply", "audio", b"\0\0")
         await tracker.mark_audio_event_playback_started("reply", "audio")
         await queue.put(write)
         await writing.wait()
 
-    async def browser(*args):
+    async def browser(*args, **kwargs):
         await asyncio.Future()
 
     async def periodic(**kwargs):
@@ -476,23 +768,27 @@ async def test_recording_finalization_waits_for_in_flight_transcript_write(monke
     try:
         await asyncio.wait_for(periodic_stopped.wait(), timeout=1)
         recorder.complete_audio_upload.assert_not_awaited()
+        assert not websocket.closed
         assert not task.done()
         release_write.set()
         await asyncio.wait_for(task, timeout=1)
         recorder.complete_audio_upload.assert_awaited_once_with(has_played_audio=True)
+        assert websocket.closed
     finally:
         release_write.set()
         task.cancel()
         await asyncio.gather(task, return_exceptions=True)
 
 
-async def test_final_playback_callback_before_browser_stops_can_qualify_session(
+@pytest.mark.parametrize("prior_playback", [False, True])
+async def test_final_playback_callback_before_browser_stops_can_qualify_reply(
     monkeypatch,
+    prior_playback,
 ):
     browser_ready = asyncio.Event()
     write = AsyncMock()
 
-    async def browser(*args):
+    async def browser(*args, **kwargs):
         tracker = args[2]
         browser_ready.set()
         try:
@@ -500,14 +796,23 @@ async def test_final_playback_callback_before_browser_stops_can_qualify_session(
         finally:
             await tracker.mark_audio_event_playback_ended("reply", "audio")
 
-    async def provider(*args):
+    async def provider(*args, **kwargs):
         queue, tracker = args[4:6]
         await browser_ready.wait()
+        if prior_playback:
+            await tracker.add_audio_delta("earlier", "earlier", b"\0\0")
+            await tracker.mark_audio_event_playback_started("earlier", "earlier")
         await tracker.add_audio_delta("reply", "audio", b"\0\0")
-        await queue.put(write)
+        buffer = kwargs["ordering_buffer"]
+        buffer.register_conversation_item("reply", None, "assistant")
+        buffer.register_transcription("reply", "answer", "assistant")
+        await realtime_module.enqueue_ready_thread_message_tasks(
+            buffer, queue, None, args[0], SimpleNamespace(version=3), None
+        )
 
     monkeypatch.setattr(realtime_module, "handle_openai_events", provider)
     monkeypatch.setattr(realtime_module, "handle_browser_messages", browser)
+    monkeypatch.setattr(realtime_module, "add_message_to_thread", write)
     websocket = DummyWebSocket()
     websocket.state["thread"] = SimpleNamespace(display_user_info=False)
     websocket.state["db"] = None
@@ -645,7 +950,7 @@ async def test_session_saves_late_transcripts_after_browser_disconnect(
 )
 @pytest.mark.parametrize("recording", [False, True])
 @pytest.mark.parametrize("played", [False, True])
-async def test_realtime_session_owns_tasks_and_cleans_browser_last(
+async def test_realtime_session_stops_browser_before_final_queue_drain(
     monkeypatch, caplog, ending, recording, played
 ):
     browser_ready = asyncio.Event()
@@ -656,7 +961,7 @@ async def test_realtime_session_owns_tasks_and_cleans_browser_last(
     children = []
     cleanup = []
 
-    async def browser(*args):
+    async def browser(*args, **kwargs):
         children.append(asyncio.current_task())
         if played:
             tracker = args[2]
@@ -668,7 +973,7 @@ async def test_realtime_session_owns_tasks_and_cleans_browser_last(
         finally:
             cleanup.append("browser")
 
-    async def provider(*args):
+    async def provider(*args, **kwargs):
         children.append(asyncio.current_task())
         provider_ready.set()
         try:
@@ -743,10 +1048,7 @@ async def test_realtime_session_owns_tasks_and_cleans_browser_last(
         else:
             await asyncio.wait_for(task, timeout=1)
         assert all(child.done() for child in children)
-        if ending != "disconnect_timeout" and played:
-            assert cleanup.index("writer") < cleanup.index("browser")
-        if not played:
-            assert cleanup.index("browser") < cleanup.index("writer")
+        assert cleanup.index("browser") < cleanup.index("writer")
         if recording:
             assert cleanup.index("recorder") < cleanup.index("writer")
             assert cleanup[-1] == "finalize"
