@@ -2696,9 +2696,173 @@ async def test_openai_recoverable_error_is_logged_without_closing_websocket():
     ]
 
 
+@pytest.mark.parametrize("operation", ["send_json", "close"])
+@pytest.mark.parametrize(
+    "failure",
+    ["disconnect", "client_disconnect", "broken_pipe", "closed", "client_closed"],
+)
+async def test_realtime_rejection_tolerates_browser_disconnect(operation, failure):
+    websocket = DummyWebSocket()
+    websocket.application_state = WebSocketState.CONNECTED
+    websocket.client_state = WebSocketState.CONNECTED
+
+    async def fail(*args):
+        if failure == "disconnect":
+            raise WebSocketDisconnect(code=1006)
+        if failure == "client_disconnect":
+            raise ClientDisconnect()
+        if failure == "broken_pipe":
+            raise BrokenPipeError()
+        if failure == "closed":
+            websocket.application_state = WebSocketState.DISCONNECTED
+        else:
+            websocket.client_state = WebSocketState.DISCONNECTED
+        raise RuntimeError('Cannot call "send" once a close message has been sent.')
+
+    websocket.send_json = AsyncMock(wraps=websocket.send_json)
+    websocket.close = AsyncMock(wraps=websocket.close)
+    getattr(websocket, operation).side_effect = fail
+    await websocket_module._reject_realtime_session(
+        websocket, websocket_module.VOICE_SESSION_FINAL_MESSAGE
+    )
+    websocket.send_json.assert_awaited_once_with(
+        {
+            "type": "error",
+            "error": {
+                "type": "invalid_request_error",
+                "code": "voice_session_unavailable",
+                "message": websocket_module.VOICE_SESSION_FINAL_MESSAGE,
+            },
+        }
+    )
+    assert websocket.close.await_count == int(operation == "close")
+
+
+@pytest.mark.parametrize("operation", ["send_json", "close"])
+@pytest.mark.parametrize("error_type", [RuntimeError, ValueError])
+async def test_realtime_rejection_does_not_hide_unrelated_errors(operation, error_type):
+    websocket = DummyWebSocket()
+    websocket.application_state = WebSocketState.CONNECTED
+    websocket.client_state = WebSocketState.CONNECTED
+    error = error_type("unexpected failure")
+    setattr(websocket, operation, AsyncMock(side_effect=error))
+    with pytest.raises(error_type, match="unexpected failure") as raised:
+        await websocket_module._reject_realtime_session(
+            websocket, websocket_module.VOICE_SESSION_FINAL_MESSAGE
+        )
+    assert raised.value is error
+
+
+@pytest.mark.parametrize(
+    "rejection", ["permissions", "openai_client", "openai_realtime_connection"]
+)
+@pytest.mark.parametrize(
+    "operation,failure",
+    [(None, None)]
+    + [
+        (operation, failure)
+        for operation in ["send_json", "close"]
+        for failure in [
+            "disconnect",
+            "client_disconnect",
+            "broken_pipe",
+            "closed",
+            "client_closed",
+        ]
+    ],
+)
+async def test_startup_rejection_preserves_error_and_rollback_after_disconnect(
+    monkeypatch, rejection, operation, failure
+):
+    websocket = DummyWebSocket()
+    websocket.accept = AsyncMock()
+    websocket.application_state = WebSocketState.CONNECTED
+    websocket.client_state = WebSocketState.CONNECTED
+    websocket.send_json = AsyncMock(wraps=websocket.send_json)
+    websocket.close = AsyncMock(wraps=websocket.close)
+    error = (
+        ValueError("Permission denied.")
+        if rejection == "permissions"
+        else RuntimeError("Provider setup failed.")
+    )
+    handler = AsyncMock()
+    if rejection == "permissions":
+        monkeypatch.setattr(
+            models.Class,
+            "get_by_id",
+            AsyncMock(return_value=SimpleNamespace(archived=None)),
+        )
+        monkeypatch.setattr(
+            websocket_module,
+            "check_realtime_permissions",
+            AsyncMock(side_effect=error),
+        )
+        wrapped = websocket_module.ws_check_realtime_permissions(handler)
+    elif rejection == "openai_client":
+        monkeypatch.setattr(
+            websocket_module,
+            "get_openai_client_by_class_id",
+            AsyncMock(side_effect=error),
+        )
+        wrapped = websocket_module.ws_with_openai_client(handler)
+    else:
+        connection = FakeRealtimeConnection()
+        connection.session.update = AsyncMock(side_effect=error)
+        websocket.state["openai_client"] = FakeOpenAIClient(connection)
+        websocket.state["assistant"] = realtime_assistant()
+        websocket.state["thread"] = SimpleNamespace(id=1, thread_id=None)
+        websocket.state["conversation_instructions"] = "Speak clearly."
+        wrapped = websocket_module.ws_with_realtime_connection(handler)
+
+    async def fail(*args):
+        if failure == "disconnect":
+            raise WebSocketDisconnect(code=1006)
+        if failure == "client_disconnect":
+            raise ClientDisconnect()
+        if failure == "broken_pipe":
+            raise BrokenPipeError()
+        if failure == "closed":
+            websocket.application_state = WebSocketState.DISCONNECTED
+        else:
+            websocket.client_state = WebSocketState.DISCONNECTED
+        raise RuntimeError('Cannot call "send" once a close message has been sent.')
+
+    if operation:
+        getattr(websocket, operation).side_effect = fail
+    db = AsyncMock()
+    context = AsyncMock()
+    context.__aenter__.return_value = db
+    monkeypatch.setattr(
+        websocket_module.config.db.driver,
+        "async_session_with_args",
+        lambda **kwargs: lambda: context,
+    )
+    with pytest.raises(type(error)) as raised:
+        await websocket_module.ws_db_middleware(wrapped)(websocket, "1", "1")
+    assert raised.value is error
+    handler.assert_not_awaited()
+    db.rollback.assert_awaited_once()
+    db.commit.assert_not_awaited()
+    websocket.send_json.assert_awaited_once_with(
+        {
+            "type": "error",
+            "error": {
+                "type": "invalid_request_error",
+                "code": rejection,
+                "message": str(error)
+                if rejection == "permissions"
+                else "We were unable to connect to OpenAI.",
+            },
+        }
+    )
+    assert websocket.close.await_count == int(operation != "send_json")
+    assert websocket.closed is (failure is None)
+
+
 @pytest.mark.parametrize("has_recording,has_messages", [(True, False), (False, True)])
+@pytest.mark.parametrize("disconnect_during", [None, "send_json", "close"])
 async def test_single_realtime_session_rejects_finished_thread(
-    monkeypatch, has_recording, has_messages
+    monkeypatch, has_recording, has_messages, disconnect_during
 ):
     async def fake_get_by_id_with_assistant(_session, thread_id, **kwargs):
         assert kwargs == {
@@ -2733,17 +2897,24 @@ async def test_single_realtime_session_rejects_finished_thread(
 
     websocket = DummyWebSocket()
     websocket.state["db"] = object()
+    if disconnect_during:
+        setattr(
+            websocket,
+            disconnect_during,
+            AsyncMock(side_effect=WebSocketDisconnect(code=1006)),
+        )
     handler = AsyncMock()
     wrapped = websocket_module.ws_with_single_realtime_session(handler)
 
     await wrapped(websocket, "10", "20")
 
     handler.assert_not_awaited()
-    assert websocket.closed is True
-    assert (
-        websocket.sent_json[0]["error"]["message"]
-        == websocket_module.VOICE_SESSION_FINAL_MESSAGE
-    )
+    assert websocket.closed is (disconnect_during is None)
+    if disconnect_during != "send_json":
+        assert (
+            websocket.sent_json[0]["error"]["message"]
+            == websocket_module.VOICE_SESSION_FINAL_MESSAGE
+        )
 
 
 @pytest.mark.parametrize(
