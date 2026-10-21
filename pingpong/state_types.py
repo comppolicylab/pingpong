@@ -48,6 +48,8 @@ class RequestState(BaseConnectionState):
 
 
 class WebSocketState(BaseConnectionState):
+    after_db_commit: NotRequired[list[DatabaseCallback]]
+    after_db_rollback: NotRequired[list[DatabaseCallback]]
     openai_client: NotRequired[OpenAIClientType]
     thread: NotRequired[models.Thread]
     assistant: NotRequired[models.Assistant]

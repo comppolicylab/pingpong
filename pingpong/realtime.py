@@ -58,6 +58,7 @@ REALTIME_EXPIRY_MARGIN_SECONDS = 60.0
 BROWSER_EXPIRY_STOP_SECONDS = 5.0
 REALTIME_EXPIRY_WARNING_SECONDS = (5 * 60, 60)
 EXPIRY_WARNING_SEND_SECONDS = 1.0
+BROWSER_SAVE_CONFIRMATION_SECONDS = 5.0
 
 
 class RealtimeSessionExpiry:
@@ -1285,6 +1286,7 @@ async def handle_browser_messages(
     close_on_cancel: bool = True,
     on_playback_settled: Callable[[str], Awaitable[None]] | None = None,
     session_expiry: RealtimeSessionExpiry | None = None,
+    on_session_stop: Callable[[], None] | None = None,
 ):
     try:
         while True:
@@ -1294,6 +1296,10 @@ async def handle_browser_messages(
                 try:
                     data = json.loads(message["text"])
                     type = data.get("type")
+                    if type == "session.stop":
+                        if on_session_stop is not None:
+                            on_session_stop()
+                        return
                     if not type:
                         browser_connection_logger.exception(
                             "Received unexpected message: %s",
@@ -1897,6 +1903,47 @@ async def browser_realtime_websocket(
 
             await openai_task_queue.put(update_playback_metadata)
 
+    stop_requested = False
+
+    async def acknowledge_stop(saved: bool) -> None:
+        try:
+            async with asyncio.timeout(BROWSER_SAVE_CONFIRMATION_SECONDS):
+                await browser_connection.send_json(
+                    {"type": "session.stopped", "saved": saved}
+                )
+        except (TimeoutError, WebSocketDisconnect, ClientDisconnect, OSError):
+            browser_connection_logger.debug(
+                "Could not deliver voice save confirmation to the browser."
+            )
+        except RuntimeError:
+            if (
+                getattr(browser_connection, "application_state", None)
+                != WebSocketState.DISCONNECTED
+                and getattr(browser_connection, "client_state", None)
+                != WebSocketState.DISCONNECTED
+            ):
+                raise
+        finally:
+            try:
+                async with asyncio.timeout(BROWSER_SAVE_CONFIRMATION_SECONDS):
+                    await _close_browser_connection(browser_connection)
+            except TimeoutError:
+                browser_connection_logger.debug(
+                    "Browser close timed out after voice save confirmation."
+                )
+
+    def request_stop() -> None:
+        nonlocal stop_requested
+        stop_requested = True
+        session_expiry.stopping = True
+        # The middleware owns the final transaction, including recorder metadata.
+        browser_connection.state["after_db_commit"].append(
+            lambda: acknowledge_stop(True)
+        )
+        browser_connection.state["after_db_rollback"].append(
+            lambda: acknowledge_stop(False)
+        )
+
     browser_task = asyncio.create_task(
         handle_browser_messages(
             browser_connection,
@@ -1906,6 +1953,7 @@ async def browser_realtime_websocket(
             close_on_cancel=False,
             on_playback_settled=on_playback_settled,
             session_expiry=session_expiry,
+            on_session_stop=request_stop,
         )
     )
 
@@ -2021,10 +2069,11 @@ async def browser_realtime_websocket(
             results.extend(await asyncio.gather(browser_task, return_exceptions=True))
             # Stop reading before deciding which replies were heard, but keep
             # the socket open until queued history writes have finished.
-            try:
-                await _close_browser_connection(browser_connection)
-            except Exception as error:
-                results.append(error)
+            if not stop_requested:
+                try:
+                    await _close_browser_connection(browser_connection)
+                except Exception as error:
+                    results.append(error)
             # The recorder shares the transcript writer's DB session. Finalize
             # only after writes and browser buffer mutations have stopped.
             if realtime_recorder:
@@ -2072,6 +2121,18 @@ async def browser_realtime_websocket(
                     "Error rolling back cancelled voice session for thread_id=%s",
                     sanitize_for_log(thread_id),
                 )
+        finally:
+            # Cancellation bypasses the middleware's acknowledgement callbacks,
+            # including when it first arrives during recording finalization.
+            if stop_requested:
+                try:
+                    async with asyncio.timeout(BROWSER_SAVE_CONFIRMATION_SECONDS):
+                        await _close_browser_connection(browser_connection)
+                except Exception:
+                    openai_connection_logger.exception(
+                        "Error closing cancelled voice session for thread_id=%s",
+                        sanitize_for_log(thread_id),
+                    )
 
     cancelled: asyncio.CancelledError | None = None
 

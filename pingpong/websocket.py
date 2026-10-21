@@ -19,7 +19,7 @@ from pingpong.ai import (
     inject_timestamp_to_instructions,
 )
 from pingpong.session import populate_request
-from pingpong.state_types import StateWebSocket
+from pingpong.state_types import DatabaseCallback, StateWebSocket
 from pingpong.log_utils import sanitize_for_log
 from pingpong.permission import ARCHIVED_DETAIL
 from .config import config
@@ -319,12 +319,28 @@ def ws_db_middleware(func):
     async def wrapper(websocket: StateWebSocket, *args, **kwargs):
         async with config.db.driver.async_session_with_args(pool_pre_ping=True)() as db:
             websocket.state["db"] = db
+            websocket.state["after_db_commit"] = []
+            websocket.state["after_db_rollback"] = []
+
+            async def complete(callbacks: list[DatabaseCallback]) -> None:
+                for callback in callbacks:
+                    try:
+                        await callback()
+                    except Exception:
+                        browser_connection_logger.exception(
+                            "Websocket database completion notification failed."
+                        )
+
             try:
                 await func(websocket, *args, **kwargs)
                 await db.commit()
-            except Exception as e:
-                await db.rollback()
-                raise e
+            except Exception:
+                try:
+                    await db.rollback()
+                finally:
+                    await complete(websocket.state["after_db_rollback"])
+                raise
+            await complete(websocket.state["after_db_commit"])
 
     return wrapper
 

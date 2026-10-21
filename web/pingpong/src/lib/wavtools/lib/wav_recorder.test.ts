@@ -131,6 +131,17 @@ describe('microphone access and selection', () => {
 		});
 	});
 
+	it.each(['NotAllowedError', 'NotFoundError', 'NotReadableError', 'SecurityError'])(
+		'preserves %s from microphone acquisition at Start',
+		async (name) => {
+			const env = environment();
+			audio();
+			const error = new DOMException('Microphone unavailable', name);
+			env.media.getUserMedia.mockRejectedValueOnce(error);
+			await expect(new WavRecorder().begin('usb')).rejects.toBe(error);
+		}
+	);
+
 	it('acquires the chosen replacement before stopping the permission stream', async () => {
 		const env = environment();
 		const initial = microphone('built-in'),
