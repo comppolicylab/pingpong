@@ -75,10 +75,10 @@
 			triggered the error. Identifiable information, per policy, cannot be requested and will not be
 			provided to moderators. Generally, HKS follows the
 			<a
-				href="https://provost.harvard.edu/sites/g/files/omnuum12476/files/provost/files/policy_on_access_to_electronic_information.pdf"
+				href="https://privsec.harvard.edu/harvard-university-umbrella-privacy-statement"
 				rel="noopener noreferrer"
 				class="underline"
-				target="_blank">Harvard Policy on Access to Electronic Information</a
+				target="_blank">Harvard University Umbrella Privacy Statement</a
 			> in the management of PingPong and access to the user data stored to support the service.</P
 		>
 		<P class="mt-4"
@@ -89,10 +89,10 @@
 			Assistants API under the Harvard institutional license. Documents uploaded to the app are
 			stored on OpenAI's servers, not our own. We are able to delete these files as necessary. For
 			more information about Harvard's license with OpenAI, please contact <a
-				href="mailto:sgoshev@hks.harvard.edu"
+				href="mailto:apisello@hks.harvard.edu"
 				rel="noopener noreferrer"
 				class="underline"
-				target="_blank">Simo Goshev</a
+				target="_blank">Tony Pisello</a
 			>.</P
 		>
 		<P class="mt-4"
