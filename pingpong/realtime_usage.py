@@ -98,13 +98,18 @@ class RealtimeUsage:
             if not item_id:
                 return
             # Microphone-buffer commits contain one input-audio part at index 0.
-            content_index = str(getattr(event, "content_index", 0))
+            content_index = str(getattr(event, "content_index", None) or 0)
             record = self.transcriptions.setdefault(item_id, {}).setdefault(
                 content_index, {"model": self._transcription_model, "usage": None}
             )
             usage = _provider_json(getattr(event, "usage", None))
             if usage is not None:
                 record["usage"] = usage
+            if (
+                event.type == "conversation.item.input_audio_transcription.failed"
+                and getattr(event, "error", None) is not None
+            ):
+                self.record_error(event)
 
     def record_error(self, event) -> None:
         record = {
@@ -112,6 +117,25 @@ class RealtimeUsage:
             "error": {
                 field: getattr(event.error, field, None)
                 for field in ("type", "code", "message", "param", "event_id")
+            },
+        }
+        if event.type == "conversation.item.input_audio_transcription.failed":
+            record.update(
+                item_id=event.item_id,
+                content_index=getattr(event, "content_index", None) or 0,
+            )
+        if record not in self.errors:
+            self.errors.append(record)
+
+    def record_exception(self, error: Exception, *, code: str) -> None:
+        record = {
+            "event_id": None,
+            "error": {
+                "type": type(error).__name__,
+                "code": code,
+                "message": str(error),
+                "param": None,
+                "event_id": None,
             },
         }
         if record not in self.errors:

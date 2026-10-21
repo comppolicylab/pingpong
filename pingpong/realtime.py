@@ -136,6 +136,7 @@ class RealtimeShutdownDrain:
         self._vad_disabled = False
         self._clear_requested = False
         self._buffer_cleared = False
+        self._clear_failed = False
         self._cancel_event_response_ids: dict[str, str] = {}
         self.usage = RealtimeUsage()
         self._changed = asyncio.Event()
@@ -166,6 +167,13 @@ class RealtimeShutdownDrain:
             )
         elif self._clear_requested and event.type == "input_audio_buffer.cleared":
             self._buffer_cleared = True
+        elif (
+            self._clear_requested
+            and event.type in {"error", "session.error"}
+            and getattr(event.error, "event_id", None) == "voice_shutdown_clear"
+        ):
+            self._clear_failed = True
+            self.usage.mark_incomplete("input_audio_buffer_clear_failed")
         self._changed.set()
 
     def is_finished_cancellation_error(self, error) -> bool:
@@ -184,7 +192,7 @@ class RealtimeShutdownDrain:
         return (
             self.stopping
             and self._vad_disabled
-            and self._buffer_cleared
+            and (self._buffer_cleared or self._clear_failed)
             and not self.usage.pending_response_ids
             and not self.pending_transcripts
             and not ordering_buffer.has_pending_retained_items(heard_item_ids)
@@ -214,8 +222,15 @@ class RealtimeShutdownDrain:
                     )
                 self._clear_requested = True
                 try:
-                    await connection.input_audio_buffer.clear()
-                except Exception:
+                    await connection.input_audio_buffer.clear(
+                        event_id="voice_shutdown_clear"
+                    )
+                except Exception as error:
+                    self._clear_failed = True
+                    self.usage.mark_incomplete("input_audio_buffer_clear_failed")
+                    self.usage.record_exception(
+                        error, code="input_audio_buffer_clear_failed"
+                    )
                     openai_connection_logger.exception(
                         "Failed to clear input audio during voice shutdown."
                     )
@@ -1001,6 +1016,31 @@ def _new_voice_run(browser_connection: StateWebSocket, thread: Thread) -> Run:
     )
 
 
+def retain_voice_startup_failure(
+    browser_connection: StateWebSocket, thread: Thread, error: Exception
+) -> None:
+    # Snapshot attributes before rollback expires the session's ORM objects.
+    run = _new_voice_run(browser_connection, thread)
+    usage = RealtimeUsage()
+    code = getattr(error, "code", None) or "provider_startup_error"
+    usage.fail(code, str(error))
+    usage.record_exception(error, code=code)
+    run.status = usage.final_status
+    run.error_code = usage.error_code
+    run.error_message = usage.error_message
+    run.completed = func.now()
+    run.provider_metadata = usage.provider_metadata_to_json()
+
+    async def save_after_rollback() -> None:
+        # Release the original transaction's thread lock before inserting a run
+        # in a separate transaction that survives the startup failure.
+        async with config.db.driver.async_session() as session:
+            session.add(run)
+            await session.commit()
+
+    browser_connection.state["after_db_rollback"].append(save_after_rollback)
+
+
 async def save_voice_usage(
     browser_connection: StateWebSocket, thread: Thread, usage: RealtimeUsage
 ) -> None:
@@ -1044,6 +1084,30 @@ async def save_voice_usage(
             openai_connection_logger.exception(
                 "Failed to reload thread after voice usage save failure."
             )
+        if run_id is not None:
+            try:
+                async with session.begin_nested():
+                    run = await Run.get_by_id(session, run_id)
+                    if run is not None and run.thread_id == thread_id:
+                        # Keep a failed accounting payload out of this fallback.
+                        run.status = (
+                            schemas.RunStatus.FAILED
+                            if usage.error_code is not None
+                            else schemas.RunStatus.INCOMPLETE
+                        )
+                        run.error_code = usage.error_code
+                        run.error_message = usage.error_message
+                        run.incomplete_reason = (
+                            usage.incomplete_reason or "usage_save_failed"
+                            if run.status == schemas.RunStatus.INCOMPLETE
+                            else None
+                        )
+                        run.completed = func.now()
+                        await session.flush()
+            except Exception:
+                openai_connection_logger.exception(
+                    "Failed to finalize voice run after usage save failure."
+                )
 
 
 async def add_message_to_thread(

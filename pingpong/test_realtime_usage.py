@@ -1,10 +1,13 @@
 import asyncio
 import inspect
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from openai.types.realtime import (
     ConversationItemInputAudioTranscriptionCompletedEvent,
+    ConversationItemInputAudioTranscriptionDeltaEvent,
+    ConversationItemInputAudioTranscriptionFailedEvent,
     ResponseDoneEvent,
 )
 from sqlalchemy import select
@@ -20,6 +23,8 @@ from pingpong.test_realtime_shutdown import (
 )
 from pingpong.test_server_audio_websocket import (
     DummyWebSocket,
+    FakeOpenAIClient,
+    FakeRealtimeConnection,
     FakeRealtimeEventStream,
     realtime_assistant,
     synthetic_assistant_audio,
@@ -165,6 +170,77 @@ def test_transcription_usage_is_separate_and_keyed_by_item_and_content(payload):
     assert usage.responses["resp_1"]["usage"] == RESPONSE_USAGE
 
 
+@pytest.mark.parametrize("content_index", [None, 0, 1])
+def test_transcription_delta_uses_the_completed_content_index(content_index):
+    usage = RealtimeUsage()
+    delta = ConversationItemInputAudioTranscriptionDeltaEvent.model_validate(
+        {
+            "type": "conversation.item.input_audio_transcription.delta",
+            "event_id": "delta",
+            "item_id": "user",
+            "content_index": content_index,
+            "delta": "question",
+        }
+    )
+    usage.observe(delta)
+    usage.observe(
+        transcription_done(
+            {"type": "duration", "seconds": 1}, content_index=content_index or 0
+        )
+    )
+
+    assert list(usage.transcriptions["user"]) == [str(content_index or 0)]
+    assert usage.transcriptions["user"][str(content_index or 0)]["usage"] == {
+        "type": "duration",
+        "seconds": 1,
+    }
+
+
+def test_transcription_failure_diagnostics_are_separate_and_idempotent():
+    failure = ConversationItemInputAudioTranscriptionFailedEvent.model_validate(
+        {
+            "type": "conversation.item.input_audio_transcription.failed",
+            "event_id": "transcription_error",
+            "item_id": "user",
+            "content_index": 1,
+            "error": {
+                "code": "transcription_failed",
+                "message": "Synthetic transcription failure.",
+                "type": "server_error",
+                "param": None,
+            },
+        }
+    )
+    usage = RealtimeUsage()
+    usage.observe(failure)
+    usage.observe(failure)
+
+    assert usage.to_json()["transcriptions"] == {
+        "user": {"1": {"model": None, "usage": None}}
+    }
+    diagnostics = usage.provider_metadata_to_json()
+    assert diagnostics["errors"] == [
+        {
+            "event_id": "transcription_error",
+            "item_id": "user",
+            "content_index": 1,
+            "error": {
+                "code": "transcription_failed",
+                "message": "Synthetic transcription failure.",
+                "type": "server_error",
+                "param": None,
+                "event_id": None,
+            },
+        }
+    ]
+    diagnostics["errors"][0]["error"]["message"] = "changed"
+    assert (
+        usage.provider_metadata_to_json()["errors"][0]["error"]["message"]
+        == failure.error.message
+    )
+    assert usage.final_status == schemas.RunStatus.COMPLETED
+
+
 def test_missing_usage_stays_unknown_and_zero_usage_is_preserved():
     usage = RealtimeUsage()
     usage.observe(event("response.created", response=SimpleNamespace(id="unknown")))
@@ -307,7 +383,7 @@ async def test_received_usage_survives_cancellation_during_browser_delivery():
         await asyncio.wait_for(started.wait(), 1)
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
-            await task
+            await asyncio.wait_for(task, 1)
         assert drain.usage.responses["resp_1"]["usage"] == RESPONSE_USAGE
     finally:
         task.cancel()
@@ -350,6 +426,60 @@ async def test_clear_ack_is_required_but_old_clear_ack_does_not_count():
         assert not task.done()
         drain.observe(event("input_audio_buffer.cleared"))
         await asyncio.wait_for(task, 1)
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+
+@pytest.mark.parametrize("failure", ["send", "error", "session.error"])
+async def test_failed_clear_releases_only_its_ack_wait(monkeypatch, failure):
+    monkeypatch.setattr(realtime, "BROWSER_DISCONNECT_DRAIN_SECONDS", 1)
+    drain = realtime.RealtimeShutdownDrain()
+    drain.observe(event("response.created", response=SimpleNamespace(id="resp_1")))
+    drain.observe(event("input_audio_buffer.committed", item_id="user"))
+    connection = ShutdownConnection()
+    if failure == "send":
+        connection.input_audio_buffer.clear.side_effect = BrokenPipeError(
+            "Clear failed."
+        )
+    else:
+        connection.input_audio_buffer.clear.side_effect = None
+    buffer = realtime.ConversationItemOrderingBuffer(realtime.openai_connection_logger)
+    task = asyncio.create_task(drain.wait(connection, buffer))
+    try:
+        await wait_until(lambda: connection.input_audio_buffer.clear.await_count == 1)
+        drain.observe(shutdown_ack())
+        unrelated = event("error", error=SimpleNamespace(event_id="unrelated"))
+        drain.observe(unrelated)
+        if failure != "send":
+            assert not drain._clear_failed
+            rejection = event(
+                failure,
+                error=SimpleNamespace(
+                    event_id="voice_shutdown_clear", code="clear_rejected"
+                ),
+            )
+            await realtime.handle_openai_events(
+                DummyWebSocket(),
+                FakeRealtimeEventStream([rejection]),
+                None,
+                SimpleNamespace(version=1),
+                asyncio.Queue(),
+                realtime.RealtimeAssistantAudioTracker(),
+                shutdown_drain=drain,
+            )
+        assert not drain._buffer_cleared
+        assert drain._clear_failed
+        assert not task.done()
+        drain.observe(response_done())
+        await asyncio.sleep(0)
+        assert not task.done()
+        drain.observe(transcription_done({"type": "duration", "seconds": 1}))
+        await asyncio.wait_for(task, 0.5)
+        assert drain.usage.final_status == schemas.RunStatus.INCOMPLETE
+        assert drain.usage.incomplete_reason == "input_audio_buffer_clear_failed"
+        assert len(drain.usage.provider_metadata_to_json()["errors"]) == 1
+        assert drain.usage.responses["resp_1"]["usage"] == RESPONSE_USAGE
     finally:
         task.cancel()
         await asyncio.gather(task, return_exceptions=True)
@@ -548,6 +678,98 @@ async def test_startup_error_without_provider_operations_is_retained(
 
 
 @with_user(123)
+@pytest.mark.parametrize("stage", ["connect", "update", "greeting", "handler"])
+@pytest.mark.parametrize("save_fails", [False, True])
+async def test_provider_startup_failure_survives_transaction_rollback(
+    db, user, monkeypatch, caplog, stage, save_fails
+):
+    async with db.async_session() as session:
+        thread = models.Thread(version=3, user_message_ct=0, tools_available="[]")
+        session.add(thread)
+        await session.flush()
+        thread_id = thread.id
+        await session.commit()
+
+    browser = DummyWebSocket()
+    browser.state["session"] = SimpleNamespace(user=user)
+    browser.state["assistant"] = realtime_assistant(assistant_should_message_first=True)
+    browser.state["conversation_instructions"] = "Speak clearly."
+    failure = RuntimeError("Synthetic provider startup failure.")
+    connection = FakeRealtimeConnection()
+    client = FakeOpenAIClient(connection)
+    if stage == "connect":
+        client.realtime.connect = Mock(side_effect=failure)
+    elif stage == "update":
+        connection.session.update = AsyncMock(side_effect=failure)
+    elif stage == "greeting":
+        connection.response.create = AsyncMock(side_effect=failure)
+    handler = AsyncMock(side_effect=failure if stage == "handler" else None)
+    browser.state["openai_client"] = client
+    provider_handler = websocket_module.ws_with_realtime_connection(handler)
+
+    async def load_thread(socket, class_id, thread_id):
+        thread = await socket.state["db"].scalar(
+            select(models.Thread)
+            .where(models.Thread.id == int(thread_id))
+            .with_for_update()
+        )
+        socket.state["thread"] = thread
+        thread.user_message_ct = 42
+        await socket.state["db"].flush()
+        await provider_handler(socket, class_id, thread_id)
+
+    if save_fails:
+        monkeypatch.setattr(
+            db,
+            "async_session",
+            Mock(side_effect=RuntimeError("Error run save failed.")),
+        )
+    with pytest.raises(RuntimeError) as raised:
+        await websocket_module.ws_db_middleware(load_thread)(
+            browser, "1", str(thread_id)
+        )
+    assert raised.value is failure
+    assert handler.await_count == int(stage == "handler")
+    assert len(browser.state["after_db_rollback"]) == int(stage != "handler")
+    if save_fails:
+        monkeypatch.undo()
+        if stage != "handler":
+            assert "Websocket database completion notification failed" in caplog.text
+
+    async with db.async_session() as session:
+        saved_thread = await session.get(models.Thread, thread_id)
+        assert saved_thread.user_message_ct == 0
+        assert not await websocket_module._thread_has_messages(session, thread_id)
+        assert await session.scalar(select(models.VoiceModeRecording.id)) is None
+        runs = (await session.scalars(select(models.Run))).all()
+        if stage == "handler" or save_fails:
+            assert runs == []
+        else:
+            assert len(runs) == 1
+            run = runs[0]
+            assert run.status == schemas.RunStatus.FAILED
+            assert run.completed is not None
+            assert run.error_code == "provider_startup_error"
+            assert run.error_message == str(failure)
+            assert run.model == browser.state["assistant"].model
+            assert run.creator_id == user.id
+            assert run.usage is None
+            assert run.instructions is None
+            assert run.provider_metadata["errors"] == [
+                {
+                    "event_id": None,
+                    "error": {
+                        "type": "RuntimeError",
+                        "code": "provider_startup_error",
+                        "message": str(failure),
+                        "param": None,
+                        "event_id": None,
+                    },
+                }
+            ]
+
+
+@with_user(123)
 @pytest.mark.parametrize(
     "ending",
     [
@@ -707,8 +929,10 @@ async def test_provider_close_after_final_events_keeps_session_completed(
 
 
 @with_user(123)
+@pytest.mark.parametrize("ending", ["completed", "failed", "incomplete"])
+@pytest.mark.parametrize("fallback_fails", [False, True])
 async def test_failed_usage_save_does_not_rollback_saved_transcripts(
-    db, user, monkeypatch
+    db, user, monkeypatch, ending, fallback_fails
 ):
     async with db.async_session() as session:
         thread = models.Thread(version=3, user_message_ct=0, tools_available="[]")
@@ -722,11 +946,19 @@ async def test_failed_usage_save_does_not_rollback_saved_transcripts(
         )
         usage = RealtimeUsage()
         usage.observe(response_done())
+        if ending == "failed":
+            usage.fail("provider_error", "Synthetic provider failure.")
+        elif ending == "incomplete":
+            usage.mark_incomplete("provider_connection_closed")
         flush = session.flush
 
         async def fail_usage_flush(*args, **kwargs):
             if any(isinstance(obj, models.Run) and obj.usage for obj in session.dirty):
                 raise RuntimeError("synthetic usage save failure")
+            if fallback_fails and any(
+                isinstance(obj, models.Run) for obj in session.dirty
+            ):
+                raise RuntimeError("synthetic terminal status save failure")
             await flush(*args, **kwargs)
 
         monkeypatch.setattr(session, "flush", fail_usage_flush)
@@ -742,6 +974,23 @@ async def test_failed_usage_save_does_not_rollback_saved_transcripts(
         run = (await session.scalars(select(models.Run))).one()
         assert run.usage is None
         assert run.provider_metadata is None
+        if fallback_fails:
+            assert run.status == schemas.RunStatus.IN_PROGRESS
+            assert run.completed is None
+        else:
+            assert run.completed is not None
+            assert run.status == (
+                schemas.RunStatus.FAILED
+                if ending == "failed"
+                else schemas.RunStatus.INCOMPLETE
+            )
+            assert run.error_code == usage.error_code
+            assert run.error_message == usage.error_message
+            assert run.incomplete_reason == (
+                None
+                if ending == "failed"
+                else usage.incomplete_reason or "usage_save_failed"
+            )
 
 
 @with_user(123)

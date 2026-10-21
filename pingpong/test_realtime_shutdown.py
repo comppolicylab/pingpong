@@ -37,7 +37,7 @@ class ShutdownConnection:
         self.session = SimpleNamespace(update=AsyncMock())
         self.response = SimpleNamespace(cancel=AsyncMock(), create=AsyncMock())
 
-        async def clear():
+        async def clear(**kwargs):
             self.events.put_nowait(event("input_audio_buffer.cleared"))
 
         self.input_audio_buffer = SimpleNamespace(
@@ -64,6 +64,10 @@ class ShutdownConnection:
         ] == list(response_ids)
         self.response.create.assert_not_awaited()
         assert self.input_audio_buffer.clear.await_count == int(clear_sent)
+        if clear_sent:
+            self.input_audio_buffer.clear.assert_awaited_once_with(
+                event_id="voice_shutdown_clear"
+            )
         self.input_audio_buffer.commit.assert_not_awaited()
         self.input_audio_buffer.append.assert_not_awaited()
 
