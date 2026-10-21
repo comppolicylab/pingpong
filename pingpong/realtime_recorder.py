@@ -782,7 +782,11 @@ class RealtimeRecorder:
                         position=max(chunk_starts_at - starts_at, 0),
                     )
 
-            await self._write_to_ffmpeg(tail.raw_data)
+            try:
+                await self._write_to_ffmpeg(tail.raw_data)
+            except Exception:
+                realtime_recorder_logger.exception("Failed to save user audio tail.")
+                return
             self.audio_duration += ends_at - starts_at
             self.end_timestamp = ends_at
             self.user_audio.clear()

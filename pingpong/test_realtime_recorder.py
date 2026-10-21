@@ -175,6 +175,82 @@ async def test_complete_upload_preserves_trailing_user_audio(
     assert recorder.audio_store_obj.completed
 
 
+@pytest.mark.parametrize(
+    "stage,error", [("write", BrokenPipeError), ("drain", ConnectionResetError)]
+)
+async def test_tail_write_failure_still_finalizes_previously_saved_audio(
+    db, monkeypatch, caplog, stage, error
+):
+    recorder = make_recorder()
+    recorder.end_timestamp = None
+    await recorder.add_user_audio(ONE_SECOND_PCM16, 1_000)
+    await recorder.add_assistant_response_delta(ONE_SECOND_PCM16, "audio", "reply")
+    await recorder.started_playing_assistant_response_delta("reply", "audio", 1_000)
+    await recorder.stopped_playing_assistant_response("reply", 1_000)
+    await recorder.save_buffer()
+    assert recorder.audio_duration == 2_000
+    saved_writes = list(cast_fake_ffmpeg(recorder.ffmpeg).stdin.writes)
+    await recorder.add_user_audio(ONE_SECOND_PCM16, 3_000)
+
+    def fail_write(data):
+        raise error("injected tail write failure")
+
+    async def fail_drain():
+        raise error("injected tail drain failure")
+
+    monkeypatch.setattr(
+        recorder.ffmpeg.stdin, stage, fail_write if stage == "write" else fail_drain
+    )
+    encoder_finished = asyncio.Event()
+    cleanup = []
+
+    async def finish_encoding():
+        assert recorder.ffmpeg.stdin.closed
+        cleanup.append("encoder")
+        encoder_finished.set()
+
+    async def upload():
+        await encoder_finished.wait()
+        cleanup.append("upload")
+
+    monkeypatch.setattr(recorder.ffmpeg, "wait", finish_encoding)
+    recorder.upload_task = asyncio.create_task(upload())
+    try:
+        async with db.async_session() as session:
+            thread = models.Thread(version=3)
+            session.add(thread)
+            await session.flush()
+            recorder.thread_id = thread.id
+            recorder.session = session
+            await asyncio.wait_for(
+                recorder.complete_audio_upload(has_played_audio=True), timeout=1
+            )
+            await session.commit()
+            recording = await session.scalar(
+                select(VoiceModeRecording).where(
+                    VoiceModeRecording.thread_id == thread.id
+                )
+            )
+            assert recording is not None
+            assert recording.duration == 2_000
+    finally:
+        recorder.upload_task.cancel()
+        await asyncio.gather(recorder.upload_task, return_exceptions=True)
+
+    assert cleanup == ["encoder", "upload"]
+    assert recorder.audio_store_obj.completed
+    assert not recorder.audio_store_obj.deleted
+    assert recorder.closed
+    assert recorder.audio_duration == 2_000
+    assert recorder.end_timestamp == 2_000
+    assert len(recorder.user_audio) == 1
+    assert (
+        cast_fake_ffmpeg(recorder.ffmpeg).stdin.writes[: len(saved_writes)]
+        == saved_writes
+    )
+    assert "Failed to save user audio tail." in caplog.text
+
+
 @pytest.mark.parametrize("saved_until", [None, 0, 1_000, 1_500, 2_000])
 async def test_final_user_audio_flush_respects_saved_boundary(db, saved_until):
     recorder = make_recorder()
