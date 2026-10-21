@@ -283,17 +283,28 @@ async def test_provider_shutdown_does_not_wait_forever_for_browser(
     assert connection.reader_stopped.is_set()
 
 
-@pytest.mark.parametrize("closure", [True, False])
+@pytest.mark.parametrize("failure", ["pipe", "websocket", "sdk", "unexpected"])
+@pytest.mark.parametrize("failure_stage", ["handler", "context"])
 async def test_provider_context_close_preserves_finalized_transaction(
-    monkeypatch, closure
+    monkeypatch, failure, failure_stage
 ):
+    error = {
+        "pipe": BrokenPipeError("provider closed"),
+        "websocket": ConnectionClosedError(Close(1011, "provider closed"), None),
+        "sdk": WebSocketConnectionClosedError("provider closed", unsent_messages=[]),
+        "unexpected": RuntimeError("unexpected"),
+    }[failure]
+    close_calls = 0
+
     class Connection(FakeRealtimeConnection):
         async def __aexit__(self, *args):
-            raise (
-                BrokenPipeError("provider closed")
-                if closure
-                else RuntimeError("unexpected")
-            )
+            nonlocal close_calls
+            close_calls += 1
+            if failure_stage == "context":
+                assert args == (None, None, None)
+                raise error
+            assert args[1] is error
+            return False
 
     browser = ExpiryBrowser()
     browser.state["openai_client"] = FakeOpenAIClient(Connection())
@@ -312,18 +323,23 @@ async def test_provider_context_close_preserves_finalized_transaction(
 
     async def finalized(ws, *args):
         ws.state["after_db_commit"].append(saved)
+        if failure_stage == "handler":
+            raise error
 
     handler = websocket_module.ws_db_middleware(
         websocket_module.ws_with_realtime_connection(finalized)
     )
-    if closure:
+    if failure_stage == "context" and failure != "unexpected":
         await handler(browser, "1", "1")
         db.commit.assert_awaited_once()
         db.rollback.assert_not_awaited()
         saved.assert_awaited_once()
         assert not browser.sent_json
     else:
-        with pytest.raises(RuntimeError, match="unexpected"):
+        with pytest.raises(type(error)) as raised:
             await handler(browser, "1", "1")
+        assert raised.value is error
         db.rollback.assert_awaited_once()
+        db.commit.assert_not_awaited()
         saved.assert_not_awaited()
+    assert close_calls == 1
