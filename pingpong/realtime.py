@@ -1809,14 +1809,14 @@ async def browser_realtime_websocket(
             await session.commit()
         except Exception:
             openai_connection_logger.exception(
-                "Error committing cancelled voice session for thread_id=%s", thread.id
+                "Error committing cancelled voice session for thread_id=%s", thread_id
             )
             try:
                 await session.rollback()
             except Exception:
                 openai_connection_logger.exception(
                     "Error rolling back cancelled voice session for thread_id=%s",
-                    thread.id,
+                    thread_id,
                 )
 
     cancelled: asyncio.CancelledError | None = None
