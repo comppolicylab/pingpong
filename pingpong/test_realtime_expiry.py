@@ -5,7 +5,7 @@ import json
 import struct
 import time
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, call
 
 import pytest
 from starlette.websockets import WebSocketDisconnect
@@ -385,13 +385,28 @@ async def test_warning_delivery_failure_does_not_end_or_block_session(
 
 
 async def test_warning_schedule_does_not_finish_at_the_first_threshold(monkeypatch):
-    monkeypatch.setattr(realtime, "REALTIME_SESSION_MAX_SECONDS", 0.08)
+    monkeypatch.setattr(realtime, "REALTIME_SESSION_MAX_SECONDS", 80)
     monkeypatch.setattr(realtime, "REALTIME_EXPIRY_MARGIN_SECONDS", 0)
-    monkeypatch.setattr(realtime, "REALTIME_EXPIRY_WARNING_SECONDS", (0.05, 0.02))
-    expiry = realtime.RealtimeSessionExpiry()
-    warn = AsyncMock()
-    await asyncio.wait_for(expiry.wait(warn), 1)
-    assert warn.await_count == 2
+    monkeypatch.setattr(realtime, "REALTIME_EXPIRY_WARNING_SECONDS", (50, 20))
+    now = 0.0
+    wakeups = iter((30.0, 60.0, 80.0))
+
+    async def advance_to_wakeup():
+        nonlocal now
+        now = next(wakeups)
+        raise TimeoutError
+
+    # Mocked waits complete inline; restore the clock before yielding to the loop.
+    with monkeypatch.context() as clock:
+        clock.setattr(asyncio.get_running_loop(), "time", lambda: now)
+        expiry = realtime.RealtimeSessionExpiry()
+        wait = AsyncMock(side_effect=advance_to_wakeup)
+        clock.setattr(expiry._changed, "wait", wait)
+        warn = AsyncMock()
+        await expiry.wait(warn)
+
+    assert wait.await_count == 3
+    assert warn.await_args_list == [call(50), call(20)]
     assert expiry.stopping
 
 
