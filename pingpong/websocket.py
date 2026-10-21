@@ -611,7 +611,9 @@ def ws_with_realtime_connection(func):
                 await func(browser_connection, class_id, thread_id, *args, **kwargs)
                 session_completed = True
         except Exception as e:
-            if session_completed and isinstance(e, REALTIME_CONNECTION_ERRORS):
+            if session_completed and isinstance(
+                e, (ConnectionClosed, WebSocketConnectionClosedError, OSError)
+            ):
                 # Provider context cleanup must not roll back finalized history.
                 openai_connection_logger.warning(
                     "Provider connection closed after voice session finalization.",

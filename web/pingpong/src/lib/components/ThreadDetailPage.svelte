@@ -1597,7 +1597,10 @@
 
 		sessionSocket.addEventListener('close', () => {
 			if (socket !== sessionSocket || endingAudioSession) return;
-			void handleSessionEnd();
+			if (!recordingStarted) {
+				sadToast('The voice connection closed before the session started. Please try again.');
+			}
+			void endAudioSession(recordingStarted);
 		});
 
 		socket.addEventListener('message', async (event) => {
@@ -1693,16 +1696,18 @@
 	/**
 	 * Handle session end.
 	 */
-	const handleSessionEnd = () => {
+	const handleSessionEnd = () => endAudioSession(true);
+
+	const endAudioSession = (sessionEstablished: boolean) => {
 		if (endingAudioSession) {
 			return endingAudioSessionWork;
 		}
 		endingAudioSession = true;
-		endingAudioSessionWork = finishAudioSession();
+		endingAudioSessionWork = finishAudioSession(sessionEstablished);
 		return endingAudioSessionWork;
 	};
 
-	const finishAudioSession = async () => {
+	const finishAudioSession = async (sessionEstablished: boolean) => {
 		const generation = audioSessionGeneration;
 		const sessionSocket = socket;
 		const player = wavStreamPlayer;
@@ -1734,19 +1739,23 @@
 			}
 			if (generation !== audioSessionGeneration) return;
 			preparingMicrophone = false;
-			if (!sessionSocket) throw new Error('The voice connection is no longer available.');
-			// Final playback reports precede the stop. Recorder teardown must not
-			// delay the handshake or prevent it when the worklet fails to stop.
-			const stopWork = stopVoiceSession(sessionSocket);
-			void cleanupAudio();
-			await stopWork;
-			saveConfirmed = true;
-			if (generation !== audioSessionGeneration) return;
-			loadingVoiceTranscript = true;
+			if (sessionEstablished) {
+				if (!sessionSocket) throw new Error('The voice connection is no longer available.');
+				// Final playback reports precede the stop. Recorder teardown must not
+				// delay the handshake or prevent it when the worklet fails to stop.
+				const stopWork = stopVoiceSession(sessionSocket);
+				void cleanupAudio();
+				await stopWork;
+				saveConfirmed = true;
+				if (generation !== audioSessionGeneration) return;
+				loadingVoiceTranscript = true;
+			}
 			await cleanupAudio();
 			if (generation !== audioSessionGeneration) return;
-			await invalidateAll();
-			if (generation !== audioSessionGeneration) return;
+			if (sessionEstablished) {
+				await invalidateAll();
+				if (generation !== audioSessionGeneration) return;
+			}
 			if ($messages.length === 0) {
 				const recorder = new WavRecorder({ sampleRate: 24000, debug: true });
 				wavRecorder = recorder;
