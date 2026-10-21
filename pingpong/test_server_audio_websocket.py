@@ -1,6 +1,5 @@
 import asyncio
 import base64
-import contextlib
 import importlib
 import inspect
 import json
@@ -683,8 +682,7 @@ async def test_each_assistant_write_waits_for_its_own_playback(
         assert not await callback("held", "held")
     finally:
         worker.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await worker
+        await asyncio.gather(worker, return_exceptions=True)
 
 
 @pytest.mark.parametrize("played", [False, True])
