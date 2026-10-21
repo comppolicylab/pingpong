@@ -213,14 +213,6 @@ def _serialize_realtime_error(_error) -> dict[str, str | None]:
     }
 
 
-def _is_realtime_session_startup_error(error, session_updated: bool) -> bool:
-    if not session_updated:
-        return True
-
-    param = getattr(error, "param", None)
-    return isinstance(param, str) and param.startswith("session.")
-
-
 def _has_non_empty_transcript(transcript_text: str | None) -> bool:
     if transcript_text is None:
         return False
@@ -1648,15 +1640,12 @@ async def handle_openai_events(
                         )
                 case "session.error" | "error":
                     openai_connection_logger.exception(f"Session error: {event.error}")
-                    if _is_realtime_session_startup_error(
-                        event.error, session_updated
-                    ) and not (
+                    # A rejected command does not end an established session,
+                    # even when error.param identifies a session setting.
+                    if not session_updated and not (
                         (shutdown_drain and shutdown_drain.stopping)
                         or (session_expiry and session_expiry.stopping)
                     ):
-                        if session_updated and on_provider_end is not None:
-                            on_provider_end()
-                            return
                         await send_browser_event(
                             {
                                 "type": "error",

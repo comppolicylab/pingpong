@@ -229,8 +229,32 @@ async def test_provider_shutdown_preserves_final_playback_and_confirms_commit(
         connection.events.put_nowait(event("session.ended", session=SimpleNamespace()))
     elif ending == "error":
         connection.events.put_nowait(
-            event("error", error=SimpleNamespace(param="session.model"))
+            event(
+                "error",
+                error=SimpleNamespace(
+                    type="invalid_request_error",
+                    code="invalid_value",
+                    param="session.model",
+                    message="The model cannot be changed during the session.",
+                ),
+            )
         )
+        connection.events.put_nowait(
+            event(
+                "conversation.item.input_audio_transcription.completed",
+                item_id="user",
+                transcript="final question",
+            )
+        )
+        connection.events.put_nowait(
+            event(
+                "response.output_audio.delta",
+                item_id="reply",
+                event_id="after_error",
+                delta=base64.b64encode(b"\0\0" * 2400).decode(),
+            )
+        )
+        connection.events.put_nowait(None)
 
     handler = websocket_module.ws_db_middleware(
         inspect.unwrap(realtime.browser_realtime_websocket)
@@ -239,6 +263,13 @@ async def test_provider_shutdown_preserves_final_playback_and_confirms_commit(
     assert browser.closed
     assert connection.reader_stopped.is_set()
     assert [msg["type"] for msg in browser.sent_json].count("session.ended") == 1
+    if ending == "error":
+        audio_events = [
+            msg["event_id"]
+            for msg in browser.sent_json
+            if msg["type"] == "response.audio.delta"
+        ]
+        assert audio_events == ["audio", "after_error"]
     assert browser.sent_json[-1] == {"type": "session.stopped", "saved": True}
     db.rollback.assert_not_awaited()
     connection.conversation.item.truncate.assert_not_awaited()
@@ -257,7 +288,9 @@ async def test_provider_shutdown_preserves_final_playback_and_confirms_commit(
     assert write.await_count == (2 if heard else 0)
     if heard:
         assert [call.args[4] for call in write.await_args_list] == [
-            "final question" if ending in {"send", "ended"} else "partial question",
+            "final question"
+            if ending in {"send", "ended", "error"}
+            else "partial question",
             "partial answer",
         ]
 
