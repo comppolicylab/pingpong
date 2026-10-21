@@ -1503,6 +1503,9 @@ async def handle_openai_events(
     session_expiry: RealtimeSessionExpiry | None = None,
     on_provider_end: Callable[[], None] | None = None,
 ):
+    # Transcript savepoint rollbacks can expire the shared thread during a session.
+    thread_id = getattr(thread, "id", None)
+    class_id = getattr(thread, "class_id", None)
     initial_output_index = 0
     if thread.version == 3:
         try:
@@ -1766,13 +1769,13 @@ async def handle_openai_events(
                             try:
                                 async with config.db.driver.async_session() as session:
                                     await Class.log_rate_limit_error(
-                                        session, class_id=str(thread.class_id)
+                                        session, class_id=str(class_id)
                                     )
                                     await session.commit()
                             except Exception:
                                 openai_connection_logger.exception(
                                     "Failed to record realtime rate limit for thread_id=%s.",
-                                    thread.id,
+                                    thread_id,
                                 )
                         if not (
                             (shutdown_drain and shutdown_drain.stopping)
