@@ -68,6 +68,27 @@ async def test_finished_playback_resolves_pending_and_future_reply_decisions():
     assert not tracker.has_played_audio
 
 
+@pytest.mark.parametrize("outcome", ["completed", "interrupted", "unknown"])
+@pytest.mark.parametrize("start_before_wait", [False, True])
+async def test_playback_outcome_is_unknown_until_terminal_evidence(
+    outcome, start_before_wait
+):
+    tracker = RealtimeAssistantAudioTracker()
+    await tracker.add_audio_delta("reply", "part", b"\0\0")
+    if start_before_wait:
+        await tracker.mark_audio_event_playback_started("reply", "part")
+    assert tracker.get_item_playback_outcome("reply") == "unknown"
+    if not start_before_wait:
+        await tracker.mark_audio_event_playback_started("reply", "part")
+    assert tracker.get_item_playback_outcome("reply") == "unknown"
+    if outcome == "unknown":
+        tracker.finish_playback_tracking()
+    else:
+        await tracker.mark_item_audio_done("reply")
+        assert await tracker.mark_item_playback_settled("reply", outcome, True)
+    assert tracker.get_item_playback_outcome("reply") == outcome
+
+
 @pytest.mark.parametrize("played", [False, True])
 async def test_explicit_settlement_resolves_pending_and_future_decisions(played):
     tracker = RealtimeAssistantAudioTracker()

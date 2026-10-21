@@ -18,6 +18,87 @@ from pingpong.testutil import with_authz, with_user
 
 
 @with_user(123)
+@pytest.mark.parametrize("fail_update", [False, True])
+async def test_playback_metadata_update_is_scoped_and_does_not_rollback_text(
+    db, user, monkeypatch, fail_update
+):
+    async with db.async_session() as session:
+        threads = [
+            models.Thread(version=3, user_message_ct=0, tools_available="[]")
+            for _ in range(2)
+        ]
+        session.add_all(threads)
+        await session.flush()
+        websocket = SimpleNamespace(
+            state=State({"db": session, "session": SimpleNamespace(user=user)})
+        )
+        for thread in threads:
+            assert await add_message_to_thread(
+                None,
+                websocket,
+                thread,
+                "reply",
+                "original transcript",
+                "assistant",
+                playback_outcome="unknown",
+            )
+        first = await session.scalar(
+            select(models.Message).where(
+                models.Message.thread_id == threads[0].id,
+                models.Message.message_id == "reply",
+            )
+        )
+        first.message_metadata = {**first.message_metadata, "other_flag": True}
+        await session.flush()
+        original_flush = session.flush
+        failed = False
+
+        async def flush(*args, **kwargs):
+            nonlocal failed
+            if fail_update and not failed and session.in_nested_transaction():
+                failed = True
+                raise RuntimeError("metadata update failed")
+            await original_flush(*args, **kwargs)
+
+        monkeypatch.setattr(session, "flush", flush)
+        await realtime_module.update_message_playback_outcome(
+            websocket, threads[0], "reply", "interrupted"
+        )
+        assert session.is_active
+        assert await add_message_to_thread(
+            None, websocket, threads[0], "following", "next user transcript", "user"
+        )
+        thread_ids = [thread.id for thread in threads]
+        await session.commit()
+
+    async with db.async_session() as session:
+        for index, thread_id in enumerate(thread_ids):
+            reply = await session.scalar(
+                select(models.Message)
+                .where(
+                    models.Message.thread_id == thread_id,
+                    models.Message.message_id == "reply",
+                )
+                .options(selectinload(models.Message.content))
+            )
+            assert reply.message_metadata["voice_playback_outcome"] == (
+                "interrupted" if index == 0 and not fail_update else "unknown"
+            )
+            assert reply.content[0].text == "original transcript"
+            if index == 0:
+                assert reply.message_metadata["other_flag"] is True
+        assert (
+            await session.scalar(
+                select(models.Message.id).where(
+                    models.Message.thread_id == thread_ids[0],
+                    models.Message.message_id == "following",
+                )
+            )
+            is not None
+        )
+
+
+@with_user(123)
 @pytest.mark.parametrize(
     "failure_stage, permanent_failure",
     [
@@ -154,6 +235,9 @@ async def test_repeated_voice_transcript_write_is_scoped_to_thread_and_idempoten
                     role,
                     output_index=output_index,
                     transcription_failed=role == "user",
+                    playback_outcome="interrupted"
+                    if role == "assistant" and output_index == "0"
+                    else None,
                 )
         await session.commit()
 
@@ -193,6 +277,11 @@ async def test_repeated_voice_transcript_write_is_scoped_to_thread_and_idempoten
             if role == "user":
                 assert (
                     messages[0].message_metadata["voice_transcription_failed"] is True
+                )
+            else:
+                assert (
+                    messages[0].message_metadata["voice_playback_outcome"]
+                    == "interrupted"
                 )
             assert thread.user_message_ct == int(role == "user")
         assert len((await session.scalars(select(models.Run))).all()) == 2
@@ -442,7 +531,12 @@ async def test_audio_thread_copies_deletion_protection_from_assistant(
 
 
 @with_user(123)
-async def test_add_message_to_thread_persists_version_3_voice_messages(db, user):
+@pytest.mark.parametrize(
+    "playback_outcome", [None, "completed", "interrupted", "unknown"]
+)
+async def test_add_message_to_thread_persists_version_3_voice_messages(
+    db, user, playback_outcome
+):
     mock_threads_messages_create = AsyncMock()
     openai_client = SimpleNamespace(
         beta=SimpleNamespace(
@@ -508,6 +602,7 @@ async def test_add_message_to_thread_persists_version_3_voice_messages(db, user)
             transcript_text="hello from user",
             role="user",
             output_index="0",
+            playback_outcome=playback_outcome,
         )
         await add_message_to_thread(
             openai_client,  # type: ignore[arg-type]
@@ -517,6 +612,7 @@ async def test_add_message_to_thread_persists_version_3_voice_messages(db, user)
             transcript_text="hello from assistant",
             role="assistant",
             output_index="1",
+            playback_outcome=playback_outcome,
         )
 
         runs = (
@@ -564,6 +660,27 @@ async def test_add_message_to_thread_persists_version_3_voice_messages(db, user)
         assert len(messages[1].content) == 1
         assert messages[1].content[0].type == schemas.MessagePartType.OUTPUT_TEXT
         assert messages[1].content[0].text == "hello from assistant"
+        assert all(
+            message.message_status == schemas.MessageStatus.COMPLETED
+            for message in messages
+        )
+        assert messages[0].message_metadata is None
+        assert messages[1].message_metadata == (
+            {"voice_playback_outcome": playback_outcome} if playback_outcome else None
+        )
+        await session.commit()
+
+    async with db.async_session() as session:
+        saved = await session.scalar(
+            select(models.Message).where(
+                models.Message.thread_id == 21,
+                models.Message.message_id == "item-assistant-1",
+            )
+        )
+        assert saved is not None
+        assert saved.message_metadata == (
+            {"voice_playback_outcome": playback_outcome} if playback_outcome else None
+        )
 
     mock_threads_messages_create.assert_not_awaited()
 
