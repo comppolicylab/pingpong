@@ -136,6 +136,111 @@ async def test_stop_acknowledgement_follows_recording_and_database_commit(
         await asyncio.gather(task, return_exceptions=True)
 
 
+@pytest.mark.parametrize(
+    "failure", [None, "commit", "rollback", "close", "stalled_close"]
+)
+async def test_late_cancellation_closes_after_protected_finalization_and_commit(
+    monkeypatch, failure
+):
+    monkeypatch.setattr(realtime, "BROWSER_SAVE_CONFIRMATION_SECONDS", 0.02)
+    connection = ShutdownConnection()
+    browser = ExpiryBrowser()
+    browser.state["thread"] = SimpleNamespace(
+        id=1, thread_id=None, version=3, display_user_info=True
+    )
+    browser.state["openai_client"] = None
+    browser.state["realtime_connection"] = connection
+    db = AsyncMock()
+    context = AsyncMock()
+    context.__aenter__.return_value = db
+    monkeypatch.setattr(
+        websocket_module.config.db.driver,
+        "async_session_with_args",
+        lambda **kwargs: lambda: context,
+    )
+    monkeypatch.setattr(Thread, "get_max_output_sequence", AsyncMock(return_value=-1))
+    finalizing = asyncio.Event()
+    finish_recording = asyncio.Event()
+    committing = asyncio.Event()
+    finish_commit = asyncio.Event()
+    order = []
+
+    async def periodic(**kwargs):
+        await asyncio.Future()
+
+    async def finalize(**kwargs):
+        finalizing.set()
+        await finish_recording.wait()
+        order.append("recording")
+
+    async def commit():
+        committing.set()
+        await finish_commit.wait()
+        order.append("commit")
+        if failure in {"commit", "rollback"}:
+            raise RuntimeError("synthetic commit failure")
+
+    async def rollback():
+        order.append("rollback")
+        if failure == "rollback":
+            raise RuntimeError("synthetic rollback failure")
+
+    original_close = browser.close
+
+    async def close():
+        order.append("close")
+        if failure == "stalled_close":
+            await asyncio.Future()
+        if failure == "close":
+            raise RuntimeError("synthetic close failure")
+        await original_close()
+
+    browser.close = close
+    db.commit.side_effect = commit
+    db.rollback.side_effect = rollback
+    recorder = SimpleNamespace(
+        health=VoiceRecordingHealth(),
+        handle_saving_buffer=periodic,
+        complete_audio_upload=finalize,
+    )
+    monkeypatch.setattr(
+        realtime.RealtimeRecorder, "create", AsyncMock(return_value=recorder)
+    )
+    connection.session.update.side_effect = (
+        lambda **kwargs: connection.events.put_nowait(shutdown_ack())
+    )
+    handler = websocket_module.ws_db_middleware(
+        inspect.unwrap(realtime.browser_realtime_websocket)
+    )
+    browser.telemetry(type="session.stop")
+    task = asyncio.create_task(handler(browser, "1", "1"))
+    try:
+        await asyncio.wait_for(finalizing.wait(), 1)
+        task.cancel()
+        await asyncio.sleep(0)
+        assert not browser.closed
+        finish_recording.set()
+        await asyncio.wait_for(committing.wait(), 1)
+        task.cancel()  # Repeated cancellation must not interrupt the commit/close.
+        await asyncio.sleep(0)
+        assert not browser.closed
+        finish_commit.set()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(task, 1)
+        assert order == ["recording", "commit"] + (
+            ["rollback"] if failure in {"commit", "rollback"} else []
+        ) + ["close"]
+        assert browser.closed == (failure not in {"close", "stalled_close"})
+        assert browser.sent_json == []
+        assert connection.reader_stopped.is_set()
+        db.commit.assert_awaited_once()
+    finally:
+        finish_recording.set()
+        finish_commit.set()
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+
 @with_user(123)
 async def test_save_confirmation_exposes_committed_history_to_another_reader(db, user):
     async with db.async_session() as session:

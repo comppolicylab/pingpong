@@ -375,11 +375,7 @@ export class WavRecorder {
 		if (!navigator.mediaDevices || !('getUserMedia' in navigator.mediaDevices)) {
 			throw new Error('Could not request user media');
 		}
-		try {
-			await this.prepareMicrophone(deviceId);
-		} catch {
-			throw new Error('Could not start media stream');
-		}
+		await this.prepareMicrophone(deviceId);
 
 		const stream = this.stream;
 		if (!stream) throw new Error('Microphone setup was cancelled');

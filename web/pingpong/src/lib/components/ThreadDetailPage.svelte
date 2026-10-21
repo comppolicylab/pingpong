@@ -1698,38 +1698,66 @@
 	const finishAudioSession = async () => {
 		const generation = audioSessionGeneration;
 		const sessionSocket = socket;
+		const player = wavStreamPlayer;
+		const recorder = wavRecorder;
+		wavRecorder = null;
+		let cleanupWork: Promise<void[]> | null = null;
+		const cleanupAudio = () =>
+			(cleanupWork ??= Promise.all(
+				[() => player?.close(), () => recorder?.quit()].map(async (cleanup) => {
+					try {
+						await cleanup();
+					} catch (error) {
+						console.warn('Could not clean up ended voice session.', error);
+					}
+				})
+			));
 		let saveConfirmed = false;
 		try {
-			if (wavStreamPlayer) {
+			if (player) {
 				try {
-					const trackSampleOffset = await wavStreamPlayer.interrupt();
+					const trackSampleOffset = await player.interrupt();
 					if (generation !== audioSessionGeneration) return;
 					sendTruncateForTrackSampleOffset(trackSampleOffset);
 				} catch (error) {
 					console.warn('Voice mode session-end interrupt failed.', error);
 				} finally {
-					if (generation === audioSessionGeneration) wavStreamPlayer = null;
+					if (wavStreamPlayer === player) wavStreamPlayer = null;
 				}
 			}
 			if (generation !== audioSessionGeneration) return;
 			preparingMicrophone = false;
-			const recorder = wavRecorder;
-			wavRecorder = null;
-			await recorder?.quit();
-			if (generation !== audioSessionGeneration) return;
 			if (!sessionSocket) throw new Error('The voice connection is no longer available.');
-			await stopVoiceSession(sessionSocket);
+			// Final playback reports precede the stop. Recorder teardown must not
+			// delay the handshake or prevent it when the worklet fails to stop.
+			const stopWork = stopVoiceSession(sessionSocket);
+			void cleanupAudio();
+			await stopWork;
 			saveConfirmed = true;
 			if (generation !== audioSessionGeneration) return;
 			loadingVoiceTranscript = true;
+			await cleanupAudio();
+			if (generation !== audioSessionGeneration) return;
 			await invalidateAll();
 			if (generation !== audioSessionGeneration) return;
 			if ($messages.length === 0) {
 				const recorder = new WavRecorder({ sampleRate: 24000, debug: true });
 				wavRecorder = recorder;
+				let deviceRefreshId = 0;
 				recorder.listenForDeviceChange((devices) => {
+					deviceRefreshId++;
 					if (wavRecorder === recorder) handleDeviceChange(devices);
 				});
+				const refreshId = deviceRefreshId;
+				try {
+					const devices = await recorder.listDevices();
+					if (wavRecorder === recorder && refreshId === deviceRefreshId) {
+						handleDeviceChange(devices);
+					}
+				} catch (error) {
+					console.warn('Could not refresh microphones after voice session.', error);
+					if (wavRecorder === recorder && refreshId === deviceRefreshId) handleDeviceChange([]);
+				}
 			}
 		} catch (error) {
 			if (generation !== audioSessionGeneration) return;
@@ -1738,6 +1766,7 @@
 				? 'Your session was saved, but the conversation could not be refreshed. Please refresh the page.'
 				: "We couldn't confirm that your session was saved. Please refresh the page to check your conversation.";
 		} finally {
+			await cleanupAudio();
 			sessionSocket?.close();
 			if (generation === audioSessionGeneration) {
 				socket = null;

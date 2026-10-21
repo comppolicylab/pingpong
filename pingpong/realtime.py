@@ -2069,7 +2069,7 @@ async def browser_realtime_websocket(
             results.extend(await asyncio.gather(browser_task, return_exceptions=True))
             # Stop reading before deciding which replies were heard, but keep
             # the socket open until queued history writes have finished.
-            if not stop_requested or cancelled:
+            if not stop_requested:
                 try:
                     await _close_browser_connection(browser_connection)
                 except Exception as error:
@@ -2121,6 +2121,18 @@ async def browser_realtime_websocket(
                     "Error rolling back cancelled voice session for thread_id=%s",
                     sanitize_for_log(thread_id),
                 )
+        finally:
+            # Cancellation bypasses the middleware's acknowledgement callbacks,
+            # including when it first arrives during recording finalization.
+            if stop_requested:
+                try:
+                    async with asyncio.timeout(BROWSER_SAVE_CONFIRMATION_SECONDS):
+                        await _close_browser_connection(browser_connection)
+                except Exception:
+                    openai_connection_logger.exception(
+                        "Error closing cancelled voice session for thread_id=%s",
+                        thread.id,
+                    )
 
     cancelled: asyncio.CancelledError | None = None
 
