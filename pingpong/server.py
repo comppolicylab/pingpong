@@ -12815,8 +12815,14 @@ async def create_assistant(
         (model for model in class_models if model.id == req.model), None
     )
 
-    # Check if model is available for use in this class and that the model is not hidden
-    if not model_record or model_record.hide_in_model_selector:
+    if not model_record or not model_record.is_available:
+        raise HTTPException(
+            status_code=400,
+            detail="The selected model is not available. Select an available model before saving the assistant.",
+        )
+
+    # Hidden models cannot be selected for new assistants.
+    if model_record.hide_in_model_selector:
         raise HTTPException(
             status_code=400,
             detail=f"Model {req.model} is not available for use.",
@@ -14342,7 +14348,6 @@ async def update_assistant(
             openai_update["temperature"] = 0.2
             asst.temperature = 0.2
 
-    model_record = None
     # For now, allow chat mode models to be used in lecture video assistants
     # TODO: Introduce lecture_video type in AssistantModelDict.type
     _interaction_mode = (
@@ -14355,93 +14360,66 @@ async def update_assistant(
         else interaction_mode
     )
 
-    # Check that the model is available
+    # Check the effective model on every save, including unchanged selections
+    # and partial updates that omit the model. Known legacy metadata alone does
+    # not establish that the provider still serves the model.
+    model_requested = "model" in req.model_fields_set and req.model is not None
+    current_model = (
+        get_original_model_name_by_azure_equivalent(asst.model)
+        if isinstance(openai_client, openai.AsyncAzureOpenAI)
+        else asst.model
+    )
+    selected_model = req.model if model_requested else current_model
+    _model = current_model
+    class_models_response = schemas.AssistantModels.model_validate(
+        await list_class_models(
+            class_id=class_id, request=request, openai_client=openai_client
+        )
+    )
+    model_record = next(
+        (model for model in class_models_response.models if model.id == selected_model),
+        None,
+    )
+    if not model_record or not model_record.is_available:
+        raise HTTPException(
+            status_code=400,
+            detail="The selected model is not available. Select an available model before saving the assistant.",
+        )
+
+    if selected_model != current_model:
+        if model_record.hide_in_model_selector:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Model {selected_model} is not available for use.",
+            )
+        if not await request.state["authz"].test(
+            f"user:{request.state['session'].user.id}",
+            "admin",
+            f"class:{class_id}",
+        ):
+            if model_record.id in ADMIN_ONLY_MODELS:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Model {selected_model} is not available for use.",
+                )
+
+    if model_record.type != _interaction_mode:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Model {selected_model} is not available for use in {interaction_mode} mode.",
+        )
+
     if "model" in req.model_fields_set and req.model is not None:
-        _model = None
         _model = (
             get_azure_model_deployment_name_equivalent(req.model)
             if isinstance(openai_client, openai.AsyncAzureOpenAI)
             else req.model
         )
-
-        if _model != asst.model:
-            class_models_response = schemas.AssistantModels.model_validate(
-                await list_class_models(
-                    class_id=class_id, request=request, openai_client=openai_client
-                )
-            )
-            class_models = class_models_response.models
-
-            model_record = next(
-                (model for model in class_models if model.id == req.model), None
-            )
-
-            if not model_record or model_record.hide_in_model_selector:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Model {req.model} is not available for use.",
-                )
-
-            # Check that the model supports the interaction mode
-            if model_record.type != _interaction_mode:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Model {req.model} is not available for use in {interaction_mode} mode.",
-                )
-
-            # Check that the model is not admin-only
-            if not await request.state["authz"].test(
-                f"user:{request.state['session'].user.id}",
-                "admin",
-                f"class:{class_id}",
-            ):
-                if model_record.id in ADMIN_ONLY_MODELS:
-                    raise HTTPException(
-                        status_code=400,
-                        detail=f"Model {req.model} is not available for use.",
-                    )
-        else:
-            model_record_req = KNOWN_MODELS.get(asst.model)
-            if model_record_req and not model_record:
-                model_record = schemas.AssistantModel(
-                    **model_record_req,
-                    id=asst.model,
-                    created=utcnow(),
-                    updated=utcnow(),
-                    owner="",
-                )
-
-        # Override the assistant model we send to OpenAI
-        # when using voice mode
+        # Classic voice assistants use a chat model for the provider record.
         if uses_voice:
             _model = "gpt-4o"
         openai_update["model"] = _model
         asst.model = req.model
-
-    else:
-        _model = (
-            get_original_model_name_by_azure_equivalent(asst.model)
-            if isinstance(openai_client, openai.AsyncAzureOpenAI)
-            else asst.model
-        )
-
-        class_models_response = schemas.AssistantModels.model_validate(
-            await list_class_models(
-                class_id=class_id, request=request, openai_client=openai_client
-            )
-        )
-        class_models = class_models_response.models
-
-        model_record = next(
-            (model for model in class_models if model.id == _model), None
-        )
-
-        # Check that the model supports the interaction mode
-        if not model_record or model_record.type != _interaction_mode:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Model {_model} is not available for use in {interaction_mode.capitalize()} mode.",
-            )
 
     reasoning_effort_map = (
         get_reasoning_effort_map(model_record.id) if model_record else {}
