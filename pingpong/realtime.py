@@ -989,9 +989,14 @@ async def handle_browser_messages(
                     elif type == "response.audio.delta.ended":
                         item_id = data.get("item_id")
                         event_id = data.get("event_id")
-                        if item_id is None or event_id is None:
+                        if (
+                            not isinstance(item_id, str)
+                            or not isinstance(event_id, str)
+                            or not item_id
+                            or not event_id
+                        ):
                             browser_connection_logger.warning(
-                                "Received response.audio.delta.ended message without item_id or event_id: %s",
+                                "Received response.audio.delta.ended message with invalid item_id or event_id: %s",
                                 sanitize_for_log(
                                     json.dumps(data, sort_keys=True), max_len=512
                                 ),
