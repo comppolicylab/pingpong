@@ -3696,6 +3696,7 @@ class AssistantModel(BaseModel):
     supports_temperature_with_reasoning_none: bool = False
     supports_reasoning: bool
     hide_in_model_selector: bool | None = None
+    is_available: bool = True
     reasoning_effort_levels: list[int] | None = None
 
 
