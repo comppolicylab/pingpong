@@ -1,5 +1,6 @@
 import asyncio
 import base64
+import contextlib
 import importlib
 import inspect
 import json
@@ -353,7 +354,7 @@ async def test_session_retention_depends_on_playback_not_transcripts(
                     )
                 }
             browser_processed.set()
-            await asyncio.Future()
+            return await asyncio.Future()
 
         websocket.send_json = send_json
         websocket.receive = receive
@@ -421,7 +422,8 @@ async def test_queued_writes_wait_for_session_retention_decision(played, ended):
         assert write.await_count == int(played)
     finally:
         worker.cancel()
-        await worker
+        with contextlib.suppress(asyncio.CancelledError):
+            await worker
 
 
 async def test_recording_finalization_waits_for_in_flight_transcript_write(monkeypatch):
