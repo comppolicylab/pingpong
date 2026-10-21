@@ -172,6 +172,7 @@ class RealtimeAssistantAudioTracker:
             ):
                 return False
             self._settled_item_ids.add(item_id)
+            self._playback_events_by_item_id.pop(item_id, None)
             if played:
                 self._played_item_ids.add(item_id)
                 self._retention_decided.set()
@@ -181,14 +182,15 @@ class RealtimeAssistantAudioTracker:
             browser_connection_logger.debug(
                 "Confirmed browser playback settled item_id=%s outcome=%s played=%s.",
                 sanitize_for_log(item_id, max_len=256),
-                outcome,
-                played,
+                sanitize_for_log(outcome),
+                sanitize_for_log(played),
             )
             return True
 
     def finish_playback_tracking(self) -> None:
         # Stop the browser reader first: absent playback is now a final decision.
         self._playback_tracking_finished = True
+        self._playback_events_by_item_id.clear()
         self._retention_decided.set()
         for decision in self._item_retention_decisions.values():
             decision.set()

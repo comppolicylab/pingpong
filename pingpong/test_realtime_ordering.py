@@ -90,6 +90,43 @@ async def test_explicit_settlement_resolves_pending_and_future_decisions(played)
     assert not await tracker.mark_audio_event_playback_started("reply", "part")
 
 
+@pytest.mark.parametrize("played", [False, True])
+async def test_settlement_releases_chunk_records_but_keeps_truncate_boundaries(played):
+    tracker = RealtimeAssistantAudioTracker()
+    await tracker.add_audio_delta("reply", "part-1", b"\0" * 480)
+    await tracker.add_audio_delta("reply", "part-2", b"\0" * 480)
+    await tracker.add_audio_delta("pending", "part-3", b"\0" * 480)
+    if played:
+        await tracker.mark_audio_event_playback_started("reply", "part-1")
+    outcome = "interrupted" if played else "discarded"
+    assert await tracker.mark_item_playback_settled("reply", outcome, played)
+
+    assert "reply" not in tracker._playback_events_by_item_id
+    assert "pending" in tracker._playback_events_by_item_id
+    assert tracker.has_item_played_audio("reply") == played
+    assert tracker.has_played_audio == played
+    assert await tracker.clamp_truncate_audio_end_ms("reply", 1000, "part-1") == 10
+    assert await tracker.clamp_truncate_audio_end_ms("reply", 1000) == 20
+    assert not await tracker.mark_audio_event_playback_started("reply", "part-2")
+    assert not await tracker.mark_audio_event_playback_ended("reply", "part-1")
+
+
+async def test_finish_playback_tracking_releases_all_pending_chunk_records():
+    tracker = RealtimeAssistantAudioTracker()
+    await tracker.add_audio_delta("heard", "part-1", b"\0" * 480)
+    await tracker.add_audio_delta("unheard", "part-2", b"\0" * 480)
+    await tracker.mark_audio_event_playback_started("heard", "part-1")
+    tracker.finish_playback_tracking()
+
+    assert not tracker._playback_events_by_item_id
+    assert tracker.has_item_played_audio("heard")
+    assert tracker.has_played_audio
+    assert not tracker.has_item_played_audio("unheard")
+    assert not await tracker.mark_audio_event_playback_started("unheard", "part-2")
+    assert not await tracker.mark_audio_event_playback_ended("heard", "part-1")
+    assert await tracker.clamp_truncate_audio_end_ms("heard", 1000, "part-1") == 10
+
+
 @pytest.mark.parametrize(
     "item_id,outcome,played",
     [
