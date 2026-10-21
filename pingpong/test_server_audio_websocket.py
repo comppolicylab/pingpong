@@ -2,6 +2,7 @@ import asyncio
 import base64
 import importlib
 import inspect
+import json
 import logging
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -147,6 +148,101 @@ def buffering_recorder(thread_id=1, session=None):
     recorder = RealtimeRecorder(SimpleNamespace(), "synthetic.webm", thread_id, session)
     recorder.ffmpeg = SimpleNamespace()
     return recorder
+
+
+def browser_with_playback_events(events):
+    websocket = DummyWebSocket()
+    messages = iter(events)
+
+    async def receive():
+        try:
+            data = next(messages)
+        except StopIteration:
+            raise WebSocketDisconnect(code=1000)
+        return {"type": "websocket.receive", "text": json.dumps(data)}
+
+    websocket.receive = receive
+    websocket._raise_on_disconnect = lambda message: None
+    return websocket
+
+
+@pytest.mark.parametrize("recording", [False, True])
+@pytest.mark.parametrize("end_first", [False, True])
+async def test_browser_playback_tracking_is_independent_of_recording(
+    recording, end_first
+):
+    tracker = realtime_module.RealtimeAssistantAudioTracker()
+    audio_bytes = b"\0" * 480
+    await tracker.add_audio_delta("reply", "audio-1", audio_bytes)
+    await tracker.add_audio_delta("unheard", "audio-2", audio_bytes)
+    await tracker.mark_item_audio_done("reply")
+    recorder = buffering_recorder() if recording else None
+    if recorder:
+        await recorder.add_assistant_response_delta(audio_bytes, "audio-1", "reply")
+    start = {
+        "type": "response.audio.delta.started",
+        "item_id": "reply",
+        "event_id": "audio-1",
+        "started_playing_at": 1000,
+    }
+    end = {
+        "type": "response.audio.delta.ended",
+        "item_id": "reply",
+        "event_id": "audio-1",
+        "ended_playing_at": 1010,
+    }
+    events = [end, start] if end_first else [start, end]
+    await realtime_module.handle_browser_messages(
+        browser_with_playback_events(events), None, tracker, recorder
+    )
+    assert tracker.has_played_audio
+    assert tracker.has_item_played_audio("reply")
+    assert not tracker.has_item_played_audio("unheard")
+    if recorder:
+        chunk = recorder.assistant_responses["reply"].audio_chunks["audio-1"]
+        assert chunk.starts_at == 1000
+        assert chunk.ended
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"item_id": []},
+        {"event_id": {}},
+        {"item_id": "unknown"},
+        {"started_playing_at": None},
+        {"started_playing_at": "1000"},
+        {"started_playing_at": True},
+        {"started_playing_at": -1},
+        {"started_playing_at": 1.5},
+    ],
+)
+async def test_invalid_browser_playback_start_does_not_corrupt_recorder(overrides):
+    tracker = realtime_module.RealtimeAssistantAudioTracker()
+    audio_bytes = b"\0" * 480
+    await tracker.add_audio_delta("reply", "audio-1", audio_bytes)
+    recorder = buffering_recorder()
+    await recorder.add_assistant_response_delta(audio_bytes, "audio-1", "reply")
+    start = {
+        "type": "response.audio.delta.started",
+        "item_id": "reply",
+        "event_id": "audio-1",
+        "started_playing_at": 1000,
+    }
+    await realtime_module.handle_browser_messages(
+        browser_with_playback_events([{**start, **overrides}]), None, tracker, recorder
+    )
+    assert not tracker.has_played_audio
+    assert (
+        recorder.assistant_responses["reply"].audio_chunks["audio-1"].starts_at is None
+    )
+    await realtime_module.handle_browser_messages(
+        browser_with_playback_events([start]), None, tracker, recorder
+    )
+    assert tracker.has_item_played_audio("reply")
+    assert (
+        recorder.assistant_responses["reply"].audio_chunks["audio-1"].starts_at == 1000
+    )
 
 
 @with_user(123)
