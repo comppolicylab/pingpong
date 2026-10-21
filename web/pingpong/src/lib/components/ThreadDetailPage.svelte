@@ -1595,12 +1595,16 @@
 		const sessionSocket = socket;
 		let recordingStarted = false;
 
-		sessionSocket.addEventListener('close', () => {
-			if (socket !== sessionSocket || endingAudioSession) return;
+		const handleConnectionEnd = () => {
 			if (!recordingStarted) {
 				sadToast('The voice connection closed before the session started. Please try again.');
 			}
-			void endAudioSession(recordingStarted);
+			return endAudioSession(recordingStarted);
+		};
+
+		sessionSocket.addEventListener('close', () => {
+			if (socket !== sessionSocket || endingAudioSession) return;
+			void handleConnectionEnd();
 		});
 
 		socket.addEventListener('message', async (event) => {
@@ -1622,7 +1626,7 @@
 					await handleSessionEnd();
 					break;
 				case 'session.ended':
-					await handleSessionEnd();
+					await handleConnectionEnd();
 					break;
 				case 'session.updated':
 					if (recordingStarted) return;
