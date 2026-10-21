@@ -441,6 +441,54 @@ def test_early_transcripts_follow_late_predecessor_metadata():
     assert _drain_ready_messages(buffer) == []
 
 
+def test_shutdown_recovers_partial_known_turns_and_releases_complete_descendants():
+    buffer = ConversationItemOrderingBuffer(logging.getLogger(__name__))
+    buffer.register_conversation_item("question", None, "user")
+    buffer.register_transcription_delta("question", "partial question", "user")
+    buffer.register_conversation_item("reply", "question", "assistant")
+    buffer.register_transcription_delta("reply", "partial answer", "assistant")
+    buffer.register_conversation_item("later", "reply", "user")
+    buffer.register_transcription("later", "complete question", "user")
+    assert not _drain_ready_messages(buffer)
+    buffer.finalize_pending_transcriptions()
+    assert _drain_ready_messages(buffer) == [
+        ("question", "partial question", "user", "0"),
+        ("reply", "partial answer", "assistant", "1"),
+        ("later", "complete question", "user", "2"),
+    ]
+    assert buffer.incomplete_transcription_item_ids == {"question", "reply"}
+    buffer.finalize_pending_transcriptions()
+    assert not _drain_ready_messages(buffer)
+
+
+@pytest.mark.parametrize(
+    "relationship", ["missing_metadata", "missing_parent", "cycle"]
+)
+def test_shutdown_does_not_guess_unresolved_transcript_order(relationship):
+    buffer = ConversationItemOrderingBuffer(logging.getLogger(__name__))
+    buffer.register_transcription_delta("reply", "partial answer", "assistant")
+    if relationship != "missing_metadata":
+        buffer.register_conversation_item(
+            "reply",
+            "missing" if relationship == "missing_parent" else "reply",
+            "assistant",
+        )
+    buffer.finalize_pending_transcriptions()
+    assert not _drain_ready_messages(buffer)
+
+
+def test_shutdown_skips_empty_known_turn_without_blocking_later_text():
+    buffer = ConversationItemOrderingBuffer(logging.getLogger(__name__))
+    buffer.register_conversation_item("question", None, "user")
+    buffer.register_conversation_item("reply", "question", "assistant")
+    buffer.register_transcription("reply", "complete answer", "assistant")
+    buffer.finalize_pending_transcriptions()
+    assert _drain_ready_messages(buffer) == [
+        ("reply", "complete answer", "assistant", "0")
+    ]
+    assert not buffer.incomplete_transcription_item_ids
+
+
 @pytest.mark.parametrize("metadata_first", [False, True])
 @pytest.mark.parametrize("partial_text", [None, "partial question"])
 def test_failed_transcription_releases_later_messages(metadata_first, partial_text):
