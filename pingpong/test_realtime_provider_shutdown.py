@@ -13,7 +13,11 @@ from websockets.frames import Close
 from pingpong import realtime, websocket as websocket_module
 from pingpong.realtime_recorder import VoiceRecordingHealth
 from pingpong.test_realtime_expiry import ExpiryBrowser
-from pingpong.test_realtime_shutdown import ShutdownConnection, event
+from pingpong.test_realtime_shutdown import (
+    ShutdownConnection,
+    event,
+    mock_voice_usage_persistence as mock_voice_usage_persistence,
+)
 from pingpong.test_server_audio_websocket import (
     FakeOpenAIClient,
     FakeRealtimeConnection,
@@ -92,7 +96,7 @@ async def test_failed_upstream_truncate_still_updates_local_playback(failure):
 @pytest.mark.parametrize("heard", [False, True])
 @pytest.mark.parametrize("ending", ["eof", "receive", "sdk", "send", "ended", "error"])
 async def test_provider_shutdown_preserves_final_playback_and_confirms_commit(
-    monkeypatch, recording, heard, ending
+    monkeypatch, recording, heard, ending, request
 ):
     connection = ClosingConnection()
     browser = ExpiryBrowser()
@@ -260,6 +264,13 @@ async def test_provider_shutdown_preserves_final_playback_and_confirms_commit(
         inspect.unwrap(realtime.browser_realtime_websocket)
     )
     await asyncio.wait_for(handler(browser, "1", "1"), 2)
+    usage = request.getfixturevalue("mock_voice_usage_persistence").await_args.args[2]
+    assert usage.final_status == realtime.schemas.RunStatus.INCOMPLETE
+    assert usage.error_code is None
+    if ending == "error":
+        assert usage.provider_metadata_to_json()["errors"][0]["error"]["code"] == (
+            "invalid_value"
+        )
     assert browser.closed
     assert connection.reader_stopped.is_set()
     assert [msg["type"] for msg in browser.sent_json].count("session.ended") == 1

@@ -23,13 +23,25 @@ def shutdown_ack():
     )
 
 
+@pytest.fixture(autouse=True)
+def mock_voice_usage_persistence(monkeypatch):
+    # These lifecycle tests use mock DB sessions; persistence has DB tests of its own.
+    save_usage = AsyncMock()
+    monkeypatch.setattr(realtime, "save_voice_usage", save_usage)
+    return save_usage
+
+
 class ShutdownConnection:
     def __init__(self):
         self.events = asyncio.Queue()
         self.session = SimpleNamespace(update=AsyncMock())
         self.response = SimpleNamespace(cancel=AsyncMock(), create=AsyncMock())
+
+        async def clear(**kwargs):
+            self.events.put_nowait(event("input_audio_buffer.cleared"))
+
         self.input_audio_buffer = SimpleNamespace(
-            clear=AsyncMock(), commit=AsyncMock(), append=AsyncMock()
+            clear=AsyncMock(side_effect=clear), commit=AsyncMock(), append=AsyncMock()
         )
         self.reader_stopped = asyncio.Event()
 
@@ -43,13 +55,19 @@ class ShutdownConnection:
         finally:
             self.reader_stopped.set()
 
-    def assert_only_shutdown_update(self):
+    def assert_shutdown_controls(self, response_ids=(), clear_sent=True):
         self.session.update.assert_awaited_once_with(
             session={"type": "realtime", "audio": {"input": {"turn_detection": None}}}
         )
-        self.response.cancel.assert_not_awaited()
+        assert [
+            call.kwargs["response_id"] for call in self.response.cancel.await_args_list
+        ] == list(response_ids)
         self.response.create.assert_not_awaited()
-        self.input_audio_buffer.clear.assert_not_awaited()
+        assert self.input_audio_buffer.clear.await_count == int(clear_sent)
+        if clear_sent:
+            self.input_audio_buffer.clear.assert_awaited_once_with(
+                event_id="voice_shutdown_clear"
+            )
         self.input_audio_buffer.commit.assert_not_awaited()
         self.input_audio_buffer.append.assert_not_awaited()
 
@@ -82,6 +100,7 @@ async def test_early_drain_requires_ack_and_retained_transcripts(
     buffer.register_conversation_item("reply", "user", "assistant")
     # Startup/old updates cannot acknowledge shutdown.
     drain.observe(shutdown_ack())
+    drain.observe(event("input_audio_buffer.cleared"))
     task = asyncio.create_task(drain.wait(connection, buffer))
     try:
         await wait_until(lambda: connection.session.update.await_count == 1)
@@ -89,6 +108,7 @@ async def test_early_drain_requires_ack_and_retained_transcripts(
         # Delayed commits before the shutdown acknowledgement are included.
         drain.observe(event("input_audio_buffer.committed", item_id="user"))
         drain.observe(shutdown_ack())
+        drain.observe(event("input_audio_buffer.cleared"))
         roles = ["assistant", "user"] if assistant_first else ["user", "assistant"]
         for index, role in enumerate(roles):
             if role == "assistant":
@@ -111,15 +131,15 @@ async def test_early_drain_requires_ack_and_retained_transcripts(
             if index == 0:
                 await asyncio.sleep(0)
                 assert not task.done()
-        # A heard reply needs its transcript, not the end of unheard generation.
+        # With no active response, transcripts and control acknowledgements suffice.
         await asyncio.wait_for(task, 1)
-        connection.assert_only_shutdown_update()
+        connection.assert_shutdown_controls()
     finally:
         task.cancel()
         await asyncio.gather(task, return_exceptions=True)
 
 
-async def test_already_settled_session_exits_on_ack_without_waiting_five_seconds():
+async def test_already_settled_session_exits_on_ack_without_waiting_for_the_deadline():
     drain = realtime.RealtimeShutdownDrain()
     connection = ShutdownConnection()
     drain.observe(event("response.created", response=SimpleNamespace(id="reply")))
@@ -144,8 +164,9 @@ async def test_already_settled_session_exits_on_ack_without_waiting_five_seconds
         await wait_until(lambda: connection.session.update.await_count == 1)
         assert not task.done()
         drain.observe(shutdown_ack())
+        drain.observe(event("input_audio_buffer.cleared"))
         await asyncio.wait_for(task, 1)
-        connection.assert_only_shutdown_update()
+        connection.assert_shutdown_controls()
     finally:
         task.cancel()
         await asyncio.gather(task, return_exceptions=True)
@@ -187,10 +208,11 @@ async def test_missing_events_and_failed_controls_keep_the_original_deadline(
         await wait_until(lambda: connection.session.update.await_count == 1)
         if failure in {"pending_transcript", "pending_heard_transcript"}:
             drain.observe(shutdown_ack())
+        drain.observe(event("input_audio_buffer.cleared"))
         await asyncio.sleep(0)
         assert not task.done()
         await asyncio.wait_for(task, 1)
-        connection.assert_only_shutdown_update()
+        connection.assert_shutdown_controls(clear_sent=failure != "stalled_send")
     finally:
         task.cancel()
         await asyncio.gather(task, return_exceptions=True)
@@ -338,7 +360,7 @@ async def test_session_cleanup_keeps_late_text_and_playback_retention(
         assert not any(
             msg["type"] in {"session.updated", "error"} for msg in websocket.sent_json
         )
-        connection.assert_only_shutdown_update()
+        connection.assert_shutdown_controls(response_ids=("response",))
     finally:
         task.cancel()
         await asyncio.gather(task, return_exceptions=True)
@@ -366,6 +388,7 @@ async def test_completed_transcript_waits_for_late_ordering_metadata(missing):
     try:
         await wait_until(lambda: connection.session.update.await_count == 1)
         drain.observe(shutdown_ack())
+        drain.observe(event("input_audio_buffer.cleared"))
         await asyncio.sleep(0)
         assert not task.done()
         item_id = "user" if missing == "item" else "previous"
@@ -374,14 +397,14 @@ async def test_completed_transcript_waits_for_late_ordering_metadata(missing):
         )
         drain.observe(event("conversation.item.added"))
         await asyncio.wait_for(task, 1)
-        connection.assert_only_shutdown_update()
+        connection.assert_shutdown_controls()
     finally:
         task.cancel()
         await asyncio.gather(task, return_exceptions=True)
 
 
 @pytest.mark.parametrize("when", ["before_end", "during_drain"])
-async def test_unheard_reply_does_not_delay_early_cleanup_or_get_saved(
+async def test_unheard_reply_waits_for_usage_completion_without_saving_its_text(
     monkeypatch, when
 ):
     connection = ShutdownConnection()
@@ -427,7 +450,7 @@ async def test_unheard_reply_does_not_delay_early_cleanup_or_get_saved(
         connection.events.put_nowait(incoming)
 
     def add_unheard_reply():
-        # Neither response.done nor transcript.done will arrive for this reply.
+        # No transcript.done arrives for this unheard reply.
         connection.events.put_nowait(
             event("response.created", response=SimpleNamespace(id="unheard-response"))
         )
@@ -466,13 +489,21 @@ async def test_unheard_reply_does_not_delay_early_cleanup_or_get_saved(
         if when == "during_drain":
             add_unheard_reply()
         connection.events.put_nowait(shutdown_ack())
+        await wait_until(lambda: connection.response.cancel.await_count == 1)
+        assert not task.done()
+        connection.events.put_nowait(
+            event(
+                "response.done",
+                response=SimpleNamespace(id="unheard-response", output=[]),
+            )
+        )
         await asyncio.wait_for(task, 1)
         assert connection.reader_stopped.is_set()
         assert [call.args[3:5] for call in write.await_args_list] == [
             ("user", "question"),
             ("heard", "heard answer"),
         ]
-        connection.assert_only_shutdown_update()
+        connection.assert_shutdown_controls(response_ids=("unheard-response",))
     finally:
         end.set()
         task.cancel()
@@ -492,6 +523,7 @@ async def test_heard_reply_still_waits_for_its_own_transcript_and_metadata(missi
     try:
         await wait_until(lambda: connection.session.update.await_count == 1)
         drain.observe(shutdown_ack())
+        drain.observe(event("input_audio_buffer.cleared"))
         await asyncio.sleep(0)
         assert not task.done()
         if missing != "transcript":
@@ -500,7 +532,7 @@ async def test_heard_reply_still_waits_for_its_own_transcript_and_metadata(missi
             buffer.register_transcription("heard", "heard text", "assistant")
         drain.observe(event("response.output_audio_transcript.done", item_id="heard"))
         await asyncio.wait_for(task, 1)
-        connection.assert_only_shutdown_update()
+        connection.assert_shutdown_controls()
     finally:
         task.cancel()
         await asyncio.gather(task, return_exceptions=True)

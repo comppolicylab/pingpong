@@ -14,6 +14,7 @@ from pingpong import realtime
 from pingpong.realtime_recorder import VoiceRecordingHealth
 from pingpong.test_realtime_shutdown import (
     ShutdownConnection,
+    mock_voice_usage_persistence as mock_voice_usage_persistence,
     event,
     shutdown_ack,
     wait_until,
@@ -90,7 +91,7 @@ class ExpiryBrowser(DummyWebSocket):
 @pytest.mark.parametrize("recording", [False, True])
 @pytest.mark.parametrize("played", [False, True])
 async def test_expiry_preserves_final_playback_and_late_transcripts_without_extra_input(
-    monkeypatch, recording, played
+    monkeypatch, recording, played, request
 ):
     connection = ShutdownConnection()
     connection.conversation = SimpleNamespace(
@@ -203,12 +204,17 @@ async def test_expiry_preserves_final_playback_and_late_transcripts_without_extr
         )
         await asyncio.wait_for(task, 1)
         assert browser.closed and connection.reader_stopped.is_set()
+        usage = request.getfixturevalue("mock_voice_usage_persistence").await_args.args[
+            2
+        ]
+        assert usage.final_status == realtime.schemas.RunStatus.COMPLETED
+        assert usage.error_code is None
         assert [call.args[4] for call in write.await_args_list] == (
             ["late question", "final answer"] if played else []
         )
         connection.input_audio_buffer.append.assert_awaited_once()
         connection.input_audio_buffer.commit.assert_not_awaited()
-        connection.input_audio_buffer.clear.assert_not_awaited()
+        connection.input_audio_buffer.clear.assert_awaited_once()
         connection.response.create.assert_not_awaited()
         connection.response.cancel.assert_not_awaited()
         assert sum(msg["type"] == "session.expiring" for msg in browser.sent_json) == 1
@@ -262,7 +268,7 @@ async def test_expiry_fallback_still_drains_and_finalizes(monkeypatch, browser_f
         inspect.unwrap(realtime.browser_realtime_websocket)(browser, "1", "1"), 1
     )
     assert browser.closed and connection.reader_stopped.is_set()
-    connection.assert_only_shutdown_update()
+    connection.assert_shutdown_controls()
 
 
 async def test_expiry_stops_new_playback_but_keeps_processing_transcripts():
@@ -453,7 +459,7 @@ async def test_session_delivers_warning_before_cutoff_and_then_ends_normally():
             "session.expiring",
         ]
         assert browser.closed
-        connection.assert_only_shutdown_update()
+        connection.assert_shutdown_controls()
     finally:
         task.cancel()
         await asyncio.gather(task, return_exceptions=True)

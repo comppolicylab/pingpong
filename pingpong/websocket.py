@@ -606,6 +606,7 @@ def ws_with_realtime_connection(func):
             tracing_config,
         )
         extra_headers = build_realtime_extra_headers(safety_identifier)
+        handler_started = False
         try:
             async with AsyncExitStack() as connection_context:
                 realtime_connection = await connection_context.enter_async_context(
@@ -618,6 +619,7 @@ def ws_with_realtime_connection(func):
                 await realtime_connection.session.update(session=session)
                 if assistant.assistant_should_message_first:
                     await realtime_connection.response.create()
+                handler_started = True
                 await func(browser_connection, class_id, thread_id, *args, **kwargs)
                 # Provider context cleanup must not roll back finalized history.
                 try:
@@ -629,6 +631,16 @@ def ws_with_realtime_connection(func):
                     )
         except Exception as e:
             openai_connection_logger.exception(f"Error in Realtime connection: {e}")
+            if not handler_started:
+                # Imported here because realtime uses these websocket decorators.
+                from pingpong.realtime import retain_voice_startup_failure
+
+                try:
+                    retain_voice_startup_failure(browser_connection, thread, e)
+                except Exception:
+                    openai_connection_logger.exception(
+                        "Failed to retain voice startup error."
+                    )
             await _reject_realtime_session(
                 browser_connection,
                 "We were unable to connect to OpenAI.",

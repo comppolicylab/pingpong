@@ -414,11 +414,15 @@ async def test_session_retention_depends_on_playback_not_transcripts(
             )
         )
         assert (saved_recording is not None) == (recording and played)
-        assert bool(
-            await session.scalar(
-                select(models.Run.id).where(models.Run.thread_id == thread_id)
+        # The unexpected provider EOF retains an incomplete run independently
+        # of transcript/playback qualification for messages and recordings.
+        run = (
+            await session.scalars(
+                select(models.Run).where(models.Run.thread_id == thread_id)
             )
-        ) == (version == 3 and played and transcribed)
+        ).one()
+        assert run.status == schemas.RunStatus.INCOMPLETE
+        assert run.incomplete_reason == "provider_connection_closed"
 
 
 @with_user(123)
@@ -897,6 +901,7 @@ async def test_queued_writes_wait_for_session_retention_decision(played, ended):
 
 
 async def test_recording_finalization_waits_for_in_flight_transcript_write(monkeypatch):
+    monkeypatch.setattr(realtime_module, "save_voice_usage", AsyncMock())
     writing = asyncio.Event()
     release_write = asyncio.Event()
     periodic_stopped = asyncio.Event()
@@ -1093,6 +1098,7 @@ async def test_final_playback_callback_before_browser_stops_can_qualify_reply(
     monkeypatch,
     prior_playback,
 ):
+    monkeypatch.setattr(realtime_module, "save_voice_usage", AsyncMock())
     browser_ready = asyncio.Event()
     write = AsyncMock()
 
@@ -1249,7 +1255,7 @@ async def test_session_saves_late_transcripts_after_browser_disconnect(
                     select(models.Run.id).where(models.Run.thread_id == thread_id)
                 )
             )
-            == played
+            is True
         )
 
 
@@ -1261,6 +1267,8 @@ async def test_session_saves_late_transcripts_after_browser_disconnect(
 async def test_realtime_session_stops_browser_before_final_queue_drain(
     monkeypatch, caplog, ending, recording, played
 ):
+    save_usage = AsyncMock()
+    monkeypatch.setattr(realtime_module, "save_voice_usage", save_usage)
     browser_ready = asyncio.Event()
     disconnect = asyncio.Event()
     provider_ready = asyncio.Event()
@@ -1360,6 +1368,14 @@ async def test_realtime_session_stops_browser_before_final_queue_drain(
             websocket.state["db"].commit.assert_awaited_once()
         else:
             websocket.state["db"].commit.assert_not_awaited()
+        usage = save_usage.await_args.args[2]
+        assert usage.final_status == (
+            schemas.RunStatus.FAILED
+            if ending == "provider_error"
+            else schemas.RunStatus.INCOMPLETE
+        )
+        if ending == "provider_error":
+            assert usage.error_code == "voice_session_error"
         assert all(child.done() for child in children)
         assert cleanup.index("browser") < cleanup.index("writer")
         if recording:
@@ -1603,6 +1619,8 @@ async def test_shutdown_recovers_known_text_and_commits_through_db_middleware(
 async def test_cancelled_voice_session_keeps_cancellation_if_commit_fails(
     monkeypatch, caplog, rollback_fails
 ):
+    save_usage = AsyncMock()
+    monkeypatch.setattr(realtime_module, "save_voice_usage", save_usage)
     browser_ready = asyncio.Event()
     provider_ready = asyncio.Event()
     children = []
@@ -1638,6 +1656,8 @@ async def test_cancelled_voice_session_keeps_cancellation_if_commit_fails(
             await asyncio.wait_for(task, 2)
         session.commit.assert_awaited_once()
         session.rollback.assert_awaited_once()
+        save_usage.assert_awaited_once()
+        assert save_usage.await_args.args[2].incomplete_reason == "session_cancelled"
         assert "Error committing cancelled voice session" in caplog.text
         assert "synthetic commit failure" in caplog.text
         if rollback_fails:
@@ -1650,7 +1670,9 @@ async def test_cancelled_voice_session_keeps_cancellation_if_commit_fails(
         await asyncio.gather(task, *children, return_exceptions=True)
 
 
-async def test_realtime_cleanup_does_not_close_browser_twice():
+async def test_realtime_cleanup_does_not_close_browser_twice(monkeypatch):
+    save_usage = AsyncMock()
+    monkeypatch.setattr(realtime_module, "save_voice_usage", save_usage)
     websocket = DummyWebSocket()
     websocket.application_state = WebSocketState.CONNECTED
     websocket.state["thread"] = SimpleNamespace(
@@ -1674,6 +1696,8 @@ async def test_realtime_cleanup_does_not_close_browser_twice():
     handler = inspect.unwrap(realtime_module.browser_realtime_websocket)
     await asyncio.wait_for(handler(websocket, "1", "1"), timeout=1)
     websocket.close.assert_awaited_once()
+    save_usage.assert_awaited_once()
+    assert save_usage.await_args.args[2].errors
 
 
 @with_user(123)

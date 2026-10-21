@@ -128,7 +128,7 @@ async def test_stop_acknowledgement_follows_recording_and_database_commit(
         assert order == (["recording"] if recording else []) + (
             [] if failure == "commit" else ["commit"]
         ) + ([] if failure in {"browser_gone", "stalled_ack"} else ["ack"])
-        connection.assert_only_shutdown_update()
+        connection.assert_shutdown_controls()
     finally:
         finish_recording.set()
         finish_commit.set()
@@ -143,6 +143,7 @@ async def test_late_cancellation_closes_after_protected_finalization_and_commit(
     monkeypatch, failure
 ):
     monkeypatch.setattr(realtime, "BROWSER_SAVE_CONFIRMATION_SECONDS", 0.02)
+    monkeypatch.setattr(realtime, "save_voice_usage", AsyncMock())
     connection = ShutdownConnection()
     browser = ExpiryBrowser()
     browser.state["thread"] = SimpleNamespace(
