@@ -3747,6 +3747,7 @@ class AssistantDefaultPrompt(BaseModel):
 
 
 class AssistantModels(BaseModel):
+    cache_mode: Literal["redis", "direct"] = "direct"
     models: list[AssistantModel]
     default_prompts: list[AssistantDefaultPrompt] = []
     enforce_classic_assistants: bool = False

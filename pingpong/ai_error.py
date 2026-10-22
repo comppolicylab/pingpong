@@ -10,7 +10,7 @@ MODEL_NOT_AVAILABLE_MESSAGE = (
 )
 
 
-def get_ai_error_message(error: Any, default: str) -> str:
+def is_model_unavailable_error(error: Any) -> bool:
     # A rejected model can arrive as a provider event or a WebSocket close reason.
     # Match known codes without exposing the provider's raw error text.
     if isinstance(error, ConnectionClosed):
@@ -18,14 +18,17 @@ def get_ai_error_message(error: Any, default: str) -> str:
         code = close.reason if close is not None else None
     else:
         code = getattr(error, "code", None)
-    if code in (
+    return code in (
         "model_not_found",
         "model_unavailable",
         "invalid_request_error.model_not_found",
         "invalid_request_error.model_unavailable",
-    ):
-        return MODEL_NOT_AVAILABLE_MESSAGE
-    return default
+        "DeploymentNotFound",
+    )
+
+
+def get_ai_error_message(error: Any, default: str) -> str:
+    return MODEL_NOT_AVAILABLE_MESSAGE if is_model_unavailable_error(error) else default
 
 
 def get_details_from_api_error(e: APIError, custom_fallback: str | None = None) -> str:

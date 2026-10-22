@@ -6,8 +6,29 @@
 	import { updateSearch, getValue } from '$lib/urlstate';
 	import { resolve } from '$app/paths';
 	import { headerState } from '$lib/stores/header';
+	import { expandResponse, resetModelCache } from '$lib/api';
+	import { modelsPromptsStore } from '$lib/stores/general';
+	import { happyToast, sadToast } from '$lib/toast';
 
 	export let data;
+
+	let resettingModels = false;
+	const resetAvailableModels = async () => {
+		resettingModels = true;
+		try {
+			const result = expandResponse(await resetModelCache(fetch));
+			if (result.error) {
+				sadToast(result.error.detail || 'Could not reset the model cache.');
+				return;
+			}
+			modelsPromptsStore.set({});
+			happyToast('Model cache reset. Available models will refresh when next requested.');
+		} catch {
+			sadToast('Could not reset the model cache. Please try again.');
+		} finally {
+			resettingModels = false;
+		}
+	};
 
 	let institutionOptions: { value: string; name: string }[] = [];
 	$: instSearch = parseInt($page.url.searchParams.get('institution_id') || '0', 10);
@@ -143,6 +164,14 @@
 					href="/admin/lecture-lessons">Manage Lecture Lesson Access</Button
 				>
 				{#if data.admin?.isRootAdmin}
+					<Button
+						class="rounded-full bg-orange text-white hover:bg-orange-dark"
+						disabled={resettingModels}
+						onclick={resetAvailableModels}
+					>
+						{resettingModels ? 'Resetting model cache...' : 'Reset model cache'}
+					</Button>
+					<p class="text-sm text-gray-600">Refresh model availability for all groups.</p>
 					<Button
 						class="rounded-full bg-orange text-white hover:bg-orange-dark"
 						href="/admin/institutions">Manage Institutions</Button

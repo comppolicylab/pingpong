@@ -93,6 +93,17 @@ database = "pingpong"
 # maintenance_db = "postgres"
 
 
+# Optional model cache; omit model_cache.redis for direct provider lookups.
+# [model_cache]
+# ttl_seconds = 86400
+# build_revision = "pingpong@7.90+1740" # Defaults to SENTRY_RELEASE.
+# [model_cache.redis]
+# redis_url = "rediss://cache.example:6379"
+# cache_name = "pingpong-cache"
+# elasticache_user = "pingpong-model-catalog"
+# region = "us-east-1"
+
+
 [auth]
 # Secrets used to secure the app.
 

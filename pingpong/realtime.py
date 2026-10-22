@@ -36,6 +36,7 @@ from pingpong.realtime_recorder import (
     VoiceRecordingHealth,
 )
 from pingpong.ai_error import get_ai_error_message
+from pingpong.model_catalog import record_model_error
 from pingpong.realtime_usage import RealtimeUsage
 from pingpong.websocket import (
     REALTIME_CONNECTION_ERRORS,
@@ -1809,6 +1810,7 @@ async def handle_openai_events(
                             }
                         )
                 case "session.error" | "error":
+                    await record_model_error(openai_client, event.error)
                     if shutdown_drain and shutdown_drain.is_finished_cancellation_error(
                         event.error
                     ):
@@ -1950,6 +1952,7 @@ async def handle_openai_events(
                                 getattr(error, "message", None), max_len=512
                             ),
                         )
+                        await record_model_error(openai_client, error)
                         if getattr(error, "code", None) == "rate_limit_exceeded":
                             try:
                                 async with config.db.driver.async_session() as session:
