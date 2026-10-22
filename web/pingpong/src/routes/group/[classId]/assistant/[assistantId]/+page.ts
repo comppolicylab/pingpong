@@ -40,7 +40,7 @@ async function ensureModels(
 }> {
 	const cache = get(modelsPromptsStore)[classId];
 
-	if (cache) {
+	if (cache?.cache_mode === 'direct') {
 		return {
 			models: cache.models,
 			defaultPrompts: cache.default_prompts ?? [],
@@ -66,7 +66,8 @@ async function ensureModels(
 		[classId]: {
 			models,
 			default_prompts: defaultPrompts,
-			enforce_classic_assistants: enforceClassicAssistants
+			enforce_classic_assistants: enforceClassicAssistants,
+			cache_mode: modelsResponse.data.cache_mode
 		} as (typeof m)[number]
 	}));
 

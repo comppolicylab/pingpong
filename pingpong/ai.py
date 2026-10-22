@@ -192,6 +192,7 @@ from openai.types.beta.threads.runs import ToolCallsStepDetails, CodeInterpreter
 from openai.types.beta.threads.text_content_block import TextContentBlock
 from pingpong.now import NowFn, utcnow
 from pingpong.ai_error import get_ai_error_message, get_details_from_api_error
+from pingpong.model_catalog import attach_credential_scope, record_model_error
 from pingpong.schemas import (
     CodeInterpreterMessage,
     DownloadExport,
@@ -254,27 +255,30 @@ class GetOpenAIClientException(Exception):
         self.detail = detail
 
 
+def get_openai_client_from_api_key(credential: models.APIKey) -> OpenAIClientType:
+    if credential.provider == "openai":
+        client = get_openai_client(credential.api_key, provider="openai")
+    elif credential.provider == "azure":
+        client = get_openai_client(
+            credential.api_key,
+            provider="azure",
+            endpoint=credential.endpoint,
+            api_version=credential.api_version,
+        )
+    else:
+        raise GetOpenAIClientException(
+            code=400, detail="Unknown API key provider for class"
+        )
+    attach_credential_scope(client, credential)
+    return client
+
+
 async def get_openai_client_by_class_id(
     session: AsyncSession, class_id: int
 ) -> OpenAIClientType:
     result = await models.Class.get_api_key(session, class_id)
     if result.api_key_obj:
-        if result.api_key_obj.provider == "openai":
-            return get_openai_client(
-                result.api_key_obj.api_key,
-                provider=result.api_key_obj.provider,  # type: ignore
-            )
-        elif result.api_key_obj.provider == "azure":
-            return get_openai_client(
-                result.api_key_obj.api_key,
-                provider=result.api_key_obj.provider,  # type: ignore
-                endpoint=result.api_key_obj.endpoint,
-                api_version=result.api_key_obj.api_version,
-            )
-        else:
-            raise GetOpenAIClientException(
-                code=400, detail="Unknown API key provider for class"
-            )
+        return get_openai_client_from_api_key(result.api_key_obj)
     elif result.api_key:
         return get_openai_client(result.api_key)
     else:
@@ -3793,6 +3797,8 @@ class BufferedResponseStreamHandler:
                 elif item.type == "mcp_call" and self.tool_calls.get(item.id):
                     await self.on_mcp_tool_call_done(item)
 
+        if data.response.error is not None:
+            await record_model_error(self.openai_cli, data.response.error)
         cleanup_kwargs: dict[str, Any] = {}
         if (usage := getattr(data.response, "usage", None)) is not None:
             cleanup_kwargs["response_usage"] = _openai_model_to_json(usage)
@@ -3834,6 +3840,7 @@ class BufferedResponseStreamHandler:
         if data.code == "rate_limit_exceeded":
             await log_rate_limit_error_on_response_error()
 
+        await record_model_error(self.openai_cli, data)
         error_message = get_ai_error_message(data, data.message)
         await self.cleanup(
             run_status=RunStatus.FAILED,
@@ -4719,6 +4726,7 @@ async def run_response(
                     )
                 return
             except openai.APIError as openai_error:
+                await record_model_error(cli, openai_error)
                 await _tts_cleanup()
                 error_message = get_ai_error_message(
                     openai_error,
@@ -4976,6 +4984,7 @@ async def run_thread(
                 elif isinstance(event, ThreadRunStepFailed) or isinstance(
                     event, ThreadRunFailed
                 ):
+                    await record_model_error(cli, event.data.last_error)
                     if event.data.last_error.code == "rate_limit_exceeded":
                         await config.authz.driver.init()
                         async with config.db.driver.async_session() as session:
@@ -5005,6 +5014,7 @@ async def run_thread(
                     )
                 yield handler.flush()
     except openai.APIError as openai_error:
+        await record_model_error(cli, openai_error)
         if openai_error.type == "invalid_request_error" and (
             "add messages to" in openai_error.message
             or "already has an active run" in openai_error.message
