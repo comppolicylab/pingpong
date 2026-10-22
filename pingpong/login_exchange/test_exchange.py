@@ -11,6 +11,7 @@ from fastapi import FastAPI, HTTPException, Request
 from redis.asyncio import Redis
 from redis.exceptions import ConnectionError
 
+from ..redis import client as redis_connections
 from . import cache, exchange, integration
 from .settings import LoginExchangeSettings
 
@@ -324,7 +325,7 @@ async def test_disabled_exchange_preserves_saml_redirect(
     redis_factory = AsyncMock(
         side_effect=AssertionError("Disabled exchange opened Redis")
     )
-    monkeypatch.setattr(cache, "create_redis_client", redis_factory)
+    monkeypatch.setattr(redis_connections, "create_redis_client", redis_factory)
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app)) as client:
         response = await client.post(
             OLD + f"/api/v1/login/sso/saml/acs?provider={provider}"
@@ -346,7 +347,7 @@ async def test_enabled_same_host_callback_skips_redis(saml_app, monkeypatch):
     redis_factory = AsyncMock(
         side_effect=AssertionError("Same-host login opened Redis")
     )
-    monkeypatch.setattr(cache, "create_redis_client", redis_factory)
+    monkeypatch.setattr(redis_connections, "create_redis_client", redis_factory)
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app)) as client:
         response = await client.post(
             NEW + "/api/v1/login/sso/saml/acs?provider=harvardkey"
@@ -362,7 +363,7 @@ async def test_hks_login_preserves_existing_host_without_redis(saml_app, monkeyp
     app, saml = saml_app
     saml._request_data["post_data"]["RelayState"] = OLD + "/group/1?x=2"
     redis_factory = AsyncMock(side_effect=AssertionError("HKS login opened Redis"))
-    monkeypatch.setattr(cache, "create_redis_client", redis_factory)
+    monkeypatch.setattr(redis_connections, "create_redis_client", redis_factory)
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app)) as client:
         response = await client.post(
             OLD + "/api/v1/login/sso/saml/acs?provider=harvardkey"
