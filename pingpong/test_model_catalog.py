@@ -11,9 +11,14 @@ import httpx
 import openai
 import pytest
 from redis.crc import key_slot
-from redis.exceptions import ConnectionError, LockError, LockNotOwnedError
+from redis.exceptions import (
+    ConnectionError,
+    LockError,
+    LockNotOwnedError,
+    RedisClusterException,
+)
 
-from pingpong import model_catalog as catalog
+from pingpong import ai, model_catalog as catalog
 from pingpong.login_exchange import cache as login_cache
 from pingpong.login_exchange.settings import LoginExchangeSettings
 from pingpong.redis import client as redis_connections
@@ -558,14 +563,15 @@ async def test_missing_build_identity_disables_sharing(
     assert not memory_cache.values
 
 
+@pytest.mark.parametrize("error_type", [ConnectionError, RedisClusterException])
 async def test_redis_outage_skips_runtime_checks_and_invalidation_is_best_effort(
-    memory_cache, monkeypatch
+    memory_cache, monkeypatch, error_type
 ):
     monkeypatch.setattr(
-        memory_cache, "get", AsyncMock(side_effect=ConnectionError("offline"))
+        memory_cache, "get", AsyncMock(side_effect=error_type("offline"))
     )
     monkeypatch.setattr(
-        memory_cache, "eval", AsyncMock(side_effect=ConnectionError("offline"))
+        memory_cache, "eval", AsyncMock(side_effect=error_type("offline"))
     )
     client = provider_client("available")
     await catalog.ensure_model_available(client, "available")
@@ -578,12 +584,15 @@ async def test_redis_outage_skips_runtime_checks_and_invalidation_is_best_effort
 
 
 @pytest.mark.parametrize("stage", ["connection", "lock"])
+@pytest.mark.parametrize("error_type", [ConnectionError, RedisClusterException])
 async def test_runtime_redis_failure_does_not_trigger_a_provider_lookup(
-    memory_cache, monkeypatch, stage
+    memory_cache, monkeypatch, stage, error_type
 ):
+    fail = AsyncMock(side_effect=error_type("offline"))
+
     @asynccontextmanager
     async def unavailable(*args, **kwargs):
-        raise ConnectionError("offline")
+        await fail()
         yield
 
     if stage == "connection":
@@ -593,6 +602,68 @@ async def test_runtime_redis_failure_does_not_trigger_a_provider_lookup(
     client = provider_client()
     await catalog.ensure_model_available(client, "missing")
     client.models.list.assert_not_awaited()
+
+
+async def test_cluster_reset_failure_returns_service_unavailable(
+    memory_cache, monkeypatch
+):
+    monkeypatch.setattr(
+        memory_cache, "set", AsyncMock(side_effect=RedisClusterException("offline"))
+    )
+    with pytest.raises(HTTPException) as raised:
+        await catalog.reset_model_catalog_cache()
+    assert raised.value.status_code == 503
+    assert "Could not reset" in raised.value.detail
+
+
+async def test_cluster_invalidation_failure_is_best_effort(memory_cache, monkeypatch):
+    client = provider_client("available")
+    await catalog.get_model_catalog(client)
+    monkeypatch.setattr(
+        memory_cache, "eval", AsyncMock(side_effect=RedisClusterException("offline"))
+    )
+
+    await catalog.invalidate_model_catalog(client)
+
+    assert (await catalog.get_model_catalog(client)).models[0].id == "available"
+    client.models.list.assert_awaited_once()
+
+
+@pytest.mark.parametrize(
+    ("error_type", "status", "code", "invalidates", "propagates"),
+    [
+        (openai.BadRequestError, 400, "model_not_found", True, False),
+        (openai.NotFoundError, 404, "model_not_found", True, False),
+        (openai.BadRequestError, 400, "content_policy_violation", False, False),
+        (openai.RateLimitError, 429, "rate_limit_exceeded", False, True),
+    ],
+)
+async def test_title_generation_model_errors_invalidate_the_catalog(
+    memory_cache, error_type, status, code, invalidates, propagates
+):
+    client = provider_client("gpt-5.6-luna")
+    await catalog.get_model_catalog(client)
+    client.models.list.return_value = provider_response("replacement")
+    error = error_type(
+        "Synthetic title failure",
+        response=httpx.Response(
+            status, request=httpx.Request("POST", "https://example.test/responses")
+        ),
+        body={"code": code, "message": "Synthetic title failure"},
+    )
+    client.responses = SimpleNamespace(parse=AsyncMock(side_effect=error))
+
+    if propagates:
+        with pytest.raises(error_type):
+            await ai.generate_name(client, "Synthetic transcript")
+    else:
+        assert await ai.generate_name(client, "Synthetic transcript") is None
+
+    result = await catalog.get_model_catalog(client)
+    assert [model.id for model in result.models] == [
+        "replacement" if invalidates else "gpt-5.6-luna"
+    ]
+    assert client.models.list.await_count == (2 if invalidates else 1)
 
 
 @pytest.mark.parametrize("operation", ["listing", "runtime"])

@@ -238,10 +238,12 @@ async def test_configuration_change_retires_pool_without_interrupting_users(
 async def test_lazy_aws_authentication_error_becomes_redis_error(pool, monkeypatch):
     settings = RedisSettings(redis_url="redis://localhost:6379/0")
     client = AsyncMock()
+    client.ping.side_effect = NoCredentialsError()
     monkeypatch.setattr(cache, "create_redis_client", AsyncMock(return_value=client))
     with pytest.raises(cache.RedisUnavailable) as raised:
-        async with pool.client(settings):
-            raise NoCredentialsError()
+        async with pool.client(settings) as connection:
+            await connection.ping()
+    client.ping.assert_awaited_once()
     assert isinstance(raised.value.__cause__, NoCredentialsError)
 
 

@@ -36,6 +36,8 @@ async def test_exchange_passes_settings_and_translates_connection_errors(
     @asynccontextmanager
     async def connect(received_settings):
         assert received_settings is settings
+        if aws_failure:
+            raise RedisUnavailable("Synthetic AWS credential failure")
         yield client
 
     monkeypatch.setattr(cache._pool, "client", connect)
@@ -43,7 +45,6 @@ async def test_exchange_passes_settings_and_translates_connection_errors(
         with pytest.raises(HTTPException) as raised:
             async with cache.redis_client() as received_client:
                 assert received_client is client
-                raise RedisUnavailable("Synthetic AWS credential failure")
         assert raised.value.status_code == 503
         assert raised.value.detail == "Login exchange unavailable"
     else:

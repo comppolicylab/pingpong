@@ -399,7 +399,8 @@ async def generate_name(
             sanitize_for_log(len(transcript)),
         )
         return None
-    except openai.APIError:
+    except openai.APIError as e:
+        await record_model_error(cli, e)
         logger.exception("Error generating thread name.")
         return None
 

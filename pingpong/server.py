@@ -244,11 +244,9 @@ from .model_catalog import (
     close_model_catalog_cache,
     ensure_model_available,
     get_model_catalog,
-    get_runtime_model_catalog,
     reset_model_catalog_cache,
     record_model_error,
     runtime_model_cache_enabled,
-    validate_model_available,
 )
 from .login_exchange import integration as saml_login_exchange
 from .login_exchange.exchange import consume_grant, session_redirect
@@ -9675,7 +9673,6 @@ async def create_run(
 
     if thread.version == 3:
         try:
-            model_catalog = await get_runtime_model_catalog(openai_client)
             thread = await get_thread_for_class(
                 request.state["db"], class_id, int(thread_id), for_update=True
             )
@@ -9686,14 +9683,8 @@ async def create_run(
 
             if last_run and last_run.status == schemas.RunStatus.PENDING:
                 run_to_complete = last_run
-                execution_model = (
-                    run_to_complete.model
-                    if run_to_complete.model is not None
-                    else asst.model
-                )
-                validate_model_available(openai_client, execution_model, model_catalog)
                 if run_to_complete.model is None:
-                    run_to_complete.model = execution_model
+                    run_to_complete.model = asst.model
                 file_search_file_ids = (
                     await models.Run.get_file_search_files_from_messages(
                         request.state["db"], last_run.id
@@ -9708,7 +9699,6 @@ async def create_run(
                     schemas.RunStatus.INCOMPLETE,
                 }
             ):
-                validate_model_available(openai_client, asst.model, model_catalog)
                 await _ensure_thread_instructions_migrated(
                     request.state["db"],
                     thread,
@@ -9847,7 +9837,6 @@ async def create_run(
                 detail="We faced an error while sending your message. " + str(e),
             )
     elif thread.version <= 2:
-        await ensure_model_available(openai_client, asst.model)
         try:
             file_names = await models.Thread.get_file_search_files(
                 request.state["db"], thread.id

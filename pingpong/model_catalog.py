@@ -13,7 +13,7 @@ from uuid import uuid4
 from fastapi import HTTPException
 import openai
 from pydantic import BaseModel, Field, ValidationError
-from redis.exceptions import LockError, RedisError
+from redis.exceptions import LockError, RedisClusterException, RedisError
 
 from . import model_catalog_telemetry as telemetry
 from .ai_error import MODEL_NOT_AVAILABLE_MESSAGE, is_model_unavailable_error
@@ -126,7 +126,7 @@ async def reset_model_catalog_cache() -> None:
             if redis is None:
                 raise HTTPException(503, "Model caching is not configured.")
             await redis.set(cache_generation_key(), uuid4().hex)
-    except RedisError as exc:
+    except (RedisError, RedisClusterException) as exc:
         raise HTTPException(
             503, "Could not reset the model cache. Please try again."
         ) from exc
@@ -272,7 +272,7 @@ async def _get_cached_model_catalog(client: Any) -> ModelCatalog | None:
             raise HTTPException(
                 503, "Available models are being refreshed. Please try again."
             )
-    except RedisError:
+    except (RedisError, RedisClusterException):
         telemetry.outcome("unavailable", "redis_error")
         logger.warning("Model catalog cache unavailable.")
         if fetched is not None:
@@ -314,7 +314,7 @@ async def invalidate_model_catalog(client: Any) -> None:
                     uuid4().hex,
                     config.model_cache.ttl_seconds * 2,
                 )
-    except RedisError:
+    except (RedisError, RedisClusterException):
         logger.warning("Could not invalidate the model catalog cache.")
 
 
@@ -336,9 +336,9 @@ async def get_runtime_model_catalog(client: Any) -> ModelCatalog | None:
     """Fetch optional runtime verification metadata before taking database locks."""
     # Runtime guards are introduced only for newer APIKey-ID credentials.
     if credential_scope(client) is None:
-        return
+        return None
     if not runtime_model_cache_enabled():
-        return
+        return None
     with telemetry.lookup("runtime", _telemetry_provider(client)) as observation:
         try:
             catalog = await _get_cached_model_catalog(client)
@@ -352,12 +352,12 @@ async def get_runtime_model_catalog(client: Any) -> ModelCatalog | None:
             reason = observation.reason if observation.reason != "none" else "provider_error"
             telemetry.outcome("unavailable", reason)
             telemetry.decision(_telemetry_provider(client), "fail_open", reason)
-            return
+            return None
         if catalog is None or catalog.cache_mode != "redis":
             reason = observation.reason if observation.reason != "none" else "redis_error"
             telemetry.outcome("unavailable", reason)
             telemetry.decision(_telemetry_provider(client), "fail_open", reason)
-            return
+            return None
         return catalog
 
 

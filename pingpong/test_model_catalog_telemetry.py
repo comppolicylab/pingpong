@@ -224,6 +224,8 @@ async def test_real_sdk_serializes_catalog_spans_and_metrics(
     )
     try:
         with sentry_sdk.new_scope() as scope:
+            # Do not inherit an earlier test's active span or sampling decision.
+            scope.clear()
             scope.set_client(client)
             parent = (
                 sentry_sdk.start_transaction(op="http.server", name="POST /synthetic")
