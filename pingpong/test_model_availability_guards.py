@@ -23,6 +23,23 @@ from websockets.frames import Close
 server = importlib.import_module("pingpong.server")
 
 
+def _authorized_request(*, state):
+    return SimpleNamespace(
+        path_params={},
+        state={
+            "is_anonymous": False,
+            "auth_user": "user:123",
+            "anonymous_share_token_auth": "anonymous_link:test",
+            "anonymous_session_token_auth": None,
+            "authz": SimpleNamespace(
+                check=AsyncMock(return_value=[True]),
+                test=AsyncMock(return_value=True),
+            ),
+            **state,
+        },
+    )
+
+
 @pytest.fixture
 def memory_cache(config, monkeypatch):
     return install_memory_cache(config, monkeypatch)
@@ -50,7 +67,7 @@ async def test_unavailable_id_credential_does_not_create_thread_or_anonymous_ses
         session.add_all([key, group, assistant])
         await session.commit()
     async with db.async_session() as session:
-        request = SimpleNamespace(
+        request = _authorized_request(
             state={
                 "db": session,
                 "is_anonymous": True,
@@ -106,21 +123,31 @@ async def test_existing_thread_is_checked_before_writing_or_generating(
         session.add_all([group, assistant, thread])
         await session.commit()
     async with db.async_session() as session:
-        request = SimpleNamespace(
+        request = _authorized_request(
             state={
                 "db": session,
                 "is_anonymous": False,
                 "auth_user": "user:123",
-                "authz": SimpleNamespace(check=AsyncMock(return_value=[True])),
             }
         )
         with pytest.raises(HTTPException) as raised:
             if operation == "send_message":
                 await server.send_message(
-                    "1", "1", schemas.NewThreadMessage(message="hello"), request, client
+                    "1",
+                    "1",
+                    schemas.NewThreadMessage(message="hello"),
+                    request,
+                    await server.get_bound_message_context(request, "1", "1"),
+                    client,
                 )
             else:
-                await server.create_run("1", "1", request, client)
+                await server.create_run(
+                    "1",
+                    "1",
+                    request,
+                    await server.get_bound_run_context(request, "1", "1"),
+                    client,
+                )
         assert raised.value.status_code == 400
         assert (
             await session.scalar(select(func.count()).select_from(models.Message)) == 0
@@ -229,9 +256,15 @@ async def test_pending_run_checks_its_snapshot_model(db, memory_cache):
         session.add_all([group, assistant, thread, run])
         await session.commit()
     async with db.async_session() as session:
-        request = SimpleNamespace(state={"db": session})
+        request = _authorized_request(state={"db": session})
         with pytest.raises(HTTPException) as raised:
-            await server.create_run("1", "1", request, client)
+            await server.create_run(
+                "1",
+                "1",
+                request,
+                await server.get_bound_run_context(request, "1", "1"),
+                client,
+            )
         assert raised.value.status_code == 400
     client.models.list.assert_awaited_once()
 
@@ -277,11 +310,10 @@ async def test_run_checks_only_the_model_it_will_execute(
         )
         await session.commit()
     async with db.async_session() as session:
-        request = SimpleNamespace(
+        request = _authorized_request(
             state={
                 "db": session,
                 "session": SimpleNamespace(user=user),
-                "authz": SimpleNamespace(check=AsyncMock(return_value=[True])),
                 "auth_user": "user:123",
                 "anonymous_session_token_auth": None,
                 "anonymous_share_token_auth": None,
@@ -290,7 +322,13 @@ async def test_run_checks_only_the_model_it_will_execute(
                 "response_safety_identifier": "test-user",
             }
         )
-        response = await server.create_run("1", "1", request, client)
+        response = await server.create_run(
+            "1",
+            "1",
+            request,
+            await server.get_bound_run_context(request, "1", "1"),
+            client,
+        )
         assert response.status_code == 200
         check.assert_awaited_once_with(client, "available")
         stream.assert_called_once()
@@ -340,7 +378,7 @@ async def test_lecture_resolves_credentials_once_and_only_when_cache_is_usable(
             )
         ),
     )
-    request = SimpleNamespace(
+    request = _authorized_request(
         state={
             "db": object(),
             "is_anonymous": False,
