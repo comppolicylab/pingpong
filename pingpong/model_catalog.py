@@ -275,7 +275,8 @@ def _canonical_model(client: Any, model_id: str) -> str:
     return model_id
 
 
-async def ensure_model_available(client: Any, model_id: str) -> None:
+async def get_runtime_model_catalog(client: Any) -> ModelCatalog | None:
+    """Fetch optional runtime verification metadata before taking database locks."""
     # Runtime guards are introduced only for newer APIKey-ID credentials.
     if credential_scope(client) is None:
         return
@@ -291,8 +292,22 @@ async def ensure_model_available(client: Any, model_id: str) -> None:
         return
     if catalog is None or catalog.cache_mode != "redis":
         return
+    return catalog
+
+
+def validate_model_available(
+    client: Any, model_id: str, catalog: ModelCatalog | None
+) -> None:
+    """Check an execution model against prefetched metadata without network I/O."""
+    if catalog is None:
+        return
     selected = _canonical_model(client, model_id)
     if not any(
         _canonical_model(client, model.id) == selected for model in catalog.models
     ):
         raise HTTPException(400, MODEL_NOT_AVAILABLE_MESSAGE)
+
+
+async def ensure_model_available(client: Any, model_id: str) -> None:
+    catalog = await get_runtime_model_catalog(client)
+    validate_model_available(client, model_id, catalog)

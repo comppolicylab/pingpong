@@ -1,5 +1,6 @@
 import importlib
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
@@ -242,17 +243,28 @@ async def test_voice_uses_provider_rejection_when_cache_cannot_be_used(
     )
 
 
-async def test_pending_run_checks_its_snapshot_model(db, memory_cache):
+@pytest.mark.parametrize("pending_model", ["retired", None])
+async def test_pending_run_checks_its_execution_model(
+    db, memory_cache, monkeypatch, pending_model
+):
     client = provider_client("replacement")
+    stream = Mock()
+    monkeypatch.setattr(server, "run_response", stream)
     async with db.async_session() as session:
         group = models.Class(id=1, name="Group")
         assistant = models.Assistant(
-            id=1, name="Assistant", class_id=1, model="replacement", version=3
+            id=1,
+            name="Assistant",
+            class_id=1,
+            model="replacement" if pending_model is not None else "retired",
+            version=3,
         )
         thread = models.Thread(
             id=1, class_id=1, assistant_id=1, version=3, tools_available="[]"
         )
-        run = models.Run(thread_id=1, model="retired", status=schemas.RunStatus.PENDING)
+        run = models.Run(
+            thread_id=1, model=pending_model, status=schemas.RunStatus.PENDING
+        )
         session.add_all([group, assistant, thread, run])
         await session.commit()
     async with db.async_session() as session:
@@ -266,18 +278,65 @@ async def test_pending_run_checks_its_snapshot_model(db, memory_cache):
                 client,
             )
         assert raised.value.status_code == 400
+    stream.assert_not_called()
+    async with db.async_session() as session:
+        saved = await session.scalar(select(models.Run))
+        assert saved.status == schemas.RunStatus.PENDING
+        assert saved.model == pending_model
     client.models.list.assert_awaited_once()
 
 
 @with_user(123)
-@pytest.mark.parametrize("pending", [False, True])
+@pytest.mark.parametrize(
+    "run_case", ["new", "snapshot", "missing-model", "newer-pending-run"]
+)
 async def test_run_checks_only_the_model_it_will_execute(
-    db, user, memory_cache, monkeypatch, pending
+    db, user, memory_cache, monkeypatch, run_case
 ):
+    pending = run_case != "new"
     client = provider_client("available")
-    check = AsyncMock(wraps=catalog.ensure_model_available)
+    events = []
+    snapshots = []
+    load_thread = server.get_thread_for_class
+
+    async def fetch_catalog(client):
+        events.append("fetch")
+        assert "lock" not in events
+        result = await catalog.get_runtime_model_catalog(client)
+        snapshots.append(result)
+        if run_case == "newer-pending-run":
+            # Simulate another request publishing a pending run during the fetch.
+            async with db.async_session() as session:
+                session.add(
+                    models.Run(
+                        id=2,
+                        thread_id=1,
+                        model="available",
+                        status=schemas.RunStatus.PENDING,
+                    )
+                )
+                await session.commit()
+        events.append("fetched")
+        return result
+
+    async def lock_thread(*args, **kwargs):
+        if kwargs.get("for_update"):
+            assert events == ["fetch", "fetched"]
+            thread = await load_thread(*args, **kwargs)
+            events.append("lock")
+            return thread
+        return await load_thread(*args, **kwargs)
+
+    def validate(client, model_id, snapshot):
+        assert events == ["fetch", "fetched", "lock"]
+        events.append("validate")
+        catalog.validate_model_available(client, model_id, snapshot)
+
+    check = Mock(side_effect=validate)
     stream = Mock(return_value=iter(()))
-    monkeypatch.setattr(server, "ensure_model_available", check)
+    monkeypatch.setattr(server, "get_runtime_model_catalog", fetch_catalog)
+    monkeypatch.setattr(server, "get_thread_for_class", lock_thread)
+    monkeypatch.setattr(server, "validate_model_available", check)
     monkeypatch.setattr(server, "run_response", stream)
     async with db.async_session() as session:
         session.add_all(
@@ -288,7 +347,7 @@ async def test_run_checks_only_the_model_it_will_execute(
                     name="Assistant",
                     class_id=1,
                     version=3,
-                    model="retired" if pending else "available",
+                    model="retired" if run_case == "snapshot" else "available",
                 ),
                 models.Thread(
                     id=1,
@@ -301,7 +360,12 @@ async def test_run_checks_only_the_model_it_will_execute(
                 models.Run(
                     id=1,
                     thread_id=1,
-                    model="available" if pending else "retired",
+                    model=(
+                        None
+                        if run_case == "missing-model"
+                        else "available" if run_case == "snapshot" else "retired"
+                    ),
+                    created=datetime(2020, 1, 1, tzinfo=timezone.utc),
                     status=schemas.RunStatus.PENDING
                     if pending
                     else schemas.RunStatus.COMPLETED,
@@ -330,15 +394,24 @@ async def test_run_checks_only_the_model_it_will_execute(
             client,
         )
         assert response.status_code == 200
-        check.assert_awaited_once_with(client, "available")
+        check.assert_called_once_with(client, "available", snapshots[0])
+        assert events == ["fetch", "fetched", "lock", "validate"]
         stream.assert_called_once()
         run = stream.call_args.kwargs["run"]
         assert run.model == "available"
         assert run.status == schemas.RunStatus.QUEUED
-        assert run.id == (1 if pending else 2)
-        assert await session.scalar(select(func.count()).select_from(models.Run)) == (
-            1 if pending else 2
+        expected_runs = 2 if run_case in {"new", "newer-pending-run"} else 1
+        assert run.id == expected_runs
+        assert (
+            await session.scalar(select(func.count()).select_from(models.Run))
+            == expected_runs
         )
+        run_id = run.id
+        await session.commit()
+    async with db.async_session() as session:
+        saved = await session.get(models.Run, run_id)
+        assert saved.model == "available"
+        assert saved.status == schemas.RunStatus.QUEUED
     client.models.list.assert_awaited_once()
 
 
