@@ -177,6 +177,8 @@ async def _create_slide_runtime_fixture(
     models.Thread,
     list[models.LectureSlideQuestion],
 ]:
+    if await session.get(models.User, 123) is None:
+        session.add(models.User(id=123, email="user_123@domain.org"))
     class_ = models.Class(
         id=1,
         name="Test Class",
@@ -366,9 +368,10 @@ def _slide_context_data_v5() -> dict:
     }
 
 
+@with_user(123)
 @with_institution(11, "Test Institution")
 async def test_initialize_thread_state_and_acquire_control_for_lecture_slides(
-    db, institution
+    db, institution, user
 ):
     async with db.async_session() as session:
         _, _, _, thread, questions = await _create_slide_runtime_fixture(
@@ -408,29 +411,39 @@ async def test_initialize_thread_state_and_acquire_control_for_lecture_slides(
     ]
 
 
+@with_user(123)
 @with_institution(11, "Test Institution")
+@with_authz(
+    grants=[
+        ("user:123", "can_participate", "thread:1"),
+        ("user:123", "can_interact_with", "assistant:1"),
+    ]
+)
 async def test_acquire_lecture_slide_control_endpoint_uses_generic_lesson_session(
-    db, institution
+    api, db, institution, valid_user_token
 ):
     async with db.async_session() as session:
         class_, _, _, thread, questions = await _create_slide_runtime_fixture(
             session, institution
         )
         thread.interaction_mode = schemas.InteractionMode.LECTURE_SLIDES
-        await session.flush()
+        await session.commit()
+        question_id = questions[0].id
 
-        response = await server_module.acquire_lecture_slide_control(
-            str(class_.id),
-            str(thread.id),
-            _server_request(session),
-        )
+    response = api.post(
+        f"/api/v1/class/{class_.id}/thread/{thread.id}/lecture-slide/control/acquire",
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
 
-    assert response["controller_session_id"]
-    lesson_session = response["interactive_lesson_session"]
+    assert response.status_code == 200
+    assert response.json()["controller_session_id"]
+    lesson_session = schemas.InteractiveLessonSession.model_validate(
+        response.json()["interactive_lesson_session"]
+    )
     assert isinstance(lesson_session, schemas.InteractiveLessonSession)
     assert lesson_session.controller.has_control is True
     assert lesson_session.current_question is not None
-    assert lesson_session.current_question.id == questions[0].id
+    assert lesson_session.current_question.id == question_id
 
 
 @with_institution(11, "Test Institution")

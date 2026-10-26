@@ -322,6 +322,7 @@ def test_has_faithful_transcript():
 @with_authz(
     grants=[
         ("user:123", "can_create_thread", "class:1"),
+        ("user:123", "can_interact_with", "assistant:1"),
         ("user:123", "student", "class:1"),
     ]
 )
@@ -461,6 +462,7 @@ async def test_translated_thread_requires_ready_variant_and_saves_language(
 @with_institution(11, "Test Institution")
 @with_authz(
     grants=[
+        ("user:123", "can_interact_with", "assistant:1"),
         ("user:123", "can_create_thread", "class:1"),
         ("user:123", "can_edit", "assistant:1"),
     ]

@@ -226,6 +226,7 @@ from .permission import (
     LoggedIn,
     Or,
     can_participate_thread,
+    require_assistant_interaction,
 )
 from .runs import get_placeholder_ci_calls
 from .saml import get_saml2_attrs, get_saml2_client, get_saml2_settings
@@ -838,6 +839,69 @@ async def get_lecture_slide_thread_or_404(
     if thread.interaction_mode != schemas.InteractionMode.LECTURE_SLIDES:
         raise HTTPException(status_code=404, detail="Lecture slide thread not found.")
     return thread
+
+
+async def get_assistant_for_interaction(
+    request: StateRequest,
+    class_id: str,
+    assistant_id: int,
+    *,
+    load_lecture_context: bool = False,
+) -> models.Assistant:
+    loader = (
+        models.Assistant.get_by_id_with_lecture_video
+        if load_lecture_context
+        else models.Assistant.get_by_id
+    )
+    assistant = await loader(request.state["db"], assistant_id)
+    if not assistant or assistant.class_id != int(class_id):
+        raise HTTPException(
+            404, "Could not find the assistant you specified. Please try again."
+        )
+    await require_assistant_interaction(
+        request, assistant.id, detail="Missing required role"
+    )
+    return assistant
+
+
+async def get_thread_for_interaction(
+    request: StateRequest,
+    class_id: str,
+    thread_id: str,
+    *,
+    load_code_interpreter_files: bool = False,
+    interaction_mode: schemas.InteractionMode | None = None,
+    missing_detail: str = "We could not find the thread or assistant you specified. Please try again.",
+) -> tuple[models.Thread, models.Assistant]:
+    loader = (
+        models.Thread.get_by_id_with_ci_file_ids
+        if load_code_interpreter_files
+        else models.Thread.get_by_id
+    )
+    thread = await loader(request.state["db"], int(thread_id))
+    if thread is None:
+        raise HTTPException(404, missing_detail)
+    if interaction_mode is not None:
+        if thread.class_id != int(class_id):
+            raise HTTPException(404, missing_detail)
+        if thread.interaction_mode != interaction_mode:
+            label = (
+                "Lecture video"
+                if interaction_mode == schemas.InteractionMode.LECTURE_VIDEO
+                else "Lecture slide"
+            )
+            raise HTTPException(404, f"{label} thread not found.")
+    assistant = (
+        await models.Assistant.get_by_id(request.state["db"], thread.assistant_id)
+        if thread.assistant_id is not None
+        else None
+    )
+    if assistant is None or (
+        interaction_mode is None and assistant.class_id != int(class_id)
+    ):
+        raise HTTPException(404, missing_detail)
+    await require_assistant_interaction(request, assistant.id)
+    return thread, assistant
 
 
 if config.development:
@@ -6455,8 +6519,12 @@ async def acquire_lecture_video_control(
     thread_id: str,
     request: StateRequest,
 ):
-    thread = await get_lecture_video_thread_or_404(
-        request.state["db"], class_id, thread_id
+    thread, _ = await get_thread_for_interaction(
+        request,
+        class_id,
+        thread_id,
+        interaction_mode=schemas.InteractionMode.LECTURE_VIDEO,
+        missing_detail="Thread not found",
     )
     try:
         (
@@ -6518,8 +6586,12 @@ async def renew_lecture_video_control(
     data: schemas.LectureVideoControlRenewRequest,
     request: StateRequest,
 ):
-    thread = await get_lecture_video_thread_or_404(
-        request.state["db"], class_id, thread_id
+    thread, _ = await get_thread_for_interaction(
+        request,
+        class_id,
+        thread_id,
+        interaction_mode=schemas.InteractionMode.LECTURE_VIDEO,
+        missing_detail="Thread not found",
     )
     try:
         lease_expires_at = await lecture_video_runtime.renew_control(
@@ -6551,8 +6623,12 @@ async def post_lecture_video_interaction(
     data: schemas.LectureVideoInteractionRequest,
     request: StateRequest,
 ):
-    thread = await get_lecture_video_thread_or_404(
-        request.state["db"], class_id, thread_id
+    thread, _ = await get_thread_for_interaction(
+        request,
+        class_id,
+        thread_id,
+        interaction_mode=schemas.InteractionMode.LECTURE_VIDEO,
+        missing_detail="Thread not found",
     )
     try:
         lecture_video_session = await lecture_video_runtime.process_interaction(
@@ -6580,8 +6656,12 @@ async def acquire_lecture_slide_control(
     thread_id: str,
     request: StateRequest,
 ):
-    thread = await get_lecture_slide_thread_or_404(
-        request.state["db"], class_id, thread_id
+    thread, _ = await get_thread_for_interaction(
+        request,
+        class_id,
+        thread_id,
+        interaction_mode=schemas.InteractionMode.LECTURE_SLIDES,
+        missing_detail="Thread not found",
     )
     try:
         (
@@ -6643,8 +6723,12 @@ async def renew_lecture_slide_control(
     data: schemas.InteractiveLessonControlRenewRequest,
     request: StateRequest,
 ):
-    thread = await get_lecture_slide_thread_or_404(
-        request.state["db"], class_id, thread_id
+    thread, _ = await get_thread_for_interaction(
+        request,
+        class_id,
+        thread_id,
+        interaction_mode=schemas.InteractionMode.LECTURE_SLIDES,
+        missing_detail="Thread not found",
     )
     try:
         lease_expires_at = await lecture_slide_runtime.renew_control(
@@ -6676,8 +6760,12 @@ async def post_lecture_slide_interaction(
     data: schemas.InteractiveLessonInteractionRequest,
     request: StateRequest,
 ):
-    thread = await get_lecture_slide_thread_or_404(
-        request.state["db"], class_id, thread_id
+    thread, _ = await get_thread_for_interaction(
+        request,
+        class_id,
+        thread_id,
+        interaction_mode=schemas.InteractionMode.LECTURE_SLIDES,
+        missing_detail="Thread not found",
     )
     try:
         interactive_lesson_session = await lecture_slide_runtime.process_interaction(
@@ -8409,6 +8497,8 @@ async def create_audio_thread(
 ):
     thread = None
 
+    assistant = await get_assistant_for_interaction(request, class_id, req.assistant_id)
+
     anonymous_session: models.AnonymousSession | None = None
     anonymous_user: models.User | None = None
     if request.state["is_anonymous"]:
@@ -8429,12 +8519,6 @@ async def create_audio_thread(
         if request.state["session"].user.id not in parties_ids:
             parties_ids.append(request.state["session"].user.id)
 
-    assistant = await models.Assistant.get_by_id(request.state["db"], req.assistant_id)
-    if not assistant or assistant.class_id != int(class_id):
-        raise HTTPException(
-            status_code=404,
-            detail="Could not find the assistant you specified. Please try again.",
-        )
     if assistant.interaction_mode != schemas.InteractionMode.VOICE:
         raise HTTPException(
             status_code=400,
@@ -8617,6 +8701,10 @@ async def create_lecture_thread(
     req: schemas.CreateLectureThread,
     request: StateRequest,
 ):
+    assistant = await get_assistant_for_interaction(
+        request, class_id, req.assistant_id, load_lecture_context=True
+    )
+
     anonymous_session: models.AnonymousSession | None = None
     anonymous_user: models.User | None = None
     if request.state["is_anonymous"]:
@@ -8636,15 +8724,6 @@ async def create_lecture_thread(
         anonymous_session_with_logged_in_user = True
         if request.state["session"].user.id not in parties_ids:
             parties_ids.append(request.state["session"].user.id)
-
-    assistant = await models.Assistant.get_by_id_with_lecture_video(
-        request.state["db"], int(req.assistant_id)
-    )
-    if not assistant or assistant.class_id != int(class_id):
-        raise HTTPException(
-            status_code=404,
-            detail="Could not find the assistant you specified. Please try again.",
-        )
 
     if assistant.interaction_mode not in (
         schemas.InteractionMode.LECTURE_VIDEO,
@@ -8900,13 +8979,7 @@ async def create_thread(
     vector_store_object_id = None
     tool_resources: ToolResources = {}
 
-    assistant = await models.Assistant.get_by_id(request.state["db"], req.assistant_id)
-
-    if not assistant or assistant.class_id != int(class_id):
-        raise HTTPException(
-            status_code=404,
-            detail="Could not find the assistant you specified. Please try again.",
-        )
+    assistant = await get_assistant_for_interaction(request, class_id, req.assistant_id)
 
     if assistant.interaction_mode in (
         schemas.InteractionMode.LECTURE_VIDEO,
@@ -9388,19 +9461,12 @@ async def create_run(
     openai_client: OpenAIClient,
     req: schemas.CreateThreadRunRequest = Body(default=None),
 ):
-    thread = await models.Thread.get_by_id_with_ci_file_ids(
-        request.state["db"], int(thread_id)
+    thread, asst = await get_thread_for_interaction(
+        request, class_id, thread_id, load_code_interpreter_files=True
     )
-    asst = await models.Assistant.get_by_id(request.state["db"], thread.assistant_id)
     mcp_tool_ids = await models.Thread.get_mcp_tool_ids_by_thread_id(
         request.state["db"], thread.id
     )
-
-    if not thread or not asst or asst.class_id != int(class_id):
-        raise HTTPException(
-            status_code=404,
-            detail="We could not find the thread or assistant you specified. Please try again.",
-        )
 
     _ensure_lecture_video_thread_version(thread)
 
@@ -9664,7 +9730,12 @@ async def send_message(
 ):
     mcp_tool_ids: list[int] = []
     try:
-        thread = await models.Thread.get_by_id(request.state["db"], int(thread_id))
+        thread, asst = await get_thread_for_interaction(
+            request,
+            class_id,
+            thread_id,
+            missing_detail="The assistant for this thread no longer exists.",
+        )
         _ensure_lecture_video_thread_version(thread)
         if thread.tools_available and "mcp_server" in thread.tools_available:
             mcp_tool_ids = await models.Thread.get_mcp_tool_ids_by_thread_id(
@@ -9672,42 +9743,6 @@ async def send_message(
             )
 
         tool_resources: ToolResources = {}
-
-        # Check that assistant exists
-        if not thread.assistant_id:
-            raise HTTPException(
-                status_code=404,
-                detail="The assistant for this thread no longer exists.",
-            )
-
-        # Check user has permission to view this assistant
-        if not (
-            await request.state["authz"].check(
-                [
-                    (
-                        request.state["auth_user"]
-                        if not request.state["is_anonymous"]
-                        else request.state["anonymous_share_token_auth"],
-                        "can_view",
-                        f"assistant:{thread.assistant_id}",
-                    ),
-                ]
-            )
-        )[0]:
-            raise HTTPException(
-                status_code=403,
-                detail="You do not have permission to interact with this assistant.",
-            )
-
-        asst = await models.Assistant.get_by_id(
-            request.state["db"], thread.assistant_id
-        )
-
-        if not asst or asst.class_id != int(class_id):
-            raise HTTPException(
-                status_code=404,
-                detail="The assistant for this thread no longer exists.",
-            )
 
         if asst.version is not None and thread.version < asst.version:
             raise HTTPException(
@@ -11765,6 +11800,8 @@ async def get_lecture_slide_translation_languages(
     assistant = await lecture_slide_service.get_lecture_slide_assistant_for_class(
         request.state["db"], int(assistant_id), int(class_id)
     )
+    await require_assistant_interaction(request, assistant.id)
+
     can_prepare = await (
         Authz("can_edit", f"assistant:{assistant_id}")
         | Authz("supervisor", f"class:{class_id}")
@@ -11789,6 +11826,8 @@ async def get_lecture_slide_translation_status(
     assistant = await lecture_slide_service.get_lecture_slide_assistant_for_class(
         request.state["db"], int(assistant_id), int(class_id)
     )
+    await require_assistant_interaction(request, assistant.id)
+
     if assistant.lecture_slide_deck_id is None:
         raise HTTPException(404, "Lecture slide deck not found.")
     normalized_code = language_code.strip().lower()

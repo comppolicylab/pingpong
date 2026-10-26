@@ -10,6 +10,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from openai import WebSocketConnectionClosedError
+from fastapi import HTTPException
 from sqlalchemy import select
 from starlette.requests import ClientDisconnect
 from starlette.websockets import WebSocketDisconnect, WebSocketState
@@ -26,7 +27,7 @@ from pingpong.ai import (
 from pingpong.session import populate_request
 from pingpong.state_types import DatabaseCallback, StateWebSocket
 from pingpong.log_utils import sanitize_for_log
-from pingpong.permission import ARCHIVED_DETAIL
+from pingpong.permission import ARCHIVED_DETAIL, require_assistant_interaction
 from .config import config
 
 browser_connection_logger = logging.getLogger("realtime_browser")
@@ -554,6 +555,23 @@ def ws_with_single_realtime_session(func):
                 browser_connection, VOICE_SESSION_FINAL_MESSAGE
             )
             return None
+
+        if thread.assistant is None:
+            await _reject_realtime_session(
+                browser_connection, "The assistant for this thread no longer exists."
+            )
+            return None
+
+        try:
+            await require_assistant_interaction(browser_connection, thread.assistant.id)
+        except HTTPException as error:
+            if error.status_code != 403:
+                raise
+            message = str(error.detail)
+            await _reject_realtime_session(
+                browser_connection, message, code="permissions"
+            )
+            raise ValueError(message) from error
 
         browser_connection.state["thread"] = thread
         browser_connection.state["assistant"] = thread.assistant

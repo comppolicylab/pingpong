@@ -74,7 +74,12 @@ async def test_anonymous_share_file_delete_permission_revoked_on_thread_create(
                     f"anonymous_link:{share_token}",
                     "can_create_thread",
                     f"class:{class_.id}",
-                )
+                ),
+                (
+                    f"anonymous_link:{share_token}",
+                    "can_interact_with",
+                    f"assistant:{assistant.id}",
+                ),
             ]
         )
 
