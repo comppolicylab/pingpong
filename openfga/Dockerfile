@@ -1,4 +1,4 @@
-FROM alpine:3.24.2 AS builder
+FROM alpine:3.24.3 AS builder
 
 RUN [ "apk", "add", "openssl" ]
 RUN [ "mkdir", "/assets" ]
