@@ -390,7 +390,8 @@ async def generate_name(
         return response.output_parsed
     except openai.RateLimitError as e:
         raise e
-    except openai.BadRequestError:
+    except openai.BadRequestError as e:
+        await record_model_error(cli, e)
         # We are typically seeing this error when the Azure content filter
         # is triggered. We should print the message that triggered the error
         # and return None.
