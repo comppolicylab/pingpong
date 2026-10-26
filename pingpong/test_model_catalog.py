@@ -601,7 +601,7 @@ async def test_lock_timeout_waiters_do_not_fetch_directly(
 ):
     lock = AsyncMock()
 
-    async def timeout():
+    async def timeout(*args):
         await asyncio.sleep(0)
         raise LockError("Unable to acquire lock within the time specified")
 
@@ -639,7 +639,7 @@ async def test_lock_timeout_rereads_only_valid_current_snapshots(
     client = provider_client()
     lock = AsyncMock()
 
-    async def publish_then_timeout():
+    async def publish_then_timeout(*args):
         if publication == "global-reset":
             await catalog.reset_model_catalog_cache()
         global_generation = await catalog._global_generation(memory_cache)

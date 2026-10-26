@@ -1,7 +1,7 @@
 """Versioned, credential-ID-scoped provider inventories shared through Redis."""
 
 import asyncio
-from contextlib import asynccontextmanager
+from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass
 import hashlib
 import json
@@ -15,6 +15,7 @@ import openai
 from pydantic import BaseModel, Field, ValidationError
 from redis.exceptions import LockError, RedisError
 
+from . import model_catalog_telemetry as telemetry
 from .ai_error import MODEL_NOT_AVAILABLE_MESSAGE, is_model_unavailable_error
 from .config import config
 from .redis.client import RedisPool
@@ -146,35 +147,41 @@ async def close_model_catalog_cache() -> None:
 
 
 async def _fetch(client: Any, generation: str = "") -> ModelCatalog:
-    try:
-        async with asyncio.timeout(15):
-            response = await client.models.list()
-    except TimeoutError as exc:
-        raise HTTPException(
-            503, "We couldn't verify available models. Please try again."
-        ) from exc
-    return ModelCatalog(
-        cache_mode="redis" if generation else "direct",
-        generation=generation,
-        models=[
-            ProviderModel.model_validate(model, from_attributes=True)
-            for model in response.data
-        ],
-    )
+    with telemetry.step("provider_fetch"):
+        try:
+            async with asyncio.timeout(15):
+                response = await client.models.list()
+        except TimeoutError as exc:
+            telemetry.outcome("error", "provider_error")
+            raise HTTPException(
+                503, "We couldn't verify available models. Please try again."
+            ) from exc
+        except openai.APIError:
+            telemetry.outcome("error", "provider_error")
+            raise
+        return ModelCatalog(
+            cache_mode="redis" if generation else "direct",
+            generation=generation,
+            models=[
+                ProviderModel.model_validate(model, from_attributes=True)
+                for model in response.data
+            ],
+        )
 
 
 async def _read(redis: Any, prefix: str) -> ModelCatalog | None:
-    payload, generation = await redis.mget(f"{prefix}:snapshot", f"{prefix}:generation")
-    if payload is None:
-        return None
-    try:
-        catalog = ModelCatalog.model_validate_json(payload)
-    except (ValidationError, ValueError, TypeError):
-        return None
-    if catalog.generation != generation:
-        return None
-    catalog.cache_mode = "redis"
-    return catalog
+    with telemetry.step("redis_read"):
+        payload, generation = await redis.mget(f"{prefix}:snapshot", f"{prefix}:generation")
+        if payload is None:
+            return None
+        try:
+            catalog = ModelCatalog.model_validate_json(payload)
+        except (ValidationError, ValueError, TypeError):
+            return None
+        if catalog.generation != generation:
+            return None
+        catalog.cache_mode = "redis"
+        return catalog
 
 
 async def _get_cached_model_catalog(client: Any) -> ModelCatalog | None:
@@ -193,13 +200,16 @@ async def _get_cached_model_catalog(client: Any) -> ModelCatalog | None:
                 if cached is not None and (
                     await redis.get(cache_generation_key()) == global_generation
                 ):
+                    telemetry.outcome("hit")
                     return cached
                 lock_acquired = False
                 try:
                     # Single flight across workers, with a finite lock lease and wait.
-                    async with redis.lock(
-                        f"{prefix}:lock", timeout=90, blocking_timeout=20
-                    ):
+                    async with AsyncExitStack() as stack:
+                        with telemetry.step("lock_wait"):
+                            await stack.enter_async_context(
+                                redis.lock(f"{prefix}:lock", timeout=90, blocking_timeout=20)
+                            )
                         lock_acquired = True
                         if await redis.get(cache_generation_key()) != global_generation:
                             continue
@@ -207,6 +217,7 @@ async def _get_cached_model_catalog(client: Any) -> ModelCatalog | None:
                         if cached is not None and (
                             await redis.get(cache_generation_key()) == global_generation
                         ):
+                            telemetry.outcome("hit")
                             return cached
                         ttl = config.model_cache.ttl_seconds
                         async with redis.pipeline(transaction=False) as pipeline:
@@ -231,6 +242,7 @@ async def _get_cached_model_catalog(client: Any) -> ModelCatalog | None:
                         if published and (
                             await redis.get(cache_generation_key()) == global_generation
                         ):
+                            telemetry.outcome("refresh")
                             return fetched
                         # A reset made this result obsolete; do not reuse it if
                         # releasing the lock or the next Redis operation fails.
@@ -239,6 +251,8 @@ async def _get_cached_model_catalog(client: Any) -> ModelCatalog | None:
                     if lock_acquired:
                         # Preserve fallback/reuse behavior for lock release failures.
                         raise
+                    telemetry.outcome("unavailable", "lock_timeout")
+                    telemetry.event("lock_timeout")
                     # A timeout does not mean Redis is down. The lock holder may
                     # have published just as our wait expired; read the current
                     # generation once more without starting another provider fetch.
@@ -249,14 +263,17 @@ async def _get_cached_model_catalog(client: Any) -> ModelCatalog | None:
                     if cached is not None and (
                         await redis.get(cache_generation_key()) == current_generation
                     ):
+                        telemetry.outcome("hit", "lock_timeout")
                         return cached
                     raise HTTPException(
                         503, "Available models are being refreshed. Please try again."
                     )
+            telemetry.outcome("unavailable", "reset_race")
             raise HTTPException(
                 503, "Available models are being refreshed. Please try again."
             )
     except RedisError:
+        telemetry.outcome("unavailable", "redis_error")
         logger.warning("Model catalog cache unavailable.")
         if fetched is not None:
             fetched.cache_mode = "direct"
@@ -264,9 +281,22 @@ async def _get_cached_model_catalog(client: Any) -> ModelCatalog | None:
     return None
 
 
+def _telemetry_provider(client: Any) -> str:
+    scope = credential_scope(client)
+    return scope.provider if scope and scope.provider in {"openai", "azure"} else "other"
+
+
 async def get_model_catalog(client: Any) -> ModelCatalog:
-    cached = await _get_cached_model_catalog(client)
-    return cached if cached is not None else await _fetch(client)
+    if not runtime_model_cache_enabled() or credential_scope(client) is None:
+        return await _fetch(client)
+    with telemetry.lookup("listing", _telemetry_provider(client)):
+        cached = await _get_cached_model_catalog(client)
+        if cached is not None:
+            if cached.cache_mode == "direct":
+                telemetry.outcome("direct_fallback", "redis_error")
+            return cached
+        telemetry.outcome("direct_fallback", "redis_error")
+        return await _fetch(client)
 
 
 async def invalidate_model_catalog(client: Any) -> None:
@@ -307,19 +337,28 @@ async def get_runtime_model_catalog(client: Any) -> ModelCatalog | None:
     # Runtime guards are introduced only for newer APIKey-ID credentials.
     if credential_scope(client) is None:
         return
-    try:
-        catalog = await _get_cached_model_catalog(client)
-    except (openai.APIError, HTTPException) as exc:
-        if isinstance(exc, HTTPException) and exc.status_code != 503:
-            raise
-        logger.warning(
-            "Could not verify model availability (%s); deferring to provider execution.",
-            type(exc).__name__,
-        )
+    if not runtime_model_cache_enabled():
         return
-    if catalog is None or catalog.cache_mode != "redis":
-        return
-    return catalog
+    with telemetry.lookup("runtime", _telemetry_provider(client)) as observation:
+        try:
+            catalog = await _get_cached_model_catalog(client)
+        except (openai.APIError, HTTPException) as exc:
+            if isinstance(exc, HTTPException) and exc.status_code != 503:
+                raise
+            logger.warning(
+                "Could not verify model availability (%s); deferring to provider execution.",
+                type(exc).__name__,
+            )
+            reason = observation.reason if observation.reason != "none" else "provider_error"
+            telemetry.outcome("unavailable", reason)
+            telemetry.decision(_telemetry_provider(client), "fail_open", reason)
+            return
+        if catalog is None or catalog.cache_mode != "redis":
+            reason = observation.reason if observation.reason != "none" else "redis_error"
+            telemetry.outcome("unavailable", reason)
+            telemetry.decision(_telemetry_provider(client), "fail_open", reason)
+            return
+        return catalog
 
 
 def validate_model_available(
@@ -332,7 +371,9 @@ def validate_model_available(
     if not any(
         _canonical_model(client, model.id) == selected for model in catalog.models
     ):
+        telemetry.decision(_telemetry_provider(client), "rejected", "model_missing")
         raise HTTPException(400, MODEL_NOT_AVAILABLE_MESSAGE)
+    telemetry.decision(_telemetry_provider(client), "allowed")
 
 
 async def ensure_model_available(client: Any, model_id: str) -> None:
