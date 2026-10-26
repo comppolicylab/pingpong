@@ -22,6 +22,7 @@ from sqlalchemy.orm import selectinload
 
 import pingpong.models as models
 import pingpong.schemas as schemas
+from pingpong.resource_binding import get_assistant_for_class
 from pingpong.ai import get_openai_client_by_class_id
 from pingpong.config import config
 from pingpong.files import FILE_TYPES
@@ -871,9 +872,9 @@ def raise_if_lecture_slide_assignment_conflict(exc: IntegrityError) -> None:
 async def get_lecture_slide_assistant_for_class(
     session: AsyncSession, assistant_id: int, class_id: int
 ) -> models.Assistant:
-    assistant = await models.Assistant.get_by_id(session, assistant_id)
-    if not assistant or assistant.class_id != class_id:
-        raise HTTPException(404, f"Assistant {assistant_id} not found.")
+    assistant = await get_assistant_for_class(
+        session, class_id, assistant_id, detail=f"Assistant {assistant_id} not found."
+    )
 
     if assistant.interaction_mode != schemas.InteractionMode.LECTURE_SLIDES:
         raise HTTPException(

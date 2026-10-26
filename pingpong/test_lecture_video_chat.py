@@ -1421,7 +1421,7 @@ async def test_build_frame_message_parts_deduplicates_zero_offsets(monkeypatch):
             id=100 + len(upload_calls),
         )
 
-    async def _fake_add_image_files(_session, _thread_id, image_file_ids):
+    async def _fake_add_image_files(_session, _thread_id, image_file_ids, *, class_id):
         added_image_files.extend(image_file_ids)
 
     monkeypatch.setattr(
@@ -1490,7 +1490,7 @@ async def test_build_frame_message_parts_skips_failed_uploads(monkeypatch):
             id=102,
         )
 
-    async def _fake_add_image_files(_session, _thread_id, image_file_ids):
+    async def _fake_add_image_files(_session, _thread_id, image_file_ids, *, class_id):
         added_image_files.extend(image_file_ids)
 
     monkeypatch.setattr(

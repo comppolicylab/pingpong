@@ -14,6 +14,7 @@ import uuid_utils as uuid
 
 import pingpong.models as models
 import pingpong.schemas as schemas
+from pingpong.resource_binding import get_assistant_for_class
 from .authz import AuthzClient, Relation
 from .caption_text import SENTENCE_ENDINGS, caption_display_length
 from .config import config
@@ -929,9 +930,9 @@ def raise_if_lecture_video_assignment_conflict(exc: IntegrityError) -> None:
 async def get_lecture_video_assistant_for_class(
     session: AsyncSession, assistant_id: int, class_id: int
 ) -> models.Assistant:
-    assistant = await models.Assistant.get_by_id(session, assistant_id)
-    if not assistant or assistant.class_id != class_id:
-        raise HTTPException(404, f"Assistant {assistant_id} not found.")
+    assistant = await get_assistant_for_class(
+        session, class_id, assistant_id, detail=f"Assistant {assistant_id} not found."
+    )
 
     if assistant.interaction_mode != schemas.InteractionMode.LECTURE_VIDEO:
         raise HTTPException(

@@ -788,7 +788,7 @@ async def _build_frame_message_parts(
         if created_thread_image_file_ids:
             try:
                 await models.Thread.add_image_files(
-                    session, thread_id, created_thread_image_file_ids
+                    session, thread_id, created_thread_image_file_ids, class_id=class_id
                 )
             except Exception:
                 logger.warning(

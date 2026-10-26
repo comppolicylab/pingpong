@@ -28,6 +28,7 @@ from pingpong.session import populate_request
 from pingpong.state_types import DatabaseCallback, StateWebSocket
 from pingpong.log_utils import sanitize_for_log
 from pingpong.permission import ARCHIVED_DETAIL, require_assistant_interaction
+from pingpong.resource_binding import require_resource_in_class
 from .config import config
 
 browser_connection_logger = logging.getLogger("realtime_browser")
@@ -443,7 +444,9 @@ def ws_check_realtime_permissions(func):
             class_ = await models.Class.get_by_id(
                 browser_connection.state["db"], class_id_int
             )
-            if class_ and class_.archived is not None:
+            if class_ is None:
+                raise ValueError("Class not found.")
+            if class_.archived is not None:
                 raise ValueError(ARCHIVED_DETAIL)
             await check_realtime_permissions(browser_connection, thread_id)
         except ValueError as e:
@@ -497,6 +500,14 @@ def ws_with_thread_assistant_prompt(func):
             browser_connection.state["db"],
             int(thread_id),
         )
+        require_resource_in_class(
+            browser_connection.state["thread"], class_id, detail="Thread not found"
+        )
+        require_resource_in_class(
+            browser_connection.state["thread"].assistant,
+            class_id,
+            detail="Assistant not found.",
+        )
         browser_connection.state["assistant"] = browser_connection.state[
             "thread"
         ].assistant
@@ -529,11 +540,19 @@ def ws_with_single_realtime_session(func):
             for_update=True,
             include_voice_mode_recording=True,
         )
-        if thread is None:
-            await _reject_realtime_session(
-                browser_connection, "This voice session was not found."
+        try:
+            thread = require_resource_in_class(
+                thread, class_id, detail="This voice session was not found."
             )
-            return None
+            if thread.assistant is not None:
+                require_resource_in_class(
+                    thread.assistant, class_id, detail="Assistant not found."
+                )
+        except HTTPException as error:
+            await _reject_realtime_session(
+                browser_connection, str(error.detail), code="permissions"
+            )
+            raise ValueError(str(error.detail)) from error
 
         has_messages = await _thread_has_messages(
             browser_connection.state["db"], thread.id

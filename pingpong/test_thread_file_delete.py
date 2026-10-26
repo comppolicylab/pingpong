@@ -76,14 +76,18 @@ async def test_delete_thread_file_v2_file_search_upload_by_current_user_succeeds
             type=schemas.VectorStoreType.THREAD,
             class_id=10,
         )
-        file = models.File(
-            id=77,
-            file_id="file-allowed",
-            name="report.csv",
-            content_type="text/csv",
-            class_id=10,
-            private=True,
-            uploader_id=123,
+        file = await models.File.create(
+            session,
+            {
+                "id": 77,
+                "file_id": "file-allowed",
+                "name": "report.csv",
+                "content_type": "text/csv",
+                "class_id": 10,
+                "private": True,
+                "uploader_id": 123,
+            },
+            10,
         )
         vector_store.files = [file]
         session.add(vector_store)
@@ -135,14 +139,18 @@ async def test_delete_thread_file_v2_code_interpreter_upload_by_current_user_suc
 ):
     async with db.async_session() as session:
         session.add(models.Class(id=11, name="Class 11"))
-        file = models.File(
-            id=78,
-            file_id="file-ci",
-            name="script.py",
-            content_type="text/x-python",
-            class_id=11,
-            private=True,
-            uploader_id=123,
+        file = await models.File.create(
+            session,
+            {
+                "id": 78,
+                "file_id": "file-ci",
+                "name": "script.py",
+                "content_type": "text/x-python",
+                "class_id": 11,
+                "private": True,
+                "uploader_id": 123,
+            },
+            11,
         )
         session.add(file)
         session.add(
@@ -338,14 +346,18 @@ async def test_delete_thread_file_v2_other_users_upload_returns_403(
     async with db.async_session() as session:
         session.add(models.User(id=999, email="other@example.com"))
         session.add(models.Class(id=15, name="Class 15"))
-        file = models.File(
-            id=82,
-            file_id="file-other-user",
-            name="report.csv",
-            content_type="text/csv",
-            class_id=15,
-            private=True,
-            uploader_id=999,
+        file = await models.File.create(
+            session,
+            {
+                "id": 82,
+                "file_id": "file-other-user",
+                "name": "report.csv",
+                "content_type": "text/csv",
+                "class_id": 15,
+                "private": True,
+                "uploader_id": 999,
+            },
+            15,
         )
         session.add(file)
         session.add(

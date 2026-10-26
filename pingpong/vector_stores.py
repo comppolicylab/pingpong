@@ -69,6 +69,8 @@ async def append_vector_store_files(
     openai_client: openai.AsyncClient,
     vector_store_object_id: int,
     file_search_file_ids: list[str],
+    *,
+    class_id: int,
 ) -> str:
     """
     Adds the given file_search file ids to the vector store specified by vector_store_id
@@ -79,13 +81,14 @@ async def append_vector_store_files(
         session (AsyncSession): SQLAlchemy session
         openai_client (openai.AsyncClient): OpenAI client
         vector_store_object_id (int): DB PK of the vector store
+        class_id (int): Class already validated for the owning thread
         file_search_file_ids (list[str]): list of file ids to add to the vector store
 
     Returns:
         int: vector store object id (DB PK, used for database queries)
     """
     vector_store_id = await add_vector_store_files_to_db(
-        session, vector_store_object_id, file_search_file_ids
+        session, vector_store_object_id, file_search_file_ids, class_id=class_id
     )
 
     try:
@@ -104,6 +107,8 @@ async def add_vector_store_files_to_db(
     session: AsyncSession,
     vector_store_object_id: int,
     file_search_file_ids: list[str],
+    *,
+    class_id: int,
 ) -> str:
     """
     Adds the given file_search file ids to the vector store specified by vector_store_id (the PK).
@@ -112,13 +117,14 @@ async def add_vector_store_files_to_db(
         session (AsyncSession): SQLAlchemy session
         openai_client (openai.AsyncClient): OpenAI client
         vector_store_object_id (int): DB PK of the vector store
+        class_id (int): Class already validated for the owning thread
         file_search_file_ids (list[str]): list of file ids to add to the vector store
 
     Returns:
         int: vector store object id (DB PK, used for database queries)
     """
     return await models.VectorStore.add_files_return_id(
-        session, vector_store_object_id, file_search_file_ids
+        session, vector_store_object_id, file_search_file_ids, class_id=class_id
     )
 
 

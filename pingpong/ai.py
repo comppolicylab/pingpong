@@ -1788,6 +1788,7 @@ class BufferedResponseStreamHandler:
                     session=session,
                     thread_id=self.thread_id,
                     file_ids=[file.code_interpreter_file_id],
+                    class_id=self.class_id,
                 )
                 await session.commit()
 
@@ -1803,6 +1804,7 @@ class BufferedResponseStreamHandler:
                     session=session,
                     thread_id=self.thread_id,
                     file_ids=[file.vision_file_id],
+                    class_id=self.class_id,
                 )
                 await session.commit()
 

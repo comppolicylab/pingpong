@@ -3,6 +3,7 @@ import json
 import logging
 import time
 from collections import defaultdict
+from collections.abc import Awaitable, Callable
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from math import ceil
@@ -120,6 +121,15 @@ from pingpong.lti.manual_registration import (
     build_canvas_openid_configuration,
     extract_registration_settings,
 )
+from pingpong.resource_binding import (
+    ClassBoundFile,
+    get_file_for_class,
+    get_thread_for_class,
+    get_assistant_for_class,
+    get_assistant_share_for_class,
+    get_attachment_files_for_class,
+    require_resource_in_class,
+)
 from pingpong.realtime import browser_realtime_websocket
 from pingpong.say_transform import (
     combine_manual_tts_pronunciation_text,
@@ -200,10 +210,9 @@ from .config import config
 from .errors import async_sentry
 from .files import (
     FILE_TYPES,
-    FileNotFoundException,
     generate_vision_image_descriptions_string,
     handle_create_file,
-    handle_delete_file,
+    handle_delete_bound_file,
     handle_delete_files,
     validate_private_file_delete_permissions,
 )
@@ -853,11 +862,13 @@ async def get_assistant_for_interaction(
         if load_lecture_context
         else models.Assistant.get_by_id
     )
-    assistant = await loader(request.state["db"], assistant_id)
-    if not assistant or assistant.class_id != int(class_id):
-        raise HTTPException(
-            404, "Could not find the assistant you specified. Please try again."
-        )
+    assistant = await get_assistant_for_class(
+        request.state["db"],
+        class_id,
+        assistant_id,
+        loader=loader,
+        detail="Could not find the assistant you specified. Please try again.",
+    )
     await require_assistant_interaction(
         request, assistant.id, detail="Missing required role"
     )
@@ -878,12 +889,10 @@ async def get_thread_for_interaction(
         if load_code_interpreter_files
         else models.Thread.get_by_id
     )
-    thread = await loader(request.state["db"], int(thread_id))
-    if thread is None:
-        raise HTTPException(404, missing_detail)
+    thread = await get_thread_for_class(
+        request.state["db"], class_id, thread_id, loader=loader, detail=missing_detail
+    )
     if interaction_mode is not None:
-        if thread.class_id != int(class_id):
-            raise HTTPException(404, missing_detail)
         if thread.interaction_mode != interaction_mode:
             label = (
                 "Lecture video"
@@ -896,10 +905,7 @@ async def get_thread_for_interaction(
         if thread.assistant_id is not None
         else None
     )
-    if assistant is None or (
-        interaction_mode is None and assistant.class_id != int(class_id)
-    ):
-        raise HTTPException(404, missing_detail)
+    assistant = require_resource_in_class(assistant, class_id, detail=missing_detail)
     await require_assistant_interaction(request, assistant.id)
     return thread, assistant
 
@@ -938,6 +944,139 @@ async def get_openai_client_for_class(request: StateRequest) -> OpenAIClientType
 
 OpenAIClientDependency = Depends(get_openai_client_for_class)
 OpenAIClient = Annotated[OpenAIClientType, OpenAIClientDependency]
+
+
+# These callables are shared by the provider dependency and the handler. FastAPI
+# caches their results per request, including the selected eager-loading shape.
+def thread_class_dependency(
+    *,
+    loader: Callable[..., Awaitable[models.Thread | None]] | None = None,
+    detail: str = "Thread not found",
+) -> Callable[..., Awaitable[models.Thread]]:
+    async def load(
+        request: StateRequest, class_id: str, thread_id: str
+    ) -> models.Thread:
+        return await get_thread_for_class(
+            request.state["db"], class_id, thread_id, loader=loader, detail=detail
+        )
+
+    return load
+
+
+def assistant_class_dependency(
+    *,
+    loader: Callable[..., Awaitable[models.Assistant | None]] | None = None,
+    detail: str = "Assistant not found.",
+) -> Callable[..., Awaitable[models.Assistant]]:
+    async def load(
+        request: StateRequest, class_id: str, assistant_id: str
+    ) -> models.Assistant:
+        return await get_assistant_for_class(
+            request.state["db"], class_id, assistant_id, loader=loader, detail=detail
+        )
+
+    return load
+
+
+get_bound_thread = thread_class_dependency()
+get_bound_thread_with_users = thread_class_dependency(
+    loader=models.Thread.get_by_id_with_users
+)
+get_bound_voice_thread = thread_class_dependency(
+    loader=models.Thread.get_by_id_with_users_voice_mode
+)
+get_bound_image_thread = thread_class_dependency(detail="Image not found")
+get_bound_assistant = assistant_class_dependency()
+get_bound_assistant_for_copy = assistant_class_dependency(
+    loader=models.Assistant.get_by_id_with_copy_context, detail="Assistant not found"
+)
+get_bound_assistant_for_edit = assistant_class_dependency(
+    loader=models.Assistant.get_by_id_with_ci_files_mcp
+)
+
+
+async def get_bound_run_context(
+    request: StateRequest, class_id: str, thread_id: str
+) -> tuple[models.Thread, models.Assistant]:
+    return await get_thread_for_interaction(
+        request, class_id, thread_id, load_code_interpreter_files=True
+    )
+
+
+async def get_bound_message_context(
+    request: StateRequest, class_id: str, thread_id: str
+) -> tuple[models.Thread, models.Assistant]:
+    return await get_thread_for_interaction(
+        request,
+        class_id,
+        thread_id,
+        missing_detail="The assistant for this thread no longer exists.",
+    )
+
+
+async def get_bound_file(
+    request: StateRequest, class_id: str, file_id: int
+) -> ClassBoundFile:
+    return await get_file_for_class(request.state["db"], class_id, file_id)
+
+
+def bound_openai_client_dependency(binding: Callable[..., Awaitable[Any]]):
+    async def client(
+        _resource: Annotated[Any, Depends(binding)],
+        openai_client: OpenAIClient,
+    ) -> OpenAIClientType:
+        return openai_client
+
+    return Depends(client)
+
+
+BoundThread = Annotated[models.Thread, Depends(get_bound_thread)]
+BoundThreadWithUsers = Annotated[models.Thread, Depends(get_bound_thread_with_users)]
+BoundVoiceThread = Annotated[models.Thread, Depends(get_bound_voice_thread)]
+BoundImageThread = Annotated[models.Thread, Depends(get_bound_image_thread)]
+BoundAssistant = Annotated[models.Assistant, Depends(get_bound_assistant)]
+BoundAssistantForCopy = Annotated[
+    models.Assistant, Depends(get_bound_assistant_for_copy)
+]
+BoundAssistantForEdit = Annotated[
+    models.Assistant, Depends(get_bound_assistant_for_edit)
+]
+BoundRunContext = Annotated[
+    tuple[models.Thread, models.Assistant], Depends(get_bound_run_context)
+]
+BoundMessageContext = Annotated[
+    tuple[models.Thread, models.Assistant], Depends(get_bound_message_context)
+]
+BoundFile = Annotated[ClassBoundFile, Depends(get_bound_file)]
+
+ThreadClient = Annotated[
+    OpenAIClientType, bound_openai_client_dependency(get_bound_thread)
+]
+ThreadWithUsersClient = Annotated[
+    OpenAIClientType, bound_openai_client_dependency(get_bound_thread_with_users)
+]
+VoiceThreadClient = Annotated[
+    OpenAIClientType, bound_openai_client_dependency(get_bound_voice_thread)
+]
+ImageThreadClient = Annotated[
+    OpenAIClientType, bound_openai_client_dependency(get_bound_image_thread)
+]
+AssistantClient = Annotated[
+    OpenAIClientType, bound_openai_client_dependency(get_bound_assistant)
+]
+AssistantCopyClient = Annotated[
+    OpenAIClientType, bound_openai_client_dependency(get_bound_assistant_for_copy)
+]
+AssistantEditClient = Annotated[
+    OpenAIClientType, bound_openai_client_dependency(get_bound_assistant_for_edit)
+]
+RunClient = Annotated[
+    OpenAIClientType, bound_openai_client_dependency(get_bound_run_context)
+]
+MessageClient = Annotated[
+    OpenAIClientType, bound_openai_client_dependency(get_bound_message_context)
+]
+FileClient = Annotated[OpenAIClientType, bound_openai_client_dependency(get_bound_file)]
 
 
 @v1.middleware("http")
@@ -2885,13 +3024,25 @@ async def delete_class(class_id: str, request: StateRequest):
         async for thread in models.Thread.get_ids_by_class_id(
             request.state["db"], class_.id
         ):
-            await delete_thread(class_id, str(thread.id), request, openai_client)
+            await delete_thread(
+                class_id,
+                str(thread.id),
+                request,
+                openai_client=openai_client,
+                thread=await get_bound_voice_thread(request, class_id, str(thread.id)),
+            )
 
         # Delete all class assistants
         async for assistant_id in models.Assistant.async_get_by_class_id(
             request.state["db"], class_.id
         ):
-            await delete_assistant(class_id, str(assistant_id), request, openai_client)
+            await delete_assistant(
+                class_id,
+                str(assistant_id),
+                request,
+                openai_client=openai_client,
+                asst=await get_bound_assistant(request, class_id, str(assistant_id)),
+            )
 
         # Double check that we deleted all vector stores
         async for vector_store_id in models.VectorStore.get_id_by_class_id(
@@ -4598,12 +4749,12 @@ def _code_interpreter_content_from_tool_call(
     response_model=schemas.ThreadWithMeta,
 )
 async def get_thread(
-    class_id: str, thread_id: str, request: StateRequest, openai_client: OpenAIClient
+    class_id: str,
+    thread_id: str,
+    request: StateRequest,
+    thread: BoundVoiceThread,
+    openai_client: VoiceThreadClient,
 ):
-    thread = await models.Thread.get_by_id_with_users_voice_mode(
-        request.state["db"], int(thread_id)
-    )
-
     if thread.version <= 2:
         (
             messages,
@@ -5773,9 +5924,7 @@ async def get_thread_video(
     if not config.video_store:
         raise HTTPException(status_code=404, detail="No Video Store exists.")
 
-    thread = await models.Thread.get_by_id(request.state["db"], int(thread_id))
-    if not thread or thread.class_id != int(class_id):
-        raise HTTPException(status_code=404, detail="Thread not found")
+    thread = await get_thread_for_class(request.state["db"], class_id, int(thread_id))
     if (
         thread.interaction_mode != schemas.InteractionMode.LECTURE_VIDEO
         or not thread.lecture_video_id
@@ -6919,8 +7068,11 @@ async def get_thread_recording(
 ):
     user_id = request.state["session"].user.id
     thread, is_supervisor_check = await asyncio.gather(
-        models.Thread.get_by_id_with_users_voice_mode(
-            request.state["db"], int(thread_id)
+        get_thread_for_class(
+            request.state["db"],
+            class_id,
+            int(thread_id),
+            loader=models.Thread.get_by_id_with_users_voice_mode,
         ),
         request.state["authz"].check(
             [
@@ -6933,8 +7085,6 @@ async def get_thread_recording(
         ),
     )
 
-    if not thread:
-        raise HTTPException(status_code=404, detail="Thread not found")
     if not thread.voice_mode_recording:
         raise HTTPException(
             status_code=404,
@@ -6992,26 +7142,14 @@ async def transcribe_thread_recording(
     thread_id: str,
     request: StateRequest,
     tasks: BackgroundTasks,
-    openai_client: OpenAIClient,
+    thread: BoundVoiceThread,
+    openai_client: VoiceThreadClient,
 ):
     user_id = request.state["session"].user.id
-    thread, is_supervisor_check = await asyncio.gather(
-        models.Thread.get_by_id_with_users_voice_mode(
-            request.state["db"], int(thread_id)
-        ),
-        request.state["authz"].check(
-            [
-                (
-                    f"user:{user_id}",
-                    "supervisor",
-                    f"class:{class_id}",
-                ),
-            ]
-        ),
+    is_supervisor_check = await request.state["authz"].check(
+        [(f"user:{user_id}", "supervisor", f"class:{class_id}")]
     )
 
-    if not thread:
-        raise HTTPException(status_code=404, detail="Thread not found")
     if not thread.voice_mode_recording:
         raise HTTPException(
             status_code=404,
@@ -7048,6 +7186,7 @@ async def redirect_to_transcription_download(
     thread_id: str,
     request: StateRequest,
 ):
+    await get_thread_for_class(request.state["db"], class_id, thread_id)
     token = request.query_params.get("token")
     nowfn = get_now_fn(request)
     try:
@@ -7097,13 +7236,11 @@ async def get_ci_messages(
     class_id: str,
     thread_id: str,
     request: StateRequest,
-    openai_client: OpenAIClient,
+    thread: BoundThread,
+    openai_client: ThreadClient,
     run_id: str,
     step_id: str,
 ):
-    thread = await models.Thread.get_by_id(request.state["db"], int(thread_id))
-    if not thread or thread.class_id != int(class_id):
-        raise HTTPException(status_code=404, detail="Thread not found")
     assistant, is_supervisor_check = await asyncio.gather(
         models.Assistant.get_by_id(request.state["db"], thread.assistant_id),
         request.state["authz"].check(
@@ -7373,7 +7510,8 @@ async def list_thread_messages(
     class_id: str,
     thread_id: str,
     request: StateRequest,
-    openai_client: OpenAIClient,
+    thread: BoundThreadWithUsers,
+    openai_client: ThreadWithUsersClient,
     limit: int = 20,
     before: str | None = None,
 ):
@@ -7385,9 +7523,6 @@ async def list_thread_messages(
 
     limit = min(limit, 100)
 
-    thread = await models.Thread.get_by_id_with_users(
-        request.state["db"], int(thread_id)
-    )
     if thread.version <= 2:
         messages_task = openai_client.beta.threads.messages.list(
             thread.thread_id, limit=limit, order="asc", before=before
@@ -8117,12 +8252,12 @@ async def get_thread_details(
     thread_id: str,
     request: StateRequest,
 ):
-    thread = await models.Thread.get_by_id_extended_details(
-        request.state["db"], int(thread_id)
+    thread = await get_thread_for_class(
+        request.state["db"],
+        class_id,
+        int(thread_id),
+        loader=models.Thread.get_by_id_extended_details,
     )
-
-    if thread is None or thread.class_id != int(class_id):
-        raise HTTPException(status_code=404, detail="Thread not found")
 
     coalesced = []
     for run in thread.runs:
@@ -8156,11 +8291,11 @@ async def get_last_run(
     class_id: str,
     thread_id: str,
     request: StateRequest,
-    openai_client: OpenAIClient,
+    thread: BoundThread,
+    openai_client: ThreadClient,
     block: bool = True,
 ):
     TIMEOUT = 60  # seconds
-    thread = await models.Thread.get_by_id(request.state["db"], int(thread_id))
 
     if thread.version <= 2:
         # Streaming is not supported right now, so we need to poll to get the last run.
@@ -8450,6 +8585,7 @@ async def list_threads(
         thread_ids,
         limit,
         before=current_latest_time,
+        class_id=int(class_id),
     )
 
     if not threads:
@@ -8981,6 +9117,14 @@ async def create_thread(
 
     assistant = await get_assistant_for_interaction(request, class_id, req.assistant_id)
 
+    await get_attachment_files_for_class(
+        request.state["db"],
+        class_id,
+        (req.file_search_file_ids or [])
+        + (req.code_interpreter_file_ids or [])
+        + (req.vision_file_ids or []),
+    )
+
     if assistant.interaction_mode in (
         schemas.InteractionMode.LECTURE_VIDEO,
         schemas.InteractionMode.LECTURE_SLIDES,
@@ -9276,7 +9420,9 @@ async def create_thread(
             if req.code_interpreter_file_ids:
                 tasks_to_run.append(
                     models.File.get_all_by_file_id(
-                        request.state["db"], req.code_interpreter_file_ids
+                        request.state["db"],
+                        req.code_interpreter_file_ids,
+                        class_id=int(class_id),
                     )
                 )
             else:
@@ -9285,7 +9431,9 @@ async def create_thread(
             if req.file_search_file_ids:
                 tasks_to_run.append(
                     models.File.get_all_by_file_id(
-                        request.state["db"], req.file_search_file_ids
+                        request.state["db"],
+                        req.file_search_file_ids,
+                        class_id=int(class_id),
                     )
                 )
             else:
@@ -9399,7 +9547,7 @@ async def create_thread(
                     + (req.vision_file_ids or [])
                 )
                 files = await models.File.get_all_by_file_id(
-                    request.state["db"], all_file_ids
+                    request.state["db"], all_file_ids, class_id=int(class_id)
                 )
                 for file in files:
                     grants.append(
@@ -9458,12 +9606,11 @@ async def create_run(
     class_id: str,
     thread_id: str,
     request: StateRequest,
-    openai_client: OpenAIClient,
+    context: BoundRunContext,
+    openai_client: RunClient,
     req: schemas.CreateThreadRunRequest = Body(default=None),
 ):
-    thread, asst = await get_thread_for_interaction(
-        request, class_id, thread_id, load_code_interpreter_files=True
-    )
+    thread, asst = context
     mcp_tool_ids = await models.Thread.get_mcp_tool_ids_by_thread_id(
         request.state["db"], thread.id
     )
@@ -9472,15 +9619,9 @@ async def create_run(
 
     if thread.version == 3:
         try:
-            thread = await models.Thread.get_by_id(
-                request.state["db"], int(thread_id), for_update=True
+            thread = await get_thread_for_class(
+                request.state["db"], class_id, int(thread_id), for_update=True
             )
-            if not thread:
-                raise HTTPException(
-                    status_code=404,
-                    detail="We could not find the thread or assistant you specified. Please try again.",
-                )
-
             last_run = await models.Thread.get_latest_run_by_thread_id(
                 request.state["db"], thread.id
             )
@@ -9726,16 +9867,20 @@ async def send_message(
     thread_id: str,
     data: schemas.NewThreadMessage,
     request: StateRequest,
-    openai_client: OpenAIClient,
+    context: BoundMessageContext,
+    openai_client: MessageClient,
 ):
     mcp_tool_ids: list[int] = []
     try:
-        thread, asst = await get_thread_for_interaction(
-            request,
+        thread, asst = context
+        await get_attachment_files_for_class(
+            request.state["db"],
             class_id,
-            thread_id,
-            missing_detail="The assistant for this thread no longer exists.",
+            (data.file_search_file_ids or [])
+            + (data.code_interpreter_file_ids or [])
+            + (data.vision_file_ids or []),
         )
+
         _ensure_lecture_video_thread_version(thread)
         if thread.tools_available and "mcp_server" in thread.tools_available:
             mcp_tool_ids = await models.Thread.get_mcp_tool_ids_by_thread_id(
@@ -9774,15 +9919,9 @@ async def send_message(
                     detail="OpenAI is still processing your last request. We're fetching the latest status...",
                 )
         elif thread.version == 3:
-            thread = await models.Thread.get_by_id(
-                request.state["db"], int(thread_id), for_update=True
+            thread = await get_thread_for_class(
+                request.state["db"], class_id, int(thread_id), for_update=True
             )
-            if not thread:
-                raise HTTPException(
-                    status_code=404,
-                    detail="We could not find the thread or assistant you specified. Please try again.",
-                )
-
             last_run = await models.Thread.get_latest_run_by_thread_id(
                 request.state["db"], thread.id
             )
@@ -9857,12 +9996,14 @@ async def send_message(
                         openai_client,
                         thread.vector_store_id,
                         data.file_search_file_ids,
+                        class_id=thread.class_id,
                     )
                 else:
                     await add_vector_store_files_to_db(
                         request.state["db"],
                         thread.vector_store_id,
                         data.file_search_file_ids,
+                        class_id=thread.class_id,
                     )
             else:
                 # Store doesn't exist, create a new one
@@ -9904,7 +10045,10 @@ async def send_message(
 
         if data.code_interpreter_file_ids:
             await models.Thread.add_code_interpreter_files(
-                request.state["db"], thread.id, data.code_interpreter_file_ids
+                request.state["db"],
+                thread.id,
+                data.code_interpreter_file_ids,
+                class_id=thread.class_id,
             )
 
         vision_image_descriptions = None
@@ -9922,7 +10066,10 @@ async def send_message(
 
         if data.vision_file_ids:
             await models.Thread.add_image_files(
-                request.state["db"], thread.id, data.vision_file_ids
+                request.state["db"],
+                thread.id,
+                data.vision_file_ids,
+                class_id=thread.class_id,
             )
             [
                 messageContent.append(
@@ -10012,7 +10159,9 @@ async def send_message(
             if data.code_interpreter_file_ids:
                 tasks_to_run.append(
                     models.File.get_all_by_file_id(
-                        request.state["db"], data.code_interpreter_file_ids
+                        request.state["db"],
+                        data.code_interpreter_file_ids,
+                        class_id=int(class_id),
                     )
                 )
             else:
@@ -10021,7 +10170,9 @@ async def send_message(
             if data.file_search_file_ids:
                 tasks_to_run.append(
                     models.File.get_all_by_file_id(
-                        request.state["db"], data.file_search_file_ids
+                        request.state["db"],
+                        data.file_search_file_ids,
+                        class_id=int(class_id),
                     )
                 )
             else:
@@ -10335,7 +10486,7 @@ async def send_message(
     response_model=schemas.GenericStatus,
 )
 async def publish_thread(class_id: str, thread_id: str, request: StateRequest):
-    thread = await models.Thread.get_by_id(request.state["db"], int(thread_id))
+    thread = await get_thread_for_class(request.state["db"], class_id, int(thread_id))
     thread.private = False
     request.state["db"].add(thread)
     await request.state["authz"].write_safe(
@@ -10352,7 +10503,7 @@ async def publish_thread(class_id: str, thread_id: str, request: StateRequest):
     response_model=schemas.GenericStatus,
 )
 async def unpublish_thread(class_id: str, thread_id: str, request: StateRequest):
-    thread = await models.Thread.get_by_id(request.state["db"], int(thread_id))
+    thread = await get_thread_for_class(request.state["db"], class_id, int(thread_id))
     thread.private = True
     request.state["db"].add(thread)
     await request.state["authz"].write_safe(
@@ -10374,16 +10525,9 @@ async def remove_file_from_thread(
     message_id: str,
     file_id: str,
     request: StateRequest,
-    openai_client: OpenAIClient,
+    thread: BoundThread,
+    openai_client: ThreadClient,
 ):
-    thread = await models.Thread.get_by_id(request.state["db"], int(thread_id))
-
-    if not thread or thread.class_id != int(class_id):
-        raise HTTPException(
-            status_code=404,
-            detail="Thread not found",
-        )
-
     if thread.version <= 2:
         message = await _get_assistants_api_message_by_id(
             openai_client,
@@ -10394,7 +10538,9 @@ async def remove_file_from_thread(
         if not attachment_tools:
             raise HTTPException(status_code=404, detail="File not found")
 
-        file = await models.File.get_by_file_id(request.state["db"], file_id)
+        file = await models.File.get_by_file_id(
+            request.state["db"], file_id, class_id=int(class_id)
+        )
         if not file or _is_image_content_type(file.content_type):
             raise HTTPException(status_code=404, detail="File not found")
         if not _request_session_owns_uploaded_file(request, file):
@@ -10557,14 +10703,12 @@ async def remove_file_from_thread(
     response_model=schemas.GenericStatus,
 )
 async def delete_thread(
-    class_id: str, thread_id: str, request: StateRequest, openai_client: OpenAIClient
+    class_id: str,
+    thread_id: str,
+    request: StateRequest,
+    thread: BoundVoiceThread,
+    openai_client: VoiceThreadClient,
 ):
-    thread = await models.Thread.get_by_id_with_users_voice_mode(
-        request.state["db"], int(thread_id)
-    )
-    if thread is None:
-        raise HTTPException(status_code=404, detail="Thread not found")
-
     class_ = await models.Class.get_by_id(request.state["db"], thread.class_id)
     if class_ is None:
         raise HTTPException(status_code=404, detail="Group not found")
@@ -12163,9 +12307,12 @@ async def validate_assistant_lecture_video_voice(
     body: schemas.ValidateLectureVideoVoiceRequest,
     request: StateRequest,
 ):
-    assistant = await models.Assistant.get_by_id(request.state["db"], int(assistant_id))
-    if not assistant or assistant.class_id != int(class_id):
-        raise HTTPException(404, f"Assistant {assistant_id} not found.")
+    assistant = await get_assistant_for_class(
+        request.state["db"],
+        class_id,
+        int(assistant_id),
+        detail=f"Assistant {assistant_id} not found.",
+    )
     if assistant.interaction_mode not in {
         schemas.InteractionMode.LECTURE_VIDEO,
         schemas.InteractionMode.LECTURE_SLIDES,
@@ -12197,19 +12344,15 @@ async def validate_assistant_lecture_video_voice(
     response_model=schemas.GenericStatus,
 )
 async def delete_file(
-    class_id: str, file_id: str, request: StateRequest, openai_client: OpenAIClient
+    class_id: str,
+    file_id: str,
+    request: StateRequest,
+    bound_file: BoundFile,
+    openai_client: FileClient,
 ):
-    try:
-        await handle_delete_file(
-            request.state["db"],
-            request.state["authz"],
-            openai_client,
-            int(file_id),
-            int(class_id),
-        )
-    except FileNotFoundException:
-        raise HTTPException(404, "File not found!")
-    return {"status": "ok"}
+    return await handle_delete_bound_file(
+        request.state["db"], request.state["authz"], openai_client, bound_file
+    )
 
 
 @v1.delete(
@@ -12224,19 +12367,12 @@ async def delete_user_file(
     user_id: str,
     file_id: str,
     request: StateRequest,
-    openai_client: OpenAIClient,
+    bound_file: BoundFile,
+    openai_client: FileClient,
 ):
-    try:
-        await handle_delete_file(
-            request.state["db"],
-            request.state["authz"],
-            openai_client,
-            int(file_id),
-            int(class_id),
-        )
-    except FileNotFoundException:
-        raise HTTPException(404, "File not found!")
-    return {"status": "ok"}
+    return await handle_delete_bound_file(
+        request.state["db"], request.state["authz"], openai_client, bound_file
+    )
 
 
 @v1.get(
@@ -12454,12 +12590,13 @@ async def _ensure_assistant_avatar_is_editable(
     dependencies=[Depends(Authz("can_view", "assistant:{assistant_id}"))],
 )
 async def get_assistant_avatar(class_id: str, assistant_id: str, request: StateRequest):
-    assistant = await models.Assistant.get_by_id(request.state["db"], int(assistant_id))
-    if (
-        assistant is None
-        or assistant.class_id != int(class_id)
-        or assistant.avatar_file_id is None
-    ):
+    assistant = await get_assistant_for_class(
+        request.state["db"],
+        class_id,
+        int(assistant_id),
+        detail="Assistant avatar not found.",
+    )
+    if assistant.avatar_file_id is None:
         raise HTTPException(404, "Assistant avatar not found.")
 
     avatar_file = await models.File.get_by_id_with_download(
@@ -12485,12 +12622,13 @@ async def get_assistant_avatar(class_id: str, assistant_id: str, request: StateR
 async def get_thread_assistant_avatar(
     class_id: str, thread_id: str, request: StateRequest
 ):
-    thread = await models.Thread.get_by_id(request.state["db"], int(thread_id))
-    if (
-        thread is None
-        or thread.class_id != int(class_id)
-        or thread.assistant_id is None
-    ):
+    thread = await get_thread_for_class(
+        request.state["db"],
+        class_id,
+        int(thread_id),
+        detail="Assistant avatar not found.",
+    )
+    if thread.assistant_id is None:
         raise HTTPException(404, "Assistant avatar not found.")
 
     assistant = await models.Assistant.get_by_id(
@@ -12529,9 +12667,9 @@ async def upload_assistant_avatar(
     request: StateRequest,
     upload: UploadFile,
 ):
-    assistant = await models.Assistant.get_by_id(request.state["db"], int(assistant_id))
-    if assistant is None or assistant.class_id != int(class_id):
-        raise HTTPException(404, "Assistant not found.")
+    assistant = await get_assistant_for_class(
+        request.state["db"], class_id, int(assistant_id)
+    )
     await _ensure_assistant_avatar_is_editable(request, assistant, class_id)
 
     content_type = (upload.content_type or "").lower().split(";", maxsplit=1)[0]
@@ -12612,9 +12750,9 @@ async def upload_assistant_avatar(
 async def delete_assistant_avatar(
     class_id: str, assistant_id: str, request: StateRequest
 ):
-    assistant = await models.Assistant.get_by_id(request.state["db"], int(assistant_id))
-    if assistant is None or assistant.class_id != int(class_id):
-        raise HTTPException(404, "Assistant not found.")
+    assistant = await get_assistant_for_class(
+        request.state["db"], class_id, int(assistant_id)
+    )
     await _ensure_assistant_avatar_is_editable(request, assistant, class_id)
 
     old_avatar_keys = await _delete_assistant_avatar(request.state["db"], assistant)
@@ -12641,6 +12779,11 @@ async def create_assistant(
     request: StateRequest,
     openai_client: OpenAIClient,
 ):
+    await get_attachment_files_for_class(
+        request.state["db"],
+        class_id,
+        (req.file_search_file_ids or []) + (req.code_interpreter_file_ids or []),
+    )
     class_id_int = int(class_id)
     creator_id = request.state["session"].user.id
 
@@ -13466,18 +13609,11 @@ async def copy_assistant(
     class_id: str,
     assistant_id: str,
     request: StateRequest,
-    openai_client: OpenAIClient,
+    assistant: BoundAssistantForCopy,
+    openai_client: AssistantCopyClient,
     copy_options: schemas.CopyAssistantRequest | None = Body(default=None),
 ):
-    assistant = await models.Assistant.get_by_id_with_copy_context(
-        request.state["db"], int(assistant_id)
-    )
     class_id_int = int(class_id)
-    if not assistant or assistant.class_id != class_id_int:
-        raise HTTPException(
-            status_code=404,
-            detail="Assistant not found",
-        )
     source_class = await models.Class.get_by_id(request.state["db"], class_id_int)
     if not source_class:
         raise HTTPException(status_code=404, detail="Class not found")
@@ -13584,15 +13720,14 @@ async def copy_assistant_check(
     request: StateRequest,
     copy_options: schemas.CopyAssistantRequest,
 ):
-    assistant = await models.Assistant.get_by_id_with_lecture_video(
-        request.state["db"], int(assistant_id)
+    assistant = await get_assistant_for_class(
+        request.state["db"],
+        class_id,
+        int(assistant_id),
+        loader=models.Assistant.get_by_id_with_lecture_video,
+        detail="Assistant not found",
     )
     class_id_int = int(class_id)
-    if not assistant or assistant.class_id != class_id_int:
-        raise HTTPException(
-            status_code=404,
-            detail="Assistant not found",
-        )
     source_class = await models.Class.get_by_id(request.state["db"], class_id_int)
     if not source_class:
         raise HTTPException(status_code=404, detail="Class not found")
@@ -13661,12 +13796,12 @@ async def share_assistant(
     """
     Create an anonymous share of an assistant with the class.
     """
-    asst = await models.Assistant.get_by_id(request.state["db"], int(assistant_id))
-    if not asst or asst.class_id != int(class_id):
-        raise HTTPException(
-            status_code=404,
-            detail=f"Assistant {assistant_id} not found.",
-        )
+    asst = await get_assistant_for_class(
+        request.state["db"],
+        class_id,
+        int(assistant_id),
+        detail=f"Assistant {assistant_id} not found.",
+    )
 
     if not asst.published:
         raise HTTPException(
@@ -13720,29 +13855,9 @@ async def unshare_assistant(
     """
     Remove an anonymous share of an assistant with the class.
     """
-    asst, share_link = await asyncio.gather(
-        models.Assistant.get_by_id(request.state["db"], int(assistant_id)),
-        models.AnonymousLink.get_by_id_with_assistant(
-            request.state["db"], int(share_id)
-        ),
+    share_link = await get_assistant_share_for_class(
+        request.state["db"], class_id, assistant_id, share_id, wrong_parent_status=400
     )
-    if not asst or asst.class_id != int(class_id):
-        raise HTTPException(
-            status_code=404,
-            detail=f"Assistant {assistant_id} not found.",
-        )
-
-    if not share_link:
-        raise HTTPException(
-            status_code=404,
-            detail="Share link not found.",
-        )
-
-    if share_link.assistant.id != asst.id:
-        raise HTTPException(
-            status_code=400,
-            detail="This share link does not belong to the specified assistant.",
-        )
 
     if not share_link.active:
         raise HTTPException(
@@ -13790,15 +13905,9 @@ async def update_assistant_share_name(
     """
     Update the name of an anonymous share of an assistant with the class.
     """
-    share_link = await models.AnonymousLink.get_by_id(
-        request.state["db"], int(share_id)
+    share_link = await get_assistant_share_for_class(
+        request.state["db"], class_id, assistant_id, share_id
     )
-
-    if not share_link:
-        raise HTTPException(
-            status_code=404,
-            detail="Share link not found.",
-        )
 
     share_link.name = req.name
     request.state["db"].add(share_link)
@@ -13838,21 +13947,18 @@ async def update_assistant(
     assistant_id: str,
     req: schemas.UpdateAssistant,
     request: StateRequest,
-    openai_client: OpenAIClient,
+    asst: BoundAssistantForEdit,
+    openai_client: AssistantEditClient,
 ):
     # Get the existing assistant.
-    asst = await models.Assistant.get_by_id_with_ci_files_mcp(
-        request.state["db"], int(assistant_id)
-    )
     grants = list[Relation]()
     revokes = list[Relation]()
 
-    if not asst or asst.class_id != int(class_id):
-        raise HTTPException(
-            status_code=404,
-            detail="Assistant not found.",
-        )
-
+    await get_attachment_files_for_class(
+        request.state["db"],
+        class_id,
+        (req.file_search_file_ids or []) + (req.code_interpreter_file_ids or []),
+    )
     # Users without publish permission can't toggle the published status of assistants.
     is_toggling_publish_status = (
         "published" in req.model_fields_set
@@ -14613,7 +14719,9 @@ async def update_assistant(
                     "file_ids": req.code_interpreter_file_ids
                 }
                 asst.code_interpreter_files = await models.File.get_all_by_file_id(
-                    request.state["db"], req.code_interpreter_file_ids
+                    request.state["db"],
+                    req.code_interpreter_file_ids,
+                    class_id=int(class_id),
                 )
             else:
                 asst.code_interpreter_files = []
@@ -15777,9 +15885,9 @@ async def get_assistant_mcp_servers(
     class_id: str, assistant_id: str, request: StateRequest
 ):
     """Get MCP servers configured for an assistant"""
-    asst = await models.Assistant.get_by_id(request.state["db"], int(assistant_id))
-    if not asst or asst.class_id != int(class_id):
-        raise HTTPException(404, "Assistant not found.")
+    asst = await get_assistant_for_class(
+        request.state["db"], class_id, int(assistant_id)
+    )
 
     mcp_servers = await models.MCPServerTool.get_for_assistant(
         request.state["db"], asst.id
@@ -15797,9 +15905,9 @@ async def get_assistant_mcp_servers(
     response_model=schemas.GenericStatus,
 )
 async def publish_assistant(class_id: str, assistant_id: str, request: StateRequest):
-    asst = await models.Assistant.get_by_id(request.state["db"], int(assistant_id))
-    if not asst or asst.class_id != int(class_id):
-        raise HTTPException(404, "Assistant not found.")
+    asst = await get_assistant_for_class(
+        request.state["db"], class_id, int(assistant_id)
+    )
     asst.published = func.now()
     request.state["db"].add(asst)
     await request.state["authz"].write_safe(
@@ -15817,9 +15925,9 @@ async def publish_assistant(class_id: str, assistant_id: str, request: StateRequ
     response_model=schemas.GenericStatus,
 )
 async def unpublish_assistant(class_id: str, assistant_id: str, request: StateRequest):
-    asst = await models.Assistant.get_by_id(request.state["db"], int(assistant_id))
-    if not asst or asst.class_id != int(class_id):
-        raise HTTPException(404, "Assistant not found.")
+    asst = await get_assistant_for_class(
+        request.state["db"], class_id, int(assistant_id)
+    )
     asst.published = None
     request.state["db"].add(asst)
     await request.state["authz"].write_safe(
@@ -15837,9 +15945,9 @@ async def unpublish_assistant(class_id: str, assistant_id: str, request: StateRe
     response_model=schemas.GenericStatus,
 )
 async def lock_assistant(class_id: str, assistant_id: str, request: StateRequest):
-    asst = await models.Assistant.get_by_id(request.state["db"], int(assistant_id))
-    if not asst or asst.class_id != int(class_id):
-        raise HTTPException(404, "Assistant not found.")
+    asst = await get_assistant_for_class(
+        request.state["db"], class_id, int(assistant_id)
+    )
     asst.locked = True
     request.state["db"].add(asst)
     return {"status": "ok"}
@@ -15854,9 +15962,9 @@ async def lock_assistant(class_id: str, assistant_id: str, request: StateRequest
     response_model=schemas.GenericStatus,
 )
 async def unlock_assistant(class_id: str, assistant_id: str, request: StateRequest):
-    asst = await models.Assistant.get_by_id(request.state["db"], int(assistant_id))
-    if not asst or asst.class_id != int(class_id):
-        raise HTTPException(404, "Assistant not found.")
+    asst = await get_assistant_for_class(
+        request.state["db"], class_id, int(assistant_id)
+    )
     asst.locked = False
     request.state["db"].add(asst)
     return {"status": "ok"}
@@ -15871,12 +15979,9 @@ async def delete_assistant(
     class_id: str,
     assistant_id: str,
     request: StateRequest,
-    openai_client: OpenAIClient,
+    asst: BoundAssistant,
+    openai_client: AssistantClient,
 ):
-    asst = await models.Assistant.get_by_id(request.state["db"], int(assistant_id))
-    if not asst or asst.class_id != int(class_id):
-        raise HTTPException(404, "Assistant not found.")
-
     # Detach the vector store from the assistant and delete it
     vector_store_obj_id = None
     private_file_candidates: set[int] = set()
@@ -16041,11 +16146,12 @@ async def get_assistant_files(
     assistant_id: str,
     request: StateRequest,
 ):
-    asst = await models.Assistant.get_by_id_with_ci_files(
-        request.state["db"], int(assistant_id)
+    asst = await get_assistant_for_class(
+        request.state["db"],
+        class_id,
+        int(assistant_id),
+        loader=models.Assistant.get_by_id_with_ci_files,
     )
-    if not asst or asst.class_id != int(class_id):
-        raise HTTPException(404, "Assistant not found.")
     file_search_files = []
     if asst.vector_store_id:
         file_search_files = await models.VectorStore.get_files_by_id(
@@ -16070,12 +16176,11 @@ async def get_message_image(
     message_id: str,
     file_id: str,
     request: StateRequest,
-    openai_client: OpenAIClient,
+    thread: BoundImageThread,
+    openai_client: ImageThreadClient,
     proof: str | None = None,
 ):
-    thread = await models.Thread.get_by_id(request.state["db"], int(thread_id))
-
-    if not thread or thread.class_id != int(class_id) or thread.version > 2:
+    if thread.version > 2:
         raise HTTPException(status_code=404, detail="Image not found")
 
     if proof:
@@ -16123,11 +16228,10 @@ async def get_ci_call_image(
     ci_call_id: str,
     file_id: str,
     request: StateRequest,
-    openai_client: OpenAIClient,
+    thread: BoundImageThread,
+    openai_client: ImageThreadClient,
 ):
-    thread = await models.Thread.get_by_id(request.state["db"], int(thread_id))
-
-    if not thread or thread.class_id != int(class_id) or thread.version > 2:
+    if thread.version > 2:
         raise HTTPException(status_code=404, detail="Image not found")
 
     try:
@@ -16171,11 +16275,10 @@ async def get_ci_call_image_by_step_id(
     step_id: str,
     file_id: str,
     request: StateRequest,
-    openai_client: OpenAIClient,
+    thread: BoundImageThread,
+    openai_client: ImageThreadClient,
 ):
-    thread = await models.Thread.get_by_id(request.state["db"], int(thread_id))
-
-    if not thread or thread.class_id != int(class_id) or thread.version > 2:
+    if thread.version > 2:
         raise HTTPException(status_code=404, detail="Image not found")
 
     if not await _assistants_api_ci_call_references_image(
@@ -16202,10 +16305,9 @@ async def get_image(
     file_id: str,
     request: StateRequest,
 ):
-    thread = await models.Thread.get_by_id(request.state["db"], int(thread_id))
-
-    if not thread or thread.class_id != int(class_id):
-        raise HTTPException(status_code=404, detail="Image not found")
+    thread = await get_thread_for_class(
+        request.state["db"], class_id, int(thread_id), detail="Image not found"
+    )
 
     if thread.version <= 2:
         raise HTTPException(status_code=404, detail="Image not found")
@@ -16418,16 +16520,9 @@ async def download_file(
     message_id: str,
     file_id: str,
     request: StateRequest,
-    openai_client: OpenAIClient,
+    thread: BoundThread,
+    openai_client: ThreadClient,
 ):
-    thread = await models.Thread.get_by_id(request.state["db"], int(thread_id))
-
-    if not thread or thread.class_id != int(class_id):
-        raise HTTPException(
-            status_code=404,
-            detail="Thread not found",
-        )
-
     if thread.version <= 2:
         message = await _get_assistants_api_message_by_id(
             openai_client,

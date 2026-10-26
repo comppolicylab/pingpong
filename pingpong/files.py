@@ -14,6 +14,7 @@ from .authz import AuthzClient, Relation
 from .config import config
 from .log_utils import sanitize_for_log
 from .models import File, S3File
+from .resource_binding import ClassBoundFile, require_files_in_class
 from .schemas import FileTypeInfo, FileUploadPurpose, GenericStatus, ImageProxy
 from .schemas import File as FileSchema
 import base64
@@ -183,6 +184,21 @@ async def handle_delete_file(
     file = await File.get_by_id_with_delete_context(session, int_file_id)
     if not file:
         raise FileNotFoundException()
+    await require_files_in_class(session, class_id, [file])
+    return await handle_delete_bound_file(
+        session, authz, oai_client, ClassBoundFile(file, class_id)
+    )
+
+
+async def handle_delete_bound_file(
+    session: AsyncSession,
+    authz: AuthzClient,
+    oai_client: openai.AsyncClient,
+    bound_file: ClassBoundFile,
+) -> GenericStatus:
+    """Delete a file whose class binding was established before provider setup."""
+    file, class_id = bound_file.file, bound_file.class_id
+    int_file_id = file.id
     remote_file_id = file.file_id
 
     # 1) Ensure that the file is not in use by any assistants
