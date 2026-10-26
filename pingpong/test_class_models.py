@@ -92,7 +92,9 @@ async def test_openai_class_models_include_latest_gpt_5_models(monkeypatch):
         "gpt-5.5",
     ]
     highlighted_models = [
-        model["id"] for model in response["models"] if model["highlight"]
+        model["id"]
+        for model in response["models"]
+        if model["highlight"] and model["is_available"]
     ]
     assert highlighted_models == ["gpt-5.6-terra"]
     reasoning_models = [
@@ -169,9 +171,10 @@ async def test_azure_class_models_do_not_force_classic_assistants(monkeypatch):
     )
 
     assert response["enforce_classic_assistants"] is False
-    assert response["models"][0]["id"] == "gpt-5.4"
-    assert response["models"][0]["is_latest"] is True
-    assert response["models"][0]["supports_next_gen_assistants"] is True
+    model = next(model for model in response["models"] if model["id"] == "gpt-5.4")
+    assert model["is_latest"] is True
+    assert model["supports_next_gen_assistants"] is True
+    assert model["is_available"] is True
 
 
 @pytest.mark.parametrize("provider_lists_legacy_model", [False, True])
@@ -216,7 +219,11 @@ async def test_class_models_retain_legacy_metadata_for_existing_assistants(
             assert model["created"].timestamp() == 123
 
     # Missing current models must not become available merely because they are known.
-    assert "gpt-realtime-2.1-mini" not in {model["id"] for model in response["models"]}
+    for model_id in ["gpt-realtime-2.1-mini", "gpt-5.6-sol"]:
+        matches = [model for model in response["models"] if model["id"] == model_id]
+        assert len(matches) == 1
+        assert matches[0]["is_available"] is False
+        assert matches[0]["hide_in_model_selector"] is True
     latest = next(
         model for model in response["models"] if model["id"] == "gpt-realtime-2.1"
     )

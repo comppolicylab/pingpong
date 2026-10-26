@@ -4632,12 +4632,10 @@ async def list_class_models(
             }
         )
 
-    # Keep registered legacy models available as metadata even after the provider
-    # stops listing them. The shared editor retains only an assistant's saved
-    # hidden model and displays its Legacy Model warning; new selections remain
-    # blocked by hide_in_model_selector.
-    for model_id in HIDDEN_MODELS:
-        if model_id in included_model_ids or model_id not in KNOWN_MODELS:
+    # Retain missing known models as unavailable metadata so saved assistants
+    # show the correct warning. Hidden records cannot be newly selected.
+    for model_id in KNOWN_MODELS:
+        if model_id in included_model_ids:
             continue
         filtered.append(
             schemas.AssistantModel(

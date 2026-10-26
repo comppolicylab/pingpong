@@ -33,6 +33,7 @@
 	import { browser } from '$app/environment';
 	import * as api from '$lib/api';
 	import { setsEqual } from '$lib/set';
+	import { getAssistantModelModes } from '$lib/assistantModelModes';
 	import { happyToast, sadToast } from '$lib/toast';
 	import { errorMessage as formatErrorMessage } from '$lib/errors';
 	import { normalizeNewlines } from '$lib/content.js';
@@ -2218,8 +2219,10 @@
 		: data?.enforceClassicAssistants ||
 			(interactionMode === 'voice' && enforceClassicAssistantsForVoice);
 
-	$: chatModelCount = data.models.filter((model) => model.type === 'chat').length;
-	$: audioModelCount = data.models.filter((model) => model.type === 'voice').length;
+	$: modelModes = getAssistantModelModes(
+		data.models,
+		data.isCreating ? undefined : assistant?.interaction_mode
+	);
 
 	$: initialTools = (assistant?.tools ? (JSON.parse(assistant.tools) as Tool[]) : defaultTools).map(
 		(t) => t.type
@@ -5773,7 +5776,7 @@
 					&nbsp;Lecture video mode cannot be changed after assistant creation.{/if}</Helper
 			>
 			<ButtonGroup>
-				{#if !isEditingLectureAssistant && chatModelCount !== 0}
+				{#if !isEditingLectureAssistant && modelModes.chat}
 					<RadioButton
 						value="chat"
 						bind:group={interactionMode}
@@ -5787,7 +5790,7 @@
 						</div></RadioButton
 					>
 				{/if}
-				{#if !isEditingLectureAssistant && audioModelCount !== 0}
+				{#if !isEditingLectureAssistant && modelModes.voice}
 					<RadioButton
 						value="voice"
 						bind:group={interactionMode}
@@ -5801,7 +5804,7 @@
 						</div></RadioButton
 					>
 				{/if}
-				{#if showLectureModeOption && chatModelCount !== 0}
+				{#if showLectureModeOption && modelModes.chat}
 					{@const lectureDisabled =
 						lectureModeSelectionDisabled || !lectureVideoPolicy.can_select_mode_in_assistant_editor}
 					<RadioButton
@@ -5836,7 +5839,7 @@
 					>
 				{/if}
 			</ButtonGroup>
-			{#if showLectureModeOption && chatModelCount !== 0 && lectureVideoPolicy.message}
+			{#if showLectureModeOption && modelModes.chat && lectureVideoPolicy.message}
 				<Tooltip
 					triggeredBy="#lecture-video-admin-tooltip"
 					class="z-100 text-sm font-light"
