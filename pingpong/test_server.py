@@ -2483,6 +2483,7 @@ async def test_copy_assistant_check_endpoint(api, db, institution, valid_user_to
 @with_authz(
     grants=[
         ("user:123", "can_create_thread", "class:1"),
+        ("user:123", "can_interact_with", "assistant:1"),
     ]
 )
 async def test_create_thread_rejects_voice_assistant(

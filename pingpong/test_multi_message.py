@@ -2119,7 +2119,7 @@ async def test_list_thread_messages_includes_reasoning_messages(
 @with_authz(
     grants=[
         ("user:887", "can_participate", "thread:8071"),
-        ("user:887", "can_view", "assistant:8072"),
+        ("user:887", "can_interact_with", "assistant:8072"),
     ]
 )
 async def test_send_message_rejects_older_thread_version_for_upgraded_assistant(
@@ -2165,7 +2165,12 @@ async def test_send_message_rejects_older_thread_version_for_upgraded_assistant(
 
 
 @with_user(888)
-@with_authz(grants=[("user:888", "can_participate", "thread:8101")])
+@with_authz(
+    grants=[
+        ("user:888", "can_participate", "thread:8101"),
+        ("user:888", "can_interact_with", "assistant:8002"),
+    ]
+)
 async def test_create_run_locks_thread_before_checking_latest_run(
     api, db, valid_user_token, monkeypatch
 ):
@@ -2233,7 +2238,12 @@ async def test_create_run_locks_thread_before_checking_latest_run(
 
 
 @with_user(889)
-@with_authz(grants=[("user:889", "can_participate", "thread:8111")])
+@with_authz(
+    grants=[
+        ("user:889", "can_participate", "thread:8111"),
+        ("user:889", "can_interact_with", "assistant:8012"),
+    ]
+)
 async def test_create_run_includes_assistant_code_interpreter_files_on_first_run(
     api, db, valid_user_token, monkeypatch
 ):

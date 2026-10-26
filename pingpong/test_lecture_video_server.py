@@ -1269,6 +1269,7 @@ def test_lecture_video_session_rejects_negative_furthest_offset_ms():
 @with_authz(
     grants=[
         ("user:123", "can_create_thread", "class:1"),
+        ("user:123", "can_interact_with", "assistant:1"),
     ]
 )
 async def test_create_lecture_thread_success(api, db, institution, valid_user_token):
@@ -1328,6 +1329,7 @@ async def test_create_lecture_thread_success(api, db, institution, valid_user_to
 @with_authz(
     grants=[
         ("user:123", "can_create_thread", "class:1"),
+        ("user:123", "can_interact_with", "assistant:1"),
         ("user:123", "student", "class:1"),
     ]
 )
@@ -1421,6 +1423,7 @@ async def test_get_thread_returns_lecture_video_session(
 @with_authz(
     grants=[
         ("user:123", "can_create_thread", "class:1"),
+        ("user:123", "can_interact_with", "assistant:1"),
         ("user:123", "student", "class:1"),
     ]
 )
@@ -1464,6 +1467,7 @@ async def test_get_thread_returns_lecture_video_tts_availability_when_configured
 @with_authz(
     grants=[
         ("user:123", "can_create_thread", "class:1"),
+        ("user:123", "can_interact_with", "assistant:1"),
         ("user:123", "student", "class:1"),
     ]
 )
@@ -1502,6 +1506,7 @@ async def test_get_thread_returns_lecture_chat_availability_for_v2_manifest(
 @with_authz(
     grants=[
         ("user:123", "can_create_thread", "class:1"),
+        ("user:123", "can_interact_with", "assistant:1"),
         ("user:123", "student", "class:1"),
         ("user:123", "can_view", "assistant:1"),
     ]
@@ -1661,6 +1666,7 @@ async def test_send_message_creates_lecture_chat_run_with_hidden_context(
 @with_authz(
     grants=[
         ("user:123", "can_create_thread", "class:1"),
+        ("user:123", "can_interact_with", "assistant:1"),
         ("user:123", "student", "class:1"),
         ("user:123", "can_view", "assistant:1"),
     ]
@@ -1697,6 +1703,7 @@ async def test_lecture_video_thread_instructions_store_snapshot_at_create_time(
 @with_authz(
     grants=[
         ("user:123", "can_create_thread", "class:1"),
+        ("user:123", "can_interact_with", "assistant:1"),
         ("user:123", "student", "class:1"),
         ("user:123", "can_view", "assistant:1"),
     ]
@@ -1730,6 +1737,7 @@ async def test_lecture_video_thread_instructions_store_snapshot_at_create_time_w
 @with_authz(
     grants=[
         ("user:123", "can_create_thread", "class:1"),
+        ("user:123", "can_interact_with", "assistant:1"),
         ("user:123", "student", "class:1"),
         ("user:123", "can_view", "assistant:1"),
     ]
@@ -1832,6 +1840,7 @@ async def test_get_thread_transforms_lecture_video_say_history_after_latex_disab
     grants=[
         ("user:123", "can_view", "assistant:1"),
         ("user:123", "can_create_thread", "class:1"),
+        ("user:123", "can_interact_with", "assistant:1"),
         ("user:123", "student", "class:1"),
     ]
 )
@@ -1909,6 +1918,7 @@ async def test_send_message_forwards_assistant_elevenlabs_settings_to_tts(
 @with_authz(
     grants=[
         ("user:123", "can_create_thread", "class:1"),
+        ("user:123", "can_interact_with", "assistant:1"),
         ("user:123", "student", "class:1"),
         ("user:123", "can_view", "assistant:1"),
     ]
@@ -2023,6 +2033,7 @@ async def test_send_message_allows_lecture_chat_while_awaiting_answer(
 @with_authz(
     grants=[
         ("user:123", "can_create_thread", "class:1"),
+        ("user:123", "can_interact_with", "assistant:1"),
         ("user:123", "student", "class:1"),
         ("user:123", "can_view", "assistant:1"),
     ]
@@ -2061,6 +2072,7 @@ async def test_send_message_requires_playback_position_for_v4_lecture_chat(
 @with_authz(
     grants=[
         ("user:123", "can_create_thread", "class:1"),
+        ("user:123", "can_interact_with", "assistant:1"),
         ("user:123", "student", "class:1"),
         ("user:123", "can_view", "assistant:1"),
     ]
@@ -2219,6 +2231,7 @@ async def test_get_thread_skips_lecture_video_checks_for_chat_threads(
 @with_authz(
     grants=[
         ("user:123", "can_create_thread", "class:1"),
+        ("user:123", "can_interact_with", "assistant:1"),
         ("user:123", "student", "class:1"),
         ("user:123", "can_view", "assistant:1"),
     ]
@@ -2287,6 +2300,7 @@ async def test_send_message_locks_lecture_video_thread_before_first_run(
 @with_authz(
     grants=[
         ("user:123", "can_create_thread", "class:1"),
+        ("user:123", "can_interact_with", "assistant:1"),
         ("user:123", "student", "class:1"),
         ("user:123", "can_view", "assistant:1"),
     ]
@@ -2360,6 +2374,7 @@ async def test_send_message_does_not_generate_lecture_video_thread_name(
 @with_authz(
     grants=[
         ("user:123", "can_create_thread", "class:1"),
+        ("user:123", "can_interact_with", "assistant:1"),
         ("user:123", "student", "class:1"),
     ]
 )
@@ -2423,6 +2438,7 @@ async def test_get_thread_lazily_initializes_legacy_lecture_video_runtime_state(
 @with_authz(
     grants=[
         ("user:123", "can_create_thread", "class:1"),
+        ("user:123", "can_interact_with", "assistant:1"),
         ("user:123", "student", "class:1"),
     ]
 )
@@ -2482,6 +2498,7 @@ async def test_lecture_video_control_reacquire_invalidates_old_controller(
 @with_authz(
     grants=[
         ("user:123", "can_create_thread", "class:1"),
+        ("user:123", "can_interact_with", "assistant:1"),
         ("user:123", "student", "class:1"),
     ]
 )
@@ -2552,6 +2569,7 @@ async def test_lecture_video_duplicate_idempotent_request_from_old_controller_is
 @with_authz(
     grants=[
         ("user:123", "can_create_thread", "class:1"),
+        ("user:123", "can_interact_with", "assistant:1"),
         ("user:123", "student", "class:1"),
     ]
 )
@@ -2610,6 +2628,7 @@ async def test_process_interaction_rejects_unhandled_request_subclass(
 @with_authz(
     grants=[
         ("user:123", "can_create_thread", "class:1"),
+        ("user:123", "can_interact_with", "assistant:1"),
         ("user:123", "student", "class:1"),
     ]
 )
@@ -2856,6 +2875,7 @@ async def test_lecture_video_interactions_derive_continuation_and_history(
 @with_authz(
     grants=[
         ("user:123", "can_create_thread", "class:1"),
+        ("user:123", "can_interact_with", "assistant:1"),
         ("user:123", "student", "class:1"),
     ]
 )
@@ -2963,6 +2983,7 @@ async def test_lecture_video_playback_events_are_rejected_while_awaiting_answer(
 @with_authz(
     grants=[
         ("user:123", "can_create_thread", "class:1"),
+        ("user:123", "can_interact_with", "assistant:1"),
         ("user:123", "student", "class:1"),
         ("user:123", "can_view", "assistant:1"),
     ]
@@ -3231,6 +3252,7 @@ async def test_lecture_video_interactions_allow_participant_rewatch_after_comple
 @with_authz(
     grants=[
         ("user:123", "can_create_thread", "class:1"),
+        ("user:123", "can_interact_with", "assistant:1"),
         ("user:123", "student", "class:1"),
     ]
 )
@@ -3345,6 +3367,7 @@ async def test_lecture_video_interactions_record_seek_and_end_events(
 @with_authz(
     grants=[
         ("user:123", "can_create_thread", "class:1"),
+        ("user:123", "can_interact_with", "assistant:1"),
         ("user:123", "student", "class:1"),
     ]
 )
@@ -3452,6 +3475,7 @@ async def test_lecture_video_seek_preserves_plausible_watched_from_offset_after_
 @with_authz(
     grants=[
         ("user:123", "can_create_thread", "class:1"),
+        ("user:123", "can_interact_with", "assistant:1"),
         ("user:123", "student", "class:1"),
     ]
 )
@@ -3504,6 +3528,7 @@ async def test_lecture_video_interactions_reject_resume_past_unlocked_progress(
 @with_authz(
     grants=[
         ("user:123", "can_create_thread", "class:1"),
+        ("user:123", "can_interact_with", "assistant:1"),
         ("user:123", "student", "class:1"),
     ]
 )
@@ -3565,6 +3590,7 @@ async def test_lecture_video_interactions_reject_question_presented_past_unlocke
 @with_authz(
     grants=[
         ("user:123", "can_create_thread", "class:1"),
+        ("user:123", "can_interact_with", "assistant:1"),
         ("user:123", "student", "class:1"),
     ]
 )
@@ -3618,6 +3644,7 @@ async def test_lecture_video_interactions_reject_seek_with_forged_from_offset(
 @with_authz(
     grants=[
         ("user:123", "can_create_thread", "class:1"),
+        ("user:123", "can_interact_with", "assistant:1"),
         ("user:123", "student", "class:1"),
     ]
 )
@@ -3702,6 +3729,7 @@ async def test_lecture_video_timeline_bypass_allows_forward_seek_and_backseek_re
 @with_authz(
     grants=[
         ("user:123", "can_create_thread", "class:1"),
+        ("user:123", "can_interact_with", "assistant:1"),
         ("user:123", "student", "class:1"),
     ]
 )
@@ -3781,6 +3809,7 @@ async def test_lecture_video_interactions_ignore_forged_seek_from_offset_for_unl
 @with_authz(
     grants=[
         ("user:123", "can_create_thread", "class:1"),
+        ("user:123", "can_interact_with", "assistant:1"),
         ("user:123", "student", "class:1"),
     ]
 )
@@ -3858,6 +3887,7 @@ async def test_lecture_video_interactions_reject_stale_playing_resume_version(
 @with_authz(
     grants=[
         ("user:123", "can_create_thread", "class:1"),
+        ("user:123", "can_interact_with", "assistant:1"),
         ("user:123", "student", "class:1"),
     ]
 )
@@ -4214,7 +4244,9 @@ async def test_locked_lecture_video_state_load_locks_thread_first(
 @with_institution(11, "Test Institution")
 @with_authz(
     grants=[
+        ("user:456", "can_interact_with", "assistant:1"),
         ("user:123", "can_create_thread", "class:1"),
+        ("user:123", "can_interact_with", "assistant:1"),
         ("user:123", "student", "class:1"),
     ]
 )
@@ -4444,6 +4476,7 @@ async def test_lecture_video_history_uses_pseudonyms_for_other_participants(
 @with_authz(
     grants=[
         ("user:123", "can_create_thread", "class:1"),
+        ("user:123", "can_interact_with", "assistant:1"),
         ("user:123", "student", "class:1"),
     ]
 )
@@ -4530,6 +4563,7 @@ async def test_lecture_video_control_lease_is_short_and_renewable(
 @with_authz(
     grants=[
         ("user:123", "can_create_thread", "class:1"),
+        ("user:123", "can_interact_with", "assistant:1"),
         ("user:123", "student", "class:1"),
     ]
 )
@@ -4599,7 +4633,9 @@ async def test_lecture_video_control_release_and_interaction_fail_after_expiry(
 @with_institution(11, "Test Institution")
 @with_authz(
     grants=[
+        ("user:456", "can_interact_with", "assistant:1"),
         ("user:123", "can_create_thread", "class:1"),
+        ("user:123", "can_interact_with", "assistant:1"),
         ("user:123", "student", "class:1"),
     ]
 )
@@ -4688,6 +4724,7 @@ async def test_lecture_video_control_blocks_other_users_until_expiry_then_allows
 @with_authz(
     grants=[
         ("user:123", "can_create_thread", "class:1"),
+        ("user:123", "can_interact_with", "assistant:1"),
         ("user:123", "student", "class:1"),
     ]
 )
@@ -4748,6 +4785,7 @@ async def test_get_thread_does_not_grant_control_from_leaked_controller_session_
 @with_authz(
     grants=[
         ("user:123", "can_create_thread", "class:1"),
+        ("user:123", "can_interact_with", "assistant:1"),
         ("user:123", "student", "class:1"),
     ]
 )
@@ -4843,6 +4881,7 @@ async def test_share_lecture_video_assistant_allowed(
 @with_authz(
     grants=[
         ("user:123", "can_create_thread", "class:1"),
+        ("user:123", "can_interact_with", "assistant:1"),
     ]
 )
 async def test_create_thread_rejects_lecture_video_assistant(
@@ -4886,6 +4925,7 @@ async def test_create_thread_rejects_lecture_video_assistant(
 @with_authz(
     grants=[
         ("anonymous_link:anon-share-token", "can_create_thread", "class:1"),
+        ("anonymous_link:anon-share-token", "can_interact_with", "assistant:1"),
     ]
 )
 async def test_anonymous_can_create_lecture_thread(api, db, institution):
@@ -4955,6 +4995,7 @@ async def test_anonymous_can_create_lecture_thread(api, db, institution):
 @with_authz(
     grants=[
         ("user:123", "can_create_thread", "class:1"),
+        ("user:123", "can_interact_with", "assistant:1"),
     ]
 )
 async def test_non_v3_assistants_rejected(api, db, institution, valid_user_token):
@@ -5004,6 +5045,7 @@ async def test_non_v3_assistants_rejected(api, db, institution, valid_user_token
 @with_authz(
     grants=[
         ("user:123", "can_create_thread", "class:1"),
+        ("user:123", "can_interact_with", "assistant:1"),
     ]
 )
 async def test_lecture_thread_rejected_without_attached_video(
@@ -5047,6 +5089,7 @@ async def test_lecture_thread_rejected_without_attached_video(
 @with_authz(
     grants=[
         ("user:123", "can_create_thread", "class:1"),
+        ("user:123", "can_interact_with", "assistant:1"),
     ]
 )
 async def test_lecture_endpoint_rejects_non_lecture_video_assistant(
@@ -12813,7 +12856,12 @@ async def test_delete_lecture_video_deletes_manifest_and_audio_assets(
 
 @with_user(123)
 @with_institution(11, "Test Institution")
-@with_authz(grants=[("user:123", "can_create_thread", "class:1")])
+@with_authz(
+    grants=[
+        ("user:123", "can_create_thread", "class:1"),
+        ("user:123", "can_interact_with", "assistant:1"),
+    ]
+)
 async def test_lecture_thread_returns_409_when_lecture_video_not_ready(
     api, db, institution, valid_user_token
 ):
@@ -12859,7 +12907,12 @@ async def test_lecture_thread_returns_409_when_lecture_video_not_ready(
 
 @with_user(123)
 @with_institution(11, "Test Institution")
-@with_authz(grants=[("user:123", "can_create_thread", "class:1")])
+@with_authz(
+    grants=[
+        ("user:123", "can_create_thread", "class:1"),
+        ("user:123", "can_interact_with", "assistant:1"),
+    ]
+)
 async def test_lecture_thread_returns_failed_specific_message_when_lecture_video_failed(
     api, db, institution, valid_user_token
 ):
@@ -13287,6 +13340,7 @@ async def test_get_thread_video_invalid_range_returns_416(
 @with_authz(
     grants=[
         ("user:123", "can_create_thread", "class:1"),
+        ("user:123", "can_interact_with", "assistant:1"),
         ("user:123", "student", "class:1"),
     ]
 )
@@ -13378,6 +13432,7 @@ async def test_get_thread_lecture_video_narration_streams_audio(
 @with_authz(
     grants=[
         ("user:123", "can_create_thread", "class:1"),
+        ("user:123", "can_interact_with", "assistant:1"),
         ("user:123", "student", "class:1"),
     ]
 )
@@ -13431,6 +13486,7 @@ async def test_get_thread_lecture_video_narration_rejects_non_numeric_id(
 @with_authz(
     grants=[
         ("user:123", "can_create_thread", "class:1"),
+        ("user:123", "can_interact_with", "assistant:1"),
         ("user:123", "student", "class:1"),
     ]
 )
@@ -13499,6 +13555,7 @@ async def test_get_thread_lecture_video_narration_lazily_initializes_legacy_runt
 @with_authz(
     grants=[
         ("user:123", "can_create_thread", "class:1"),
+        ("user:123", "can_interact_with", "assistant:1"),
         ("user:123", "student", "class:1"),
     ]
 )
@@ -13551,6 +13608,7 @@ async def test_get_thread_lecture_video_narration_requires_can_participate(
 @with_authz(
     grants=[
         ("user:123", "can_create_thread", "class:1"),
+        ("user:123", "can_interact_with", "assistant:1"),
         ("user:123", "student", "class:1"),
     ]
 )

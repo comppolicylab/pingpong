@@ -3083,6 +3083,181 @@ async def test_startup_rejection_preserves_error_and_rollback_after_disconnect(
     assert websocket.closed is (failure is None)
 
 
+@pytest.mark.parametrize("principal", ["user", "anonymous", "hybrid"])
+@pytest.mark.parametrize("permission", ["allowed", "assistant_denied", "thread_denied"])
+async def test_realtime_requires_thread_and_actual_assistant_permissions(
+    monkeypatch, principal, permission
+):
+    websocket = DummyWebSocket()
+    websocket.accept = AsyncMock()
+    websocket.path_params = {"class_id": "10", "thread_id": "20"}
+    websocket.state["session"] = SimpleNamespace(
+        status=(
+            schemas.SessionStatus.ANONYMOUS
+            if principal == "anonymous"
+            else schemas.SessionStatus.VALID
+        )
+    )
+    websocket.state["auth_user"] = None if principal == "anonymous" else "user:1"
+    websocket.state["is_anonymous"] = principal != "user"
+    websocket.state["anonymous_share_token_auth"] = (
+        "anonymous_link:share" if principal != "user" else None
+    )
+    websocket.state["anonymous_session_token_auth"] = (
+        "anonymous_user:session" if principal != "user" else None
+    )
+    thread_subject = "user:1" if principal == "user" else "anonymous_user:session"
+    assistant_subject = "anonymous_link:share" if principal == "anonymous" else "user:1"
+    grants = {
+        (thread_subject, "can_participate", "thread:20"),
+        (assistant_subject, "can_interact_with", "assistant:30"),
+    }
+    if permission == "assistant_denied":
+        grants.remove((assistant_subject, "can_interact_with", "assistant:30"))
+        grants.add((assistant_subject, "can_interact_with", "assistant:999"))
+    elif permission == "thread_denied":
+        grants.remove((thread_subject, "can_participate", "thread:20"))
+
+    checked = []
+
+    async def check(checks):
+        checked.extend(checks)
+        return [grant in grants for grant in checks]
+
+    async def test(*grant):
+        return (await check([grant]))[0]
+
+    websocket.state["authz"] = SimpleNamespace(
+        check=AsyncMock(side_effect=check), test=AsyncMock(side_effect=test)
+    )
+    # Only the assistant returned by the locked database load may be authorized.
+    websocket.state["assistant"] = realtime_assistant(id=999)
+    thread = SimpleNamespace(
+        id=20,
+        assistant=realtime_assistant(),
+        instructions="Speak clearly.",
+        timezone=None,
+        voice_mode_recording=None,
+    )
+    load_thread = AsyncMock(return_value=thread)
+    monkeypatch.setattr(models.Thread, "get_by_id_with_assistant", load_thread)
+    monkeypatch.setattr(
+        websocket_module, "_thread_has_messages", AsyncMock(return_value=False)
+    )
+    monkeypatch.setattr(
+        models.Class,
+        "get_by_id",
+        AsyncMock(return_value=SimpleNamespace(archived=None)),
+    )
+    connection = FakeRealtimeConnection()
+    provider = FakeOpenAIClient(connection)
+    monkeypatch.setattr(
+        websocket_module,
+        "get_openai_client_by_class_id",
+        AsyncMock(return_value=provider),
+    )
+    db = AsyncMock()
+    context = AsyncMock()
+    context.__aenter__.return_value = db
+    monkeypatch.setattr(
+        websocket_module.config.db.driver,
+        "async_session_with_args",
+        lambda **kwargs: lambda: context,
+    )
+    handler = AsyncMock()
+    wrapped = websocket_module.ws_db_middleware(
+        websocket_module.ws_check_realtime_permissions(
+            websocket_module.ws_with_openai_client(
+                websocket_module.ws_with_single_realtime_session(
+                    websocket_module.ws_with_realtime_connection(handler)
+                )
+            )
+        )
+    )
+
+    if permission == "allowed":
+        await wrapped(websocket, "10", "20")
+        handler.assert_awaited_once_with(websocket, "10", "20")
+        assert provider.realtime.connect_kwargs is not None
+        db.commit.assert_awaited_once()
+        db.rollback.assert_not_awaited()
+        assert websocket.sent_json == []
+    else:
+        message = (
+            "You do not have permission to interact with this assistant."
+            if permission == "assistant_denied"
+            else "You are not allowed to participate in this thread."
+        )
+        with pytest.raises(ValueError, match=message):
+            await wrapped(websocket, "10", "20")
+        handler.assert_not_awaited()
+        assert provider.realtime.connect_kwargs is None
+        assert connection.session.updated_sessions == []
+        db.rollback.assert_awaited_once()
+        db.commit.assert_not_awaited()
+        assert websocket.closed
+        assert websocket.sent_json == [
+            {
+                "type": "error",
+                "error": {
+                    "type": "invalid_request_error",
+                    "code": "permissions",
+                    "message": message,
+                },
+            }
+        ]
+
+    if permission != "thread_denied":
+        load_thread.assert_awaited_once_with(
+            db, 20, for_update=True, include_voice_mode_recording=True
+        )
+        assert (assistant_subject, "can_interact_with", "assistant:30") in checked
+        assert not any(target == "assistant:999" for _, _, target in checked)
+    else:
+        load_thread.assert_not_awaited()
+
+
+@pytest.mark.parametrize("missing", ["thread", "assistant"])
+async def test_single_realtime_session_rejects_missing_thread_or_assistant(
+    monkeypatch, missing
+):
+    thread = (
+        None
+        if missing == "thread"
+        else SimpleNamespace(id=20, assistant=None, voice_mode_recording=None)
+    )
+    monkeypatch.setattr(
+        models.Thread, "get_by_id_with_assistant", AsyncMock(return_value=thread)
+    )
+    monkeypatch.setattr(
+        websocket_module, "_thread_has_messages", AsyncMock(return_value=False)
+    )
+    websocket = DummyWebSocket()
+    websocket.state["db"] = object()
+    handler = AsyncMock()
+
+    await websocket_module.ws_with_single_realtime_session(handler)(
+        websocket, "10", "20"
+    )
+
+    handler.assert_not_awaited()
+    assert websocket.closed
+    assert websocket.sent_json == [
+        {
+            "type": "error",
+            "error": {
+                "type": "invalid_request_error",
+                "code": "voice_session_unavailable",
+                "message": (
+                    "This voice session was not found."
+                    if missing == "thread"
+                    else "The assistant for this thread no longer exists."
+                ),
+            },
+        }
+    ]
+
+
 @pytest.mark.parametrize("has_recording,has_messages", [(True, False), (False, True)])
 @pytest.mark.parametrize("disconnect_during", [None, "send_json", "close"])
 async def test_single_realtime_session_rejects_finished_thread(

@@ -430,7 +430,12 @@ async def test_voice_transcript_failure_isolated_from_other_messages(
 
 
 @with_user(123)
-@with_authz(grants=[("user:123", "can_create_thread", "class:1")])
+@with_authz(
+    grants=[
+        ("user:123", "can_create_thread", "class:1"),
+        ("user:123", "can_interact_with", "assistant:11"),
+    ]
+)
 async def test_create_audio_thread_supports_version_3_assistant(
     api, db, valid_user_token
 ):
@@ -483,7 +488,12 @@ async def test_create_audio_thread_supports_version_3_assistant(
 
 
 @with_user(123)
-@with_authz(grants=[("user:123", "can_create_thread", "class:1")])
+@with_authz(
+    grants=[
+        ("user:123", "can_create_thread", "class:1"),
+        ("user:123", "can_interact_with", "assistant:11"),
+    ]
+)
 async def test_audio_thread_copies_deletion_protection_from_assistant(
     api, db, valid_user_token
 ):

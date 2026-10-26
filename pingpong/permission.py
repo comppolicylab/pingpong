@@ -4,7 +4,7 @@ from abc import abstractmethod
 from fastapi import HTTPException
 
 import pingpong.models as models
-from pingpong.state_types import StateRequest
+from pingpong.state_types import StateRequest, StateWebSocket
 
 
 logger = logging.getLogger(__name__)
@@ -106,7 +106,7 @@ class Authz(Expression):
         self.relation = relation
         self.target = target
 
-    async def test(self, request: StateRequest) -> bool:
+    async def test(self, request: StateRequest | StateWebSocket) -> bool:
         try:
             # Format the target with path params.
             target = self.target
@@ -158,6 +158,23 @@ class Authz(Expression):
 
 
 THREAD_CAN_PARTICIPATE = Authz("can_participate", "thread:{thread_id}")
+
+
+ASSISTANT_INTERACTION_DENIED = (
+    "You do not have permission to interact with this assistant."
+)
+
+
+async def require_assistant_interaction(
+    connection: StateRequest | StateWebSocket,
+    assistant_id: int | None,
+    *,
+    detail: str = ASSISTANT_INTERACTION_DENIED,
+) -> None:
+    if assistant_id is None or not await Authz(
+        "can_interact_with", f"assistant:{assistant_id}"
+    ).test(connection):
+        raise HTTPException(status_code=403, detail=detail)
 
 
 async def can_participate_thread(request: StateRequest) -> bool:
