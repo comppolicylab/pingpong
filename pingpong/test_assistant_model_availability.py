@@ -82,12 +82,14 @@ async def test_save_checks_current_model_even_when_unchanged(
         payload["model"] = selected_model if model_field != "null" else None
     async with db.async_session() as session:
         request = editor_request(session)
+        assistant = await server.get_bound_assistant_for_edit(request, "1", "1")
         if available:
             await server.update_assistant(
                 "1",
                 "1",
                 schemas.UpdateAssistant.model_validate(payload),
                 request,
+                assistant,
                 client,
             )
             await session.commit()
@@ -98,6 +100,7 @@ async def test_save_checks_current_model_even_when_unchanged(
                     "1",
                     schemas.UpdateAssistant.model_validate(payload),
                     request,
+                    assistant,
                     client,
                 )
             assert raised.value.status_code == 400
