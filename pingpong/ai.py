@@ -257,20 +257,21 @@ class GetOpenAIClientException(Exception):
 
 def get_openai_client_from_api_key(credential: models.APIKey) -> OpenAIClientType:
     if credential.provider == "openai":
-        client = get_openai_client(credential.api_key, provider="openai")
+        return get_openai_client(
+            credential.api_key, provider="openai", credential_id=credential.id
+        )
     elif credential.provider == "azure":
-        client = get_openai_client(
+        return get_openai_client(
             credential.api_key,
             provider="azure",
             endpoint=credential.endpoint,
             api_version=credential.api_version,
+            credential_id=credential.id,
         )
     else:
         raise GetOpenAIClientException(
             code=400, detail="Unknown API key provider for class"
         )
-    attach_credential_scope(client, credential)
-    return client
 
 
 async def get_openai_client_by_class_id(
@@ -6548,14 +6549,21 @@ def replace_annotations_in_text_v3(
 
 @overload
 def get_openai_client(
-    api_key: str, provider: Literal["openai"] = "openai"
+    api_key: str,
+    provider: Literal["openai"] = "openai",
+    *,
+    credential_id: int | None = None,
 ) -> openai.AsyncClient:
     raise NotImplementedError
 
 
 @overload
 def get_openai_client(
-    api_key: str, *, provider: Literal["azure"], endpoint: str | None
+    api_key: str,
+    *,
+    provider: Literal["azure"],
+    endpoint: str | None,
+    credential_id: int | None = None,
 ) -> openai.AsyncAzureOpenAI:
     raise NotImplementedError
 
@@ -6567,12 +6575,15 @@ def get_openai_client(
     provider: Literal["azure"],
     endpoint: str | None,
     api_version: str | None,
+    credential_id: int | None = None,
 ) -> openai.AsyncAzureOpenAI:
     raise NotImplementedError
 
 
 @functools.cache
-def get_openai_client(api_key, provider="openai", endpoint=None, api_version=None):
+def get_openai_client(
+    api_key, provider="openai", endpoint=None, api_version=None, *, credential_id=None
+):
     """Create an OpenAI client instance with the provided configuration.
 
     This function creates either a standard OpenAI client or an Azure OpenAI client
@@ -6583,6 +6594,7 @@ def get_openai_client(api_key, provider="openai", endpoint=None, api_version=Non
         provider: The API provider - either "openai" or "azure"
         endpoint: The Azure endpoint URL (required if provider is "azure")
         api_version: The Azure API version (optional)
+        credential_id: APIKey record ID, isolating scoped clients from other callers
 
     Returns:
         An AsyncClient instance for OpenAI or an AsyncAzureOpenAI instance for Azure
@@ -6596,9 +6608,18 @@ def get_openai_client(api_key, provider="openai", endpoint=None, api_version=Non
         _api_version = api_version or "2025-03-01-preview"
         if not endpoint:
             raise ValueError("Azure client requires endpoint.")
-        return openai.AsyncAzureOpenAI(
+        client = openai.AsyncAzureOpenAI(
             api_key=api_key, azure_endpoint=endpoint, api_version=_api_version
         )
-    if provider == "openai":
-        return openai.AsyncClient(api_key=api_key)
-    raise ValueError(f"Unknown provider {provider}")
+    elif provider == "openai":
+        client = openai.AsyncClient(api_key=api_key)
+    else:
+        raise ValueError(f"Unknown provider {provider}")
+    if credential_id is not None:
+        attach_credential_scope(
+            client,
+            api_key_id=credential_id,
+            provider=provider,
+            api_version=api_version,
+        )
+    return client

@@ -241,13 +241,13 @@ from .permission import (
 from .runs import get_placeholder_ci_calls
 from .saml import get_saml2_attrs, get_saml2_client, get_saml2_settings
 from .model_catalog import (
-    build_revision,
     close_model_catalog_cache,
     ensure_model_available,
     get_model_catalog,
     get_runtime_model_catalog,
     reset_model_catalog_cache,
     record_model_error,
+    runtime_model_cache_enabled,
     validate_model_available,
 )
 from .login_exchange import integration as saml_login_exchange
@@ -8905,10 +8905,15 @@ async def create_lecture_thread(
             detail="This assistant is not compatible with this thread creation endpoint. Provide a lecture video or lecture slides assistant.",
         )
 
-    if config.model_cache.redis is not None and build_revision() is not None:
+    if runtime_model_cache_enabled():
         billing = await models.Class.get_api_key(request.state["db"], int(class_id))
         if billing and billing.api_key_obj is not None:
-            openai_client = get_openai_client_from_api_key(billing.api_key_obj)
+            try:
+                openai_client = get_openai_client_from_api_key(billing.api_key_obj)
+            except GetOpenAIClientException as exc:
+                raise HTTPException(
+                    status_code=exc.code or 400, detail=exc.detail
+                ) from exc
             await ensure_model_available(openai_client, assistant.model)
 
     if request.state["is_anonymous"]:

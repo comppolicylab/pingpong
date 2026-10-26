@@ -2,9 +2,11 @@
 
 import asyncio
 import os
+from contextlib import asynccontextmanager
 from uuid import uuid4
 
 import pytest
+from fastapi import HTTPException
 from redis.asyncio import Redis
 
 from pingpong import model_catalog as catalog
@@ -78,6 +80,36 @@ async def test_real_redis_single_flight_ttl_and_shared_catalog(
         <= config.model_cache.ttl_seconds
     )
     assert await real_catalog_cache.get(f"{prefix}:lock") is None
+
+
+async def test_real_redis_lock_timeout_does_not_bypass_single_flight(
+    real_catalog_cache, monkeypatch
+):
+    client = provider_client()
+    generation = await catalog._global_generation(real_catalog_cache)
+    prefix = catalog.cache_prefix(client, generation)
+    original_lock = real_catalog_cache.lock
+
+    def short_wait_lock(name, **options):
+        options["blocking_timeout"] = 0.01
+        return original_lock(name, **options)
+
+    @asynccontextmanager
+    async def connect():
+        yield real_catalog_cache
+
+    monkeypatch.setattr(catalog, "catalog_redis", connect)
+    async with original_lock(f"{prefix}:lock", timeout=10):
+        monkeypatch.setattr(real_catalog_cache, "lock", short_wait_lock)
+        results = await asyncio.gather(
+            *(catalog.get_model_catalog(client) for _ in range(5)),
+            return_exceptions=True,
+        )
+        assert all(isinstance(result, HTTPException) for result in results)
+        assert all(result.status_code == 503 for result in results)
+        await catalog.ensure_model_available(client, "missing")
+
+    client.models.list.assert_not_awaited()
 
 
 @pytest.mark.parametrize("reset_scope", ["credential", "global"])

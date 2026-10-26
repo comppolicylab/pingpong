@@ -13,7 +13,7 @@ from uuid import uuid4
 from fastapi import HTTPException
 import openai
 from pydantic import BaseModel, Field, ValidationError
-from redis.exceptions import RedisError
+from redis.exceptions import LockError, RedisError
 
 from .ai_error import MODEL_NOT_AVAILABLE_MESSAGE, is_model_unavailable_error
 from .config import config
@@ -63,12 +63,14 @@ def credential_scope(client: Any) -> CredentialScope | None:
     return value if isinstance(value, CredentialScope) else None
 
 
-def attach_credential_scope(client: Any, credential: Any) -> None:
+def attach_credential_scope(
+    client: Any, *, api_key_id: int, provider: str, api_version: str | None
+) -> None:
     client._pingpong_model_catalog_scope = CredentialScope(
-        api_key_id=credential.id,
-        provider=credential.provider,
+        api_key_id=api_key_id,
+        provider=provider,
         endpoint=str(client.base_url),
-        api_version=credential.api_version,
+        api_version=api_version,
     )
 
 
@@ -76,6 +78,10 @@ def build_revision() -> str | None:
     # Never use a process start time or deployment timestamp. If no immutable
     # build identity is available, use direct lookups instead of stale sharing.
     return config.model_cache.build_revision or os.environ.get("SENTRY_RELEASE") or None
+
+
+def runtime_model_cache_enabled() -> bool:
+    return config.model_cache.redis is not None and build_revision() is not None
 
 
 def cache_generation_key() -> str:
@@ -172,7 +178,7 @@ async def _read(redis: Any, prefix: str) -> ModelCatalog | None:
 
 
 async def _get_cached_model_catalog(client: Any) -> ModelCatalog | None:
-    if cache_prefix(client) is None:
+    if not runtime_model_cache_enabled() or cache_prefix(client) is None:
         return None
     fetched: ModelCatalog | None = None
     try:
@@ -188,44 +194,65 @@ async def _get_cached_model_catalog(client: Any) -> ModelCatalog | None:
                     await redis.get(cache_generation_key()) == global_generation
                 ):
                     return cached
-                # Single flight across workers, with a finite lock lease and wait.
-                async with redis.lock(
-                    f"{prefix}:lock", timeout=90, blocking_timeout=20
-                ):
-                    if await redis.get(cache_generation_key()) != global_generation:
-                        continue
-                    cached = await _read(redis, prefix)
+                lock_acquired = False
+                try:
+                    # Single flight across workers, with a finite lock lease and wait.
+                    async with redis.lock(
+                        f"{prefix}:lock", timeout=90, blocking_timeout=20
+                    ):
+                        lock_acquired = True
+                        if await redis.get(cache_generation_key()) != global_generation:
+                            continue
+                        cached = await _read(redis, prefix)
+                        if cached is not None and (
+                            await redis.get(cache_generation_key()) == global_generation
+                        ):
+                            return cached
+                        ttl = config.model_cache.ttl_seconds
+                        async with redis.pipeline(transaction=False) as pipeline:
+                            pipeline.set(
+                                f"{prefix}:generation", uuid4().hex, nx=True, ex=ttl * 2
+                            )
+                            pipeline.get(f"{prefix}:generation")
+                            _, generation = await pipeline.execute()
+                        if generation is None:
+                            continue
+                        fetched = await _fetch(client, generation)
+                        published = await redis.eval(
+                            PUBLISH,
+                            2,
+                            f"{prefix}:generation",
+                            f"{prefix}:snapshot",
+                            generation,
+                            fetched.model_dump_json(),
+                            ttl,
+                            ttl * 2,
+                        )
+                        if published and (
+                            await redis.get(cache_generation_key()) == global_generation
+                        ):
+                            return fetched
+                        # A reset made this result obsolete; do not reuse it if
+                        # releasing the lock or the next Redis operation fails.
+                        fetched = None
+                except LockError:
+                    if lock_acquired:
+                        # Preserve fallback/reuse behavior for lock release failures.
+                        raise
+                    # A timeout does not mean Redis is down. The lock holder may
+                    # have published just as our wait expired; read the current
+                    # generation once more without starting another provider fetch.
+                    current_generation = await _global_generation(redis)
+                    current_prefix = cache_prefix(client, current_generation)
+                    assert current_prefix is not None
+                    cached = await _read(redis, current_prefix)
                     if cached is not None and (
-                        await redis.get(cache_generation_key()) == global_generation
+                        await redis.get(cache_generation_key()) == current_generation
                     ):
                         return cached
-                    ttl = config.model_cache.ttl_seconds
-                    async with redis.pipeline(transaction=False) as pipeline:
-                        pipeline.set(
-                            f"{prefix}:generation", uuid4().hex, nx=True, ex=ttl * 2
-                        )
-                        pipeline.get(f"{prefix}:generation")
-                        _, generation = await pipeline.execute()
-                    if generation is None:
-                        continue
-                    fetched = await _fetch(client, generation)
-                    published = await redis.eval(
-                        PUBLISH,
-                        2,
-                        f"{prefix}:generation",
-                        f"{prefix}:snapshot",
-                        generation,
-                        fetched.model_dump_json(),
-                        ttl,
-                        ttl * 2,
+                    raise HTTPException(
+                        503, "Available models are being refreshed. Please try again."
                     )
-                    if published and (
-                        await redis.get(cache_generation_key()) == global_generation
-                    ):
-                        return fetched
-                    # A reset made this result obsolete; do not reuse it if
-                    # releasing the lock or the next Redis operation fails.
-                    fetched = None
             raise HTTPException(
                 503, "Available models are being refreshed. Please try again."
             )

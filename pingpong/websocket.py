@@ -647,8 +647,14 @@ def ws_with_realtime_connection(func):
         )
         extra_headers = build_realtime_extra_headers(safety_identifier)
         handler_started = False
+        # Only availability-check HTTP errors expose their detail to the browser.
+        availability_error = None
         try:
-            await ensure_model_available(openai_client, assistant.model)
+            try:
+                await ensure_model_available(openai_client, assistant.model)
+            except HTTPException as e:
+                availability_error = e
+                raise
             async with AsyncExitStack() as connection_context:
                 realtime_connection = await connection_context.enter_async_context(
                     openai_client.realtime.connect(
@@ -670,11 +676,6 @@ def ws_with_realtime_connection(func):
                         "Provider connection closed after voice session finalization.",
                         exc_info=True,
                     )
-        except HTTPException as e:
-            await _reject_realtime_session(
-                browser_connection, str(e.detail), code="openai_realtime_connection"
-            )
-            raise
         except Exception as e:
             await record_model_error(openai_client, e)
             openai_connection_logger.exception(f"Error in Realtime connection: {e}")
@@ -690,7 +691,9 @@ def ws_with_realtime_connection(func):
                     )
             await _reject_realtime_session(
                 browser_connection,
-                get_ai_error_message(e, "We were unable to connect to OpenAI."),
+                str(e.detail)
+                if e is availability_error
+                else get_ai_error_message(e, "We were unable to connect to OpenAI."),
                 code="openai_realtime_connection",
             )
             raise e

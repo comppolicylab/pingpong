@@ -180,7 +180,7 @@ async def test_voice_reconnect_checks_availability_before_connecting(memory_cach
     assert browser.closed
     handler.assert_not_awaited()
     client.realtime.connect.assert_not_called()
-    assert not browser.state["after_db_rollback"]
+    assert len(browser.state["after_db_rollback"]) == 1
 
 
 async def test_voice_model_not_found_close_invalidates_inventory(memory_cache):
@@ -416,8 +416,9 @@ async def test_run_checks_only_the_model_it_will_execute(
 
 
 @pytest.mark.parametrize("cache_state", ["disabled", "missing-build", "enabled"])
+@pytest.mark.parametrize("provider", ["openai", "unknown"])
 async def test_lecture_resolves_credentials_once_and_only_when_cache_is_usable(
-    config, memory_cache, monkeypatch, cache_state
+    config, memory_cache, monkeypatch, cache_state, provider
 ):
     if cache_state == "disabled":
         monkeypatch.setattr(config.model_cache, "redis", None)
@@ -432,7 +433,7 @@ async def test_lecture_resolves_credentials_once_and_only_when_cache_is_usable(
             api_key_obj=SimpleNamespace(
                 id=17,
                 api_key="synthetic",
-                provider="openai",
+                provider=provider,
                 api_version=None,
             )
         )
@@ -465,14 +466,14 @@ async def test_lecture_resolves_credentials_once_and_only_when_cache_is_usable(
             "1", schemas.CreateLectureThread(assistant_id=1), request
         )
     assert raised.value.status_code == 400
-    assert "does not have a lecture video" in raised.value.detail
-    expected_calls = 1 if cache_state == "enabled" else 0
-    assert (
-        lookup.await_count
-        == factory.call_count
-        == client.models.list.await_count
-        == expected_calls
-    )
+    if cache_state == "enabled" and provider == "unknown":
+        assert raised.value.detail == "Unknown API key provider for class"
+        assert isinstance(raised.value.__cause__, ai.GetOpenAIClientException)
+    else:
+        assert "does not have a lecture video" in raised.value.detail
+    assert lookup.await_count == (1 if cache_state == "enabled" else 0)
+    expected_calls = 1 if cache_state == "enabled" and provider == "openai" else 0
+    assert factory.call_count == client.models.list.await_count == expected_calls
 
 
 @pytest.mark.parametrize("event_type", ["error", "response.failed"])

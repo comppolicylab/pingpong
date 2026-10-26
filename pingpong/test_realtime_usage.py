@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
 import pytest
+from fastapi import HTTPException
 from openai.types.realtime import (
     ConversationItemInputAudioTranscriptionCompletedEvent,
     ConversationItemInputAudioTranscriptionDeltaEvent,
@@ -708,11 +709,18 @@ async def test_startup_error_without_provider_operations_is_retained(
 
 
 @with_user(123)
-@pytest.mark.parametrize("stage", ["connect", "update", "greeting", "handler"])
+@pytest.mark.parametrize(
+    ("stage", "error_kind"),
+    [
+        (stage, error_kind)
+        for stage in ["connect", "update", "greeting", "handler"]
+        for error_kind in ["generic", "websocket"]
+    ]
+    + [("availability", "http"), ("update", "http"), ("handler", "http")],
+)
 @pytest.mark.parametrize("save_fails", [False, True])
-@pytest.mark.parametrize("numeric_code", [False, True])
 async def test_provider_startup_failure_survives_transaction_rollback(
-    db, user, monkeypatch, caplog, stage, save_fails, numeric_code
+    db, user, monkeypatch, caplog, stage, save_fails, error_kind
 ):
     async with db.async_session() as session:
         thread = models.Thread(version=3, user_message_ct=0, tools_available="[]")
@@ -725,15 +733,24 @@ async def test_provider_startup_failure_survives_transaction_rollback(
     browser.state["session"] = SimpleNamespace(user=user)
     browser.state["assistant"] = realtime_assistant(assistant_should_message_first=True)
     browser.state["conversation_instructions"] = "Speak clearly."
-    failure = (
-        ConnectionClosedError(Close(4013, "Synthetic provider startup failure."), None)
-        if numeric_code
-        else RuntimeError("Synthetic provider startup failure.")
-    )
-    expected_code = 4013 if numeric_code else "provider_startup_error"
+    if error_kind == "http":
+        failure = HTTPException(400, "Synthetic HTTP failure.")
+    elif error_kind == "websocket":
+        failure = ConnectionClosedError(
+            Close(4013, "Synthetic provider startup failure."), None
+        )
+    else:
+        failure = RuntimeError("Synthetic provider startup failure.")
+    expected_code = 4013 if error_kind == "websocket" else "provider_startup_error"
     connection = FakeRealtimeConnection()
     client = FakeOpenAIClient(connection)
-    if stage == "connect":
+    record_error = AsyncMock()
+    monkeypatch.setattr(websocket_module, "record_model_error", record_error)
+    if stage == "availability":
+        monkeypatch.setattr(
+            websocket_module, "ensure_model_available", AsyncMock(side_effect=failure)
+        )
+    elif stage == "connect":
         client.realtime.connect = Mock(side_effect=failure)
     elif stage == "update":
         connection.session.update = AsyncMock(side_effect=failure)
@@ -765,6 +782,18 @@ async def test_provider_startup_failure_survives_transaction_rollback(
             browser, "1", str(thread_id)
         )
     assert raised.value is failure
+    record_error.assert_awaited_once_with(client, failure)
+    assert "Error in Realtime connection" in caplog.text
+    assert browser.closed
+    expected_message = (
+        failure.detail
+        if stage == "availability"
+        else "We were unable to connect to OpenAI."
+    )
+    assert browser.sent_json[-1]["error"]["message"] == expected_message
+    if stage == "availability":
+        assert client.realtime.connect_kwargs is None
+        assert connection.session.updated_sessions == []
     assert handler.await_count == int(stage == "handler")
     assert len(browser.state["after_db_rollback"]) == int(stage != "handler")
     if save_fails:

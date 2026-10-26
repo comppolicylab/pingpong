@@ -11,7 +11,7 @@ import httpx
 import openai
 import pytest
 from redis.crc import key_slot
-from redis.exceptions import ConnectionError, LockNotOwnedError
+from redis.exceptions import ConnectionError, LockError, LockNotOwnedError
 
 from pingpong import model_catalog as catalog
 from pingpong.login_exchange import cache as login_cache
@@ -108,7 +108,7 @@ def provider_client(*ids, key_id=17):
     )
     if key_id is not None:
         catalog.attach_credential_scope(
-            client, SimpleNamespace(id=key_id, provider="openai", api_version=None)
+            client, api_key_id=key_id, provider="openai", api_version=None
         )
     return client
 
@@ -593,6 +593,91 @@ async def test_runtime_redis_failure_does_not_trigger_a_provider_lookup(
     client = provider_client()
     await catalog.ensure_model_available(client, "missing")
     client.models.list.assert_not_awaited()
+
+
+@pytest.mark.parametrize("operation", ["listing", "runtime"])
+async def test_lock_timeout_waiters_do_not_fetch_directly(
+    memory_cache, monkeypatch, operation
+):
+    lock = AsyncMock()
+
+    async def timeout():
+        await asyncio.sleep(0)
+        raise LockError("Unable to acquire lock within the time specified")
+
+    lock.__aenter__.side_effect = timeout
+    monkeypatch.setattr(memory_cache, "lock", Mock(return_value=lock))
+    client = provider_client()
+
+    results = await asyncio.gather(
+        *(
+            catalog.get_model_catalog(client)
+            if operation == "listing"
+            else catalog.ensure_model_available(client, "missing")
+            for _ in range(10)
+        ),
+        return_exceptions=True,
+    )
+
+    if operation == "listing":
+        assert all(isinstance(result, HTTPException) for result in results)
+        assert all(result.status_code == 503 for result in results)
+        assert all("being refreshed" in result.detail for result in results)
+    else:
+        assert results == [None] * 10
+    client.models.list.assert_not_awaited()
+    assert lock.__aenter__.await_count == 10
+    lock.__aexit__.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    "publication", ["current", "global-reset", "stale-credential", "reset-during-read"]
+)
+async def test_lock_timeout_rereads_only_valid_current_snapshots(
+    memory_cache, monkeypatch, publication
+):
+    client = provider_client()
+    lock = AsyncMock()
+
+    async def publish_then_timeout():
+        if publication == "global-reset":
+            await catalog.reset_model_catalog_cache()
+        global_generation = await catalog._global_generation(memory_cache)
+        prefix = catalog.cache_prefix(client, global_generation)
+        snapshot = catalog.ModelCatalog(
+            generation="published",
+            models=[catalog.ProviderModel(id="available")],
+        )
+        await memory_cache.set(
+            f"{prefix}:generation",
+            "invalidated" if publication == "stale-credential" else "published",
+        )
+        await memory_cache.set(f"{prefix}:snapshot", snapshot.model_dump_json())
+        raise LockError("Unable to acquire lock within the time specified")
+
+    lock.__aenter__.side_effect = publish_then_timeout
+    monkeypatch.setattr(memory_cache, "lock", Mock(return_value=lock))
+    original_read = catalog._read
+
+    async def read(redis, prefix):
+        snapshot = await original_read(redis, prefix)
+        if snapshot is not None and publication == "reset-during-read":
+            await catalog.reset_model_catalog_cache()
+        return snapshot
+
+    monkeypatch.setattr(catalog, "_read", read)
+
+    if publication in {"current", "global-reset"}:
+        result = await catalog.get_model_catalog(client)
+        assert result.cache_mode == "redis"
+        assert [model.id for model in result.models] == ["available"]
+    else:
+        with pytest.raises(HTTPException) as raised:
+            await catalog.get_model_catalog(client)
+        assert raised.value.status_code == 503
+    client.models.list.assert_not_awaited()
+    lock.__aenter__.assert_awaited_once()
+    lock.__aexit__.assert_not_awaited()
 
 
 @pytest.mark.parametrize(
