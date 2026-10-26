@@ -1,6 +1,8 @@
 """Class and parent binding for API resources, independent of permission policy."""
 
+import asyncio
 from collections.abc import Awaitable, Callable, Iterable
+from dataclasses import dataclass
 from typing import Any, TypeVar
 
 from fastapi import HTTPException
@@ -9,6 +11,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from pingpong import models
 
 T = TypeVar("T", models.Thread, models.Assistant)
+
+
+@dataclass(frozen=True)
+class ClassBoundFile:
+    file: models.File
+    class_id: int
 
 
 def require_resource_in_class(
@@ -61,8 +69,10 @@ async def get_assistant_share_for_class(
     *,
     wrong_parent_status: int = 404,
 ) -> models.AnonymousLink:
-    assistant = await get_assistant_for_class(db, class_id, assistant_id)
-    share = await models.AnonymousLink.get_by_id_with_assistant(db, int(share_id))
+    assistant, share = await asyncio.gather(
+        get_assistant_for_class(db, class_id, assistant_id),
+        models.AnonymousLink.get_by_id_with_assistant(db, int(share_id)),
+    )
     if share is None:
         raise HTTPException(404, "Share link not found.")
     if share.assistant is None or share.assistant.id != assistant.id:
@@ -80,6 +90,16 @@ async def require_files_in_class(
     ids = {file.id for file in files}
     if ids != await models.File.get_file_ids_for_class(db, int(class_id), list(ids)):
         raise HTTPException(404, "File not found")
+
+
+async def get_file_for_class(
+    db: AsyncSession, class_id: int | str, file_id: int | str
+) -> ClassBoundFile:
+    file = await models.File.get_by_id_with_delete_context(db, int(file_id))
+    if file is None:
+        raise HTTPException(404, "File not found!")
+    await require_files_in_class(db, class_id, [file])
+    return ClassBoundFile(file, int(class_id))
 
 
 async def get_attachment_files_for_class(
