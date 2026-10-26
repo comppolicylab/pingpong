@@ -60,15 +60,19 @@ async def test_refresh_and_hit_have_separate_metrics_and_lock_wait_span(observat
         await catalog.ensure_model_available(client, "another-sensitive-model")
 
     lookups = [
-        call.kwargs["attributes"] for call in count.call_args_list
+        call.kwargs["attributes"]
+        for call in count.call_args_list
         if call.args[0] == "model_catalog.lookups"
     ]
     assert [attrs["catalog.outcome"] for attrs in lookups] == ["refresh", "hit", "hit"]
     assert [attrs["catalog.operation"] for attrs in lookups] == [
-        "listing", "runtime", "runtime"
+        "listing",
+        "runtime",
+        "runtime",
     ]
     decisions = [
-        call.kwargs["attributes"]["catalog.decision"] for call in count.call_args_list
+        call.kwargs["attributes"]["catalog.decision"]
+        for call in count.call_args_list
         if call.args[0] == "model_catalog.runtime.decisions"
     ]
     assert decisions == ["allowed", "rejected"]
@@ -80,12 +84,15 @@ async def test_refresh_and_hit_have_separate_metrics_and_lock_wait_span(observat
         call.args[0] for call in distribution.call_args_list
     }
     # Keep identifying values out of the feature's explicit telemetry.
-    attributes = json.dumps([
-        call.kwargs["attributes"] for call in count.call_args_list
-    ])
+    attributes = json.dumps(
+        [call.kwargs["attributes"] for call in count.call_args_list]
+    )
     for value in [
-        client.api_key, client.base_url,
-        "sensitive-model-name", "another-sensitive-model", "17"
+        client.api_key,
+        client.base_url,
+        "sensitive-model-name",
+        "another-sensitive-model",
+        "17",
     ]:
         assert value not in attributes
     client.models.list.assert_awaited_once()
@@ -117,7 +124,8 @@ async def test_runtime_fail_open_has_a_reason_and_keeps_execution_available(
     await catalog.ensure_model_available(client, "available")
 
     decisions = [
-        call for call in count.call_args_list
+        call
+        for call in count.call_args_list
         if call.args[0] == "model_catalog.runtime.decisions"
     ]
     assert len(decisions) == 1
@@ -129,7 +137,8 @@ async def test_runtime_fail_open_has_a_reason_and_keeps_execution_available(
     }
     if failure == "lock_timeout":
         assert any(
-            call.args[0] == "model_catalog.lock_timeout" for call in count.call_args_list
+            call.args[0] == "model_catalog.lock_timeout"
+            for call in count.call_args_list
         )
     if failure != "provider_error":
         client.models.list.assert_not_awaited()
@@ -192,12 +201,12 @@ async def test_concurrent_lookup_attributes_remain_isolated(observations):
         catalog.get_model_catalog(first), catalog.get_runtime_model_catalog(second)
     )
     attributes = [
-        call.kwargs["attributes"] for call in count.call_args_list
+        call.kwargs["attributes"]
+        for call in count.call_args_list
         if call.args[0] == "model_catalog.lookups"
     ]
     assert {
-        (attrs["catalog.operation"], attrs["catalog.provider"])
-        for attrs in attributes
+        (attrs["catalog.operation"], attrs["catalog.provider"]) for attrs in attributes
     } == {("listing", "openai"), ("runtime", "azure")}
     assert telemetry._current.get() is None
 
@@ -229,7 +238,8 @@ async def test_real_sdk_serializes_catalog_spans_and_metrics(
             scope.set_client(client)
             parent = (
                 sentry_sdk.start_transaction(op="http.server", name="POST /synthetic")
-                if has_parent else nullcontext()
+                if has_parent
+                else nullcontext()
             )
             with parent:
                 await catalog.get_model_catalog(provider_client("available"))
@@ -245,7 +255,8 @@ async def test_real_sdk_serializes_catalog_spans_and_metrics(
     assert b"model_catalog.lookups" in serialized
     transactions = [
         item.payload.json
-        for envelope in envelopes for item in envelope.items
+        for envelope in envelopes
+        for item in envelope.items
         if item.type == "transaction"
     ]
     assert len(transactions) == 1

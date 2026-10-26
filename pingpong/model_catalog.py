@@ -171,7 +171,9 @@ async def _fetch(client: Any, generation: str = "") -> ModelCatalog:
 
 async def _read(redis: Any, prefix: str) -> ModelCatalog | None:
     with telemetry.step("redis_read"):
-        payload, generation = await redis.mget(f"{prefix}:snapshot", f"{prefix}:generation")
+        payload, generation = await redis.mget(
+            f"{prefix}:snapshot", f"{prefix}:generation"
+        )
         if payload is None:
             return None
         try:
@@ -208,7 +210,9 @@ async def _get_cached_model_catalog(client: Any) -> ModelCatalog | None:
                     async with AsyncExitStack() as stack:
                         with telemetry.step("lock_wait"):
                             await stack.enter_async_context(
-                                redis.lock(f"{prefix}:lock", timeout=90, blocking_timeout=20)
+                                redis.lock(
+                                    f"{prefix}:lock", timeout=90, blocking_timeout=20
+                                )
                             )
                         lock_acquired = True
                         if await redis.get(cache_generation_key()) != global_generation:
@@ -283,7 +287,9 @@ async def _get_cached_model_catalog(client: Any) -> ModelCatalog | None:
 
 def _telemetry_provider(client: Any) -> str:
     scope = credential_scope(client)
-    return scope.provider if scope and scope.provider in {"openai", "azure"} else "other"
+    return (
+        scope.provider if scope and scope.provider in {"openai", "azure"} else "other"
+    )
 
 
 async def get_model_catalog(client: Any) -> ModelCatalog:
@@ -349,12 +355,16 @@ async def get_runtime_model_catalog(client: Any) -> ModelCatalog | None:
                 "Could not verify model availability (%s); deferring to provider execution.",
                 type(exc).__name__,
             )
-            reason = observation.reason if observation.reason != "none" else "provider_error"
+            reason = (
+                observation.reason if observation.reason != "none" else "provider_error"
+            )
             telemetry.outcome("unavailable", reason)
             telemetry.decision(_telemetry_provider(client), "fail_open", reason)
             return None
         if catalog is None or catalog.cache_mode != "redis":
-            reason = observation.reason if observation.reason != "none" else "redis_error"
+            reason = (
+                observation.reason if observation.reason != "none" else "redis_error"
+            )
             telemetry.outcome("unavailable", reason)
             telemetry.decision(_telemetry_provider(client), "fail_open", reason)
             return None

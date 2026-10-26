@@ -79,7 +79,9 @@ async def test_credential_factory_reuses_scoped_clients_without_scoping_validati
     assert ai.get_openai_client_from_api_key(credential) is scoped
     validation.models.list = AsyncMock()
     validation.models.with_raw_response.list = AsyncMock(
-        return_value=SimpleNamespace(headers={"x-ms-region": "test-region"}, parse=Mock())
+        return_value=SimpleNamespace(
+            headers={"x-ms-region": "test-region"}, parse=Mock()
+        )
     )
 
     result = await ai.validate_api_key(credential.api_key, **options)
