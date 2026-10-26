@@ -37,7 +37,7 @@ def observations(config, monkeypatch):
 
     count = Mock()
     distribution = Mock()
-    monkeypatch.setattr(telemetry.sentry_sdk, "get_current_span", lambda: object())
+    monkeypatch.setattr(telemetry.sentry_sdk, "get_current_span", object)
     monkeypatch.setattr(telemetry.sentry_sdk, "start_span", start_span)
     monkeypatch.setattr(telemetry.metrics, "count", count)
     monkeypatch.setattr(telemetry.metrics, "distribution", distribution)
