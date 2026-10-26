@@ -281,10 +281,14 @@ async def ensure_model_available(client: Any, model_id: str) -> None:
         return
     try:
         catalog = await _get_cached_model_catalog(client)
-    except openai.APIError as exc:
-        raise HTTPException(
-            503, "We couldn't verify available models. Please try again."
-        ) from exc
+    except (openai.APIError, HTTPException) as exc:
+        if isinstance(exc, HTTPException) and exc.status_code != 503:
+            raise
+        logger.warning(
+            "Could not verify model availability (%s); deferring to provider execution.",
+            type(exc).__name__,
+        )
+        return
     if catalog is None or catalog.cache_mode != "redis":
         return
     selected = _canonical_model(client, model_id)

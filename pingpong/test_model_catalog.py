@@ -696,21 +696,47 @@ async def test_runtime_publish_failure_skips_model_guard(memory_cache, monkeypat
     client.models.list.assert_awaited_once()
 
 
-async def test_provider_errors_are_not_cached_and_guards_fail_closed(memory_cache):
+@pytest.mark.parametrize(
+    ("error_type", "status_code"),
+    [
+        (openai.AuthenticationError, 401),
+        (openai.PermissionDeniedError, 403),
+        (openai.RateLimitError, 429),
+        (openai.InternalServerError, 500),
+        (openai.APIConnectionError, None),
+        (openai.APITimeoutError, None),
+        (TimeoutError, None),
+    ],
+)
+async def test_provider_errors_are_not_cached_and_guards_fail_open(
+    memory_cache, error_type, status_code
+):
     client = provider_client("available")
-    client.models.list.side_effect = openai.AuthenticationError(
-        "Synthetic failure",
-        response=httpx.Response(
-            401, request=httpx.Request("GET", "https://example.test/models")
-        ),
-        body=None,
-    )
-    with pytest.raises(HTTPException) as raised:
-        await catalog.ensure_model_available(client, "available")
-    assert raised.value.status_code == 503
+    request = httpx.Request("GET", "https://example.test/models")
+    if status_code is not None:
+        error = error_type(
+            "Synthetic failure",
+            response=httpx.Response(status_code, request=request),
+            body=None,
+        )
+    elif error_type is TimeoutError:
+        error = TimeoutError()
+    else:
+        error = error_type(request=request)
+    client.models.list.side_effect = error
+
+    await catalog.ensure_model_available(client, "available")
+
+    # Listing still reports provider failures instead of returning an empty catalog.
+    with pytest.raises(HTTPException if error_type is TimeoutError else error_type):
+        await catalog.get_model_catalog(client)
     client.models.list.side_effect = None
     await catalog.ensure_model_available(client, "available")
-    assert client.models.list.await_count == 2
+    assert client.models.list.await_count == 3
+    with pytest.raises(HTTPException) as raised:
+        await catalog.ensure_model_available(client, "missing")
+    assert raised.value.status_code == 400
+    assert client.models.list.await_count == 3
 
 
 async def test_corrupt_cache_is_refetched(memory_cache):
