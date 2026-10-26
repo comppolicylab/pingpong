@@ -454,9 +454,11 @@ async def test_shared_and_duplicate_remote_file_ids_resolve_within_class(db, use
         assert {f.id for f in resolved} == {local.id, shared.id}
         # The later association writers must use the same scope as the precheck.
         await models.Thread.add_code_interpreter_files(
-            session, 20, ["duplicate", "shared"]
+            session, 20, ["duplicate", "shared"], class_id=1
         )
-        await models.Thread.add_image_files(session, 20, ["duplicate", "shared"])
+        await models.Thread.add_image_files(
+            session, 20, ["duplicate", "shared"], class_id=1
+        )
         store_id = await models.VectorStore.create(
             session,
             {
@@ -466,7 +468,7 @@ async def test_shared_and_duplicate_remote_file_ids_resolve_within_class(db, use
             },
             ["duplicate"],
         )
-        await models.VectorStore.add_files(session, store_id, ["shared"])
+        await models.VectorStore.add_files(session, store_id, ["shared"], class_id=1)
         await models.VectorStore.sync_files(session, store_id, ["duplicate", "shared"])
         await models.Thread.create(
             session,

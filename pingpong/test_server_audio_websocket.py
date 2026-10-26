@@ -3240,9 +3240,12 @@ async def test_single_realtime_session_rejects_missing_thread_or_assistant(
     websocket.state["db"] = object()
     handler = AsyncMock()
 
-    await websocket_module.ws_with_single_realtime_session(handler)(
-        websocket, "10", "20"
-    )
+    wrapped = websocket_module.ws_with_single_realtime_session(handler)
+    if missing == "thread":
+        with pytest.raises(ValueError, match="This voice session was not found."):
+            await wrapped(websocket, "10", "20")
+    else:
+        await wrapped(websocket, "10", "20")
 
     handler.assert_not_awaited()
     assert websocket.closed
@@ -3251,7 +3254,9 @@ async def test_single_realtime_session_rejects_missing_thread_or_assistant(
             "type": "error",
             "error": {
                 "type": "invalid_request_error",
-                "code": "voice_session_unavailable",
+                "code": "permissions"
+                if missing == "thread"
+                else "voice_session_unavailable",
                 "message": (
                     "This voice session was not found."
                     if missing == "thread"

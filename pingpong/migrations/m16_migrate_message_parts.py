@@ -442,7 +442,10 @@ async def _persist_ci_image_annotations(
         )
         stats.annotations_created += 1
         await models.Thread.add_image_files(
-            session, local_message.thread_id, [local_file.file_id]
+            session,
+            local_message.thread_id,
+            [local_file.file_id],
+            class_id=local_message.thread.class_id,
         )
         logger.info(
             "m16 added code interpreter image annotation. thread_id=%s "
@@ -575,6 +578,7 @@ async def _create_annotation_data_and_persist_file(
                 session=session,
                 thread_id=local_thread.id,
                 file_ids=[local_file.file_id],
+                class_id=local_thread.class_id,
             )
             logger.info(
                 "m16 added file_path output to thread code interpreter files. "

@@ -9913,12 +9913,14 @@ async def send_message(
                         openai_client,
                         thread.vector_store_id,
                         data.file_search_file_ids,
+                        class_id=thread.class_id,
                     )
                 else:
                     await add_vector_store_files_to_db(
                         request.state["db"],
                         thread.vector_store_id,
                         data.file_search_file_ids,
+                        class_id=thread.class_id,
                     )
             else:
                 # Store doesn't exist, create a new one
@@ -9960,7 +9962,10 @@ async def send_message(
 
         if data.code_interpreter_file_ids:
             await models.Thread.add_code_interpreter_files(
-                request.state["db"], thread.id, data.code_interpreter_file_ids
+                request.state["db"],
+                thread.id,
+                data.code_interpreter_file_ids,
+                class_id=thread.class_id,
             )
 
         vision_image_descriptions = None
@@ -9978,7 +9983,10 @@ async def send_message(
 
         if data.vision_file_ids:
             await models.Thread.add_image_files(
-                request.state["db"], thread.id, data.vision_file_ids
+                request.state["db"],
+                thread.id,
+                data.vision_file_ids,
+                class_id=thread.class_id,
             )
             [
                 messageContent.append(

@@ -329,6 +329,8 @@ async def test_migrate_message_parts_reuses_existing_local_file(db):
             s3_file=s3_file,
         )
         session.add(file)
+        await session.flush()
+        await models.File.add_files_to_class(session, 1, [50])
         await session.commit()
 
     fake_client = _fake_openai_client(
@@ -415,6 +417,8 @@ async def test_migrate_message_parts_backfills_missing_s3_file(db, monkeypatch):
                 class_id=1,
             )
         )
+        await session.flush()
+        await models.File.add_files_to_class(session, 1, [50])
         await session.commit()
 
     fake_store = FakeFileStore()
@@ -495,6 +499,8 @@ async def test_migrate_message_parts_skips_existing_s3_file_backfill(db, monkeyp
                 s3_file=models.S3File(id=500, key="already-backed/shared.txt"),
             )
         )
+        await session.flush()
+        await models.File.add_files_to_class(session, 1, [50])
         await session.commit()
 
     fake_store = FakeFileStore()
@@ -641,6 +647,8 @@ async def test_migrate_message_parts_sniffs_content_type_for_reused_backfilled_f
                 s3_file=models.S3File(id=500, key="backed/image"),
             )
         )
+        await session.flush()
+        await models.File.add_files_to_class(session, 1, [50])
         await session.commit()
 
     fake_store = FakeFileStore()

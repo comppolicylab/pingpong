@@ -5883,14 +5883,20 @@ class VectorStore(Base):
 
     @classmethod
     async def add_files(
-        cls, session: AsyncSession, vector_store_id: int, file_ids: list[str]
+        cls,
+        session: AsyncSession,
+        vector_store_id: int,
+        file_ids: list[str],
+        *,
+        class_id: int,
     ) -> None:
+        """Attach files using the resource's class already validated by the caller."""
         if not file_ids:
             return
         file_object_ids = await File.get_object_ids_by_file_id(
             session,
             file_ids,
-            class_id=(await cls.get_by_id(session, vector_store_id)).class_id,
+            class_id=int(class_id),
         )
         file_vector_store_pairs = [
             (obj_id, vector_store_id) for obj_id in file_object_ids
@@ -5907,12 +5913,17 @@ class VectorStore(Base):
 
     @classmethod
     async def add_files_return_id(
-        cls, session: AsyncSession, vector_store_obj_id: int, file_ids: list[str]
+        cls,
+        session: AsyncSession,
+        vector_store_obj_id: int,
+        file_ids: list[str],
+        *,
+        class_id: int,
     ) -> str:
         vector_store_id = await cls.get_vector_store_id_by_id(
             session, vector_store_obj_id
         )
-        await cls.add_files(session, vector_store_obj_id, file_ids)
+        await cls.add_files(session, vector_store_obj_id, file_ids, class_id=class_id)
         return vector_store_id
 
     @classmethod
@@ -5978,7 +5989,10 @@ class VectorStore(Base):
 
         if file_ids_to_add:
             await cls.add_files(
-                session, vector_store_obj_id, list(file_ids_to_add.keys())
+                session,
+                vector_store_obj_id,
+                list(file_ids_to_add.keys()),
+                class_id=vector_store.class_id,
             )
 
         return (
@@ -10268,14 +10282,20 @@ class Thread(Base):
 
     @classmethod
     async def add_code_interpreter_files(
-        cls, session: AsyncSession, thread_id: int, file_ids: list[str]
+        cls,
+        session: AsyncSession,
+        thread_id: int,
+        file_ids: list[str],
+        *,
+        class_id: int,
     ) -> None:
+        """Attach files using the resource's class already validated by the caller."""
         if not file_ids:
             return
         file_object_ids = await File.get_object_ids_by_file_id(
             session,
             file_ids,
-            class_id=(await cls.get_by_id(session, thread_id)).class_id,
+            class_id=int(class_id),
         )
         file_thread_pairs = [(obj_id, thread_id) for obj_id in file_object_ids]
         stmt = (
@@ -10429,14 +10449,20 @@ class Thread(Base):
 
     @classmethod
     async def add_image_files(
-        cls, session: AsyncSession, thread_id: int, file_ids: list[str]
+        cls,
+        session: AsyncSession,
+        thread_id: int,
+        file_ids: list[str],
+        *,
+        class_id: int,
     ) -> None:
+        """Attach files using the resource's class already validated by the caller."""
         if not file_ids:
             return
         image_file_object_ids = await File.get_object_ids_by_file_id(
             session,
             file_ids,
-            class_id=(await cls.get_by_id(session, thread_id)).class_id,
+            class_id=int(class_id),
         )
         image_file_thread_pairs = [
             (obj_id, thread_id) for obj_id in image_file_object_ids

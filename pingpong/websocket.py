@@ -540,14 +540,8 @@ def ws_with_single_realtime_session(func):
             for_update=True,
             include_voice_mode_recording=True,
         )
-        if thread is None:
-            await _reject_realtime_session(
-                browser_connection, "This voice session was not found."
-            )
-            return None
-
         try:
-            require_resource_in_class(
+            thread = require_resource_in_class(
                 thread, class_id, detail="This voice session was not found."
             )
             if thread.assistant is not None:
