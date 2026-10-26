@@ -70,6 +70,7 @@ async def test_audio_stream_uses_lti_session_when_cookie_missing(monkeypatch):
 def realtime_assistant(**overrides):
     defaults = {
         "id": 30,
+        "class_id": 10,
         "assistant_id": "asst_30",
         "model": "gpt-4o-realtime-preview",
         "assistant_should_message_first": False,
@@ -3134,6 +3135,7 @@ async def test_realtime_requires_thread_and_actual_assistant_permissions(
     websocket.state["assistant"] = realtime_assistant(id=999)
     thread = SimpleNamespace(
         id=20,
+        class_id=10,
         assistant=realtime_assistant(),
         instructions="Speak clearly.",
         timezone=None,
@@ -3167,8 +3169,8 @@ async def test_realtime_requires_thread_and_actual_assistant_permissions(
     handler = AsyncMock()
     wrapped = websocket_module.ws_db_middleware(
         websocket_module.ws_check_realtime_permissions(
-            websocket_module.ws_with_openai_client(
-                websocket_module.ws_with_single_realtime_session(
+            websocket_module.ws_with_single_realtime_session(
+                websocket_module.ws_with_openai_client(
                     websocket_module.ws_with_realtime_connection(handler)
                 )
             )
@@ -3224,7 +3226,9 @@ async def test_single_realtime_session_rejects_missing_thread_or_assistant(
     thread = (
         None
         if missing == "thread"
-        else SimpleNamespace(id=20, assistant=None, voice_mode_recording=None)
+        else SimpleNamespace(
+            id=20, class_id=10, assistant=None, voice_mode_recording=None
+        )
     )
     monkeypatch.setattr(
         models.Thread, "get_by_id_with_assistant", AsyncMock(return_value=thread)
@@ -3258,6 +3262,47 @@ async def test_single_realtime_session_rejects_missing_thread_or_assistant(
     ]
 
 
+@pytest.mark.parametrize("mismatch", ["thread", "assistant"])
+async def test_realtime_class_mismatch_rejects_before_provider_and_rolls_back(
+    monkeypatch, mismatch
+):
+    thread = SimpleNamespace(
+        id=20,
+        class_id=11 if mismatch == "thread" else 10,
+        assistant=realtime_assistant(class_id=11 if mismatch == "assistant" else 10),
+    )
+    load = AsyncMock(return_value=thread)
+    provider = AsyncMock()
+    monkeypatch.setattr(models.Thread, "get_by_id_with_assistant", load)
+    monkeypatch.setattr(websocket_module, "get_openai_client_by_class_id", provider)
+    db = AsyncMock()
+    context = AsyncMock()
+    context.__aenter__.return_value = db
+    monkeypatch.setattr(
+        websocket_module.config.db.driver,
+        "async_session_with_args",
+        lambda **kwargs: lambda: context,
+    )
+    websocket = DummyWebSocket()
+    handler = AsyncMock()
+    wrapped = websocket_module.ws_db_middleware(
+        websocket_module.ws_with_single_realtime_session(
+            websocket_module.ws_with_openai_client(handler)
+        )
+    )
+    with pytest.raises(ValueError, match="not found"):
+        await wrapped(websocket, "10", "20")
+    load.assert_awaited_once_with(
+        db, 20, for_update=True, include_voice_mode_recording=True
+    )
+    provider.assert_not_awaited()
+    handler.assert_not_awaited()
+    db.rollback.assert_awaited_once()
+    db.commit.assert_not_awaited()
+    assert websocket.closed
+    assert websocket.sent_json[0]["error"]["code"] == "permissions"
+
+
 @pytest.mark.parametrize("has_recording,has_messages", [(True, False), (False, True)])
 @pytest.mark.parametrize("disconnect_during", [None, "send_json", "close"])
 async def test_single_realtime_session_rejects_finished_thread(
@@ -3270,6 +3315,7 @@ async def test_single_realtime_session_rejects_finished_thread(
         }
         return SimpleNamespace(
             id=thread_id,
+            class_id=10,
             assistant=realtime_assistant(),
             instructions="Speak clearly.",
             timezone=None,

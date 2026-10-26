@@ -2112,8 +2112,8 @@ async def process_queue_tasks(
 @ws_db_middleware
 @ws_parse_session_token
 @ws_check_realtime_permissions
-@ws_with_openai_client
 @ws_with_single_realtime_session
+@ws_with_openai_client
 @ws_with_realtime_connection
 async def browser_realtime_websocket(
     browser_connection: StateWebSocket,

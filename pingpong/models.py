@@ -5355,8 +5355,12 @@ class File(Base):
         return await session.scalar(stmt)
 
     @classmethod
-    async def get_by_file_id(cls, session: AsyncSession, file_id: str) -> "File":
+    async def get_by_file_id(
+        cls, session: AsyncSession, file_id: str, *, class_id: int | None = None
+    ) -> "File":
         stmt = select(File).where(File.file_id == file_id)
+        if class_id is not None:
+            stmt = stmt.where(File.classes.any(Class.id == class_id))
         return await session.scalar(stmt)
 
     @classmethod
@@ -5431,29 +5435,35 @@ class File(Base):
 
     @classmethod
     async def get_all_by_file_id(
-        cls, session: AsyncSession, ids: List[str]
+        cls, session: AsyncSession, ids: List[str], *, class_id: int | None = None
     ) -> List["File"]:
         if not ids:
             return []
         stmt = select(File).where(File.file_id.in_(ids))
+        if class_id is not None:
+            stmt = stmt.where(File.classes.any(Class.id == class_id))
         result = await session.execute(stmt)
         return [row.File for row in result]
 
     @classmethod
     async def get_object_ids_by_file_id(
-        cls, session: AsyncSession, ids: List[str]
+        cls, session: AsyncSession, ids: List[str], *, class_id: int | None = None
     ) -> List[int]:
         if not ids:
             return []
         stmt = select(File.id).where(File.file_id.in_(ids))
+        if class_id is not None:
+            stmt = stmt.where(File.classes.any(Class.id == class_id))
         result = await session.execute(stmt)
         return [row[0] for row in result]
 
     @classmethod
     async def get_id_tuple_by_file_id(
-        cls, session: AsyncSession, ids: List[str]
+        cls, session: AsyncSession, ids: List[str], *, class_id: int | None = None
     ) -> AsyncGenerator[tuple[str, int], None]:
         stmt = select(File.file_id, File.id).where(File.file_id.in_(ids))
+        if class_id is not None:
+            stmt = stmt.where(File.classes.any(Class.id == class_id))
         result = await session.execute(stmt)
         for row in result:
             yield row
@@ -5772,7 +5782,9 @@ class VectorStore(Base):
         await session.flush()
 
         if file_ids:
-            file_object_ids = await File.get_object_ids_by_file_id(session, file_ids)
+            file_object_ids = await File.get_object_ids_by_file_id(
+                session, file_ids, class_id=vector_store.class_id
+            )
             file_vector_store_pairs = [
                 (obj_id, vector_store.id) for obj_id in file_object_ids
             ]
@@ -5875,7 +5887,11 @@ class VectorStore(Base):
     ) -> None:
         if not file_ids:
             return
-        file_object_ids = await File.get_object_ids_by_file_id(session, file_ids)
+        file_object_ids = await File.get_object_ids_by_file_id(
+            session,
+            file_ids,
+            class_id=(await cls.get_by_id(session, vector_store_id)).class_id,
+        )
         file_vector_store_pairs = [
             (obj_id, vector_store_id) for obj_id in file_object_ids
         ]
@@ -5915,11 +5931,17 @@ class VectorStore(Base):
             )
         }
 
+        vector_store = await cls.get_by_id(session, vector_store_obj_id)
+        if not vector_store:
+            raise ValueError(
+                f"Vector store with id {vector_store_obj_id} does not exist."
+            )
+
         new_file_ids = dict()
         new_file_ids = {
             file_id: file_obj_id
             async for file_id, file_obj_id in File.get_id_tuple_by_file_id(
-                session, file_ids
+                session, file_ids, class_id=vector_store.class_id
             )
         }
 
@@ -5929,12 +5951,6 @@ class VectorStore(Base):
         file_ids_to_remove = {
             k: v for k, v in current_file_ids.items() if k not in new_file_ids
         }
-
-        vector_store = await cls.get_by_id(session, vector_store_obj_id)
-        if not vector_store:
-            raise ValueError(
-                f"Vector store with id {vector_store_obj_id} does not exist."
-            )
 
         if (
             len(current_file_ids) - len(file_ids_to_remove) + len(file_ids_to_add)
@@ -6540,7 +6556,7 @@ class Assistant(Base):
 
         if code_interpreter_file_ids:
             code_interpreter_file_object_ids = await File.get_object_ids_by_file_id(
-                session, code_interpreter_file_ids
+                session, code_interpreter_file_ids, class_id=int(class_id)
             )
             file_assistant_pairs = [
                 (obj_id, assistant.id) for obj_id in code_interpreter_file_object_ids
@@ -9734,7 +9750,7 @@ class Thread(Base):
 
         if code_interpreter_file_ids:
             code_interpreter_file_object_ids = await File.get_object_ids_by_file_id(
-                session, code_interpreter_file_ids
+                session, code_interpreter_file_ids, class_id=thread.class_id
             )
             file_thread_pairs = [
                 (obj_id, thread.id) for obj_id in code_interpreter_file_object_ids
@@ -9750,7 +9766,7 @@ class Thread(Base):
 
         if image_file_ids:
             image_file_object_ids = await File.get_object_ids_by_file_id(
-                session, image_file_ids
+                session, image_file_ids, class_id=thread.class_id
             )
             file_thread_pairs = [
                 (obj_id, thread.id) for obj_id in image_file_object_ids
@@ -10256,7 +10272,11 @@ class Thread(Base):
     ) -> None:
         if not file_ids:
             return
-        file_object_ids = await File.get_object_ids_by_file_id(session, file_ids)
+        file_object_ids = await File.get_object_ids_by_file_id(
+            session,
+            file_ids,
+            class_id=(await cls.get_by_id(session, thread_id)).class_id,
+        )
         file_thread_pairs = [(obj_id, thread_id) for obj_id in file_object_ids]
         stmt = (
             _get_upsert_stmt(session)(code_interpreter_file_thread_association)
@@ -10413,7 +10433,11 @@ class Thread(Base):
     ) -> None:
         if not file_ids:
             return
-        image_file_object_ids = await File.get_object_ids_by_file_id(session, file_ids)
+        image_file_object_ids = await File.get_object_ids_by_file_id(
+            session,
+            file_ids,
+            class_id=(await cls.get_by_id(session, thread_id)).class_id,
+        )
         image_file_thread_pairs = [
             (obj_id, thread_id) for obj_id in image_file_object_ids
         ]

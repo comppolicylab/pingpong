@@ -353,16 +353,16 @@ async def copy_vector_store(
     old_vector_store_id: int,
 ) -> tuple[str, int]:
     files = await models.VectorStore.get_files_by_id(session, old_vector_store_id)
+    # Copying intentionally extends class membership before scoped resolution.
+    await models.File.add_files_to_class(
+        session, target_class_id, [f.id for f in files]
+    )
     vector_store_obj_id, vector_store_id = await create_vector_store(
         session,
         cli,
         str(target_class_id),
         [f.file_id for f in files],
         type=VectorStoreType.ASSISTANT,
-    )
-
-    await models.File.add_files_to_class(
-        session, target_class_id, [f.id for f in files]
     )
 
     new_grants: list[Relation] = []
