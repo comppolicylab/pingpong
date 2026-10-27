@@ -53,7 +53,7 @@ from sqlalchemy import (
     tuple_,
     update,
 )
-from sqlalchemy.sql.elements import BinaryExpression
+from sqlalchemy.sql.elements import BinaryExpression, ColumnElement
 from sqlalchemy.dialects.postgresql import insert as postgres_upsert
 from sqlalchemy.dialects.sqlite import insert as sqlite_upsert
 from sqlalchemy.ext.asyncio import AsyncAttrs, AsyncSession
@@ -5209,6 +5209,35 @@ class S3File(Base):
 class File(Base):
     __tablename__ = "files"
 
+    @classmethod
+    def visible_in_thread_clause(cls, thread_id: int) -> ColumnElement[bool]:
+        """Hide images produced only by unreleased messages, preserving uploads."""
+        annotation_reference = or_(
+            Annotation.file_object_id == cls.id,
+            Annotation.vision_file_object_id == cls.id,
+            Annotation.file_id == cls.file_id,
+            Annotation.vision_file_id == cls.file_id,
+        )
+        references = (
+            select(MessagePart.id)
+            .join(Message, Message.id == MessagePart.message_id)
+            .outerjoin(Annotation, Annotation.message_part_id == MessagePart.id)
+            .where(Message.thread_id == thread_id)
+            .correlate_except(MessagePart, Message, Annotation)
+        )
+        blocked_reference = references.where(
+            annotation_reference, ~Message.visible_content_clause()
+        ).exists()
+        visible_reference = references.where(
+            Message.visible_content_clause(),
+            or_(
+                annotation_reference,
+                MessagePart.input_image_file_object_id == cls.id,
+                MessagePart.input_image_file_id == cls.file_id,
+            ),
+        ).exists()
+        return or_(~blocked_reference, visible_reference)
+
     id: Mapped[int] = mapped_column(primary_key=True)
     name = Column(String)
     content_type = Column(String)
@@ -9068,13 +9097,21 @@ class Message(Base):
     completed = Column(DateTime(timezone=True), nullable=True)
 
     @classmethod
+    def visible_content_clause(cls) -> ColumnElement[bool]:
+        """Prompt inputs remain readable; generated messages require release."""
+        return or_(
+            cls.role != schemas.MessageRole.ASSISTANT,
+            Run.generated_content_visible_clause(cls.run_id),
+        )
+
+    @classmethod
     async def get_messages_by_thread_id(
         cls, session: AsyncSession, thread_id: int
     ) -> AsyncGenerator["Message", None]:
         stmt = (
             select(Message)
             .join(Run)
-            .filter(Run.thread_id == thread_id)
+            .filter(Run.thread_id == thread_id, cls.visible_content_clause())
             .order_by(Message.created.desc())
         )
 
@@ -9088,7 +9125,7 @@ class Message(Base):
     ) -> "Message | None":
         stmt = (
             select(Message)
-            .where(Message.id == id_)
+            .where(Message.id == id_, cls.visible_content_clause())
             .options(
                 selectinload(Message.content).selectinload(MessagePart.annotations),
             )
@@ -9325,6 +9362,19 @@ class Run(Base):
         onupdate=func.now(),
     )
     completed = Column(DateTime(timezone=True), nullable=True)
+
+    @classmethod
+    def generated_content_visible_clause(cls, run_id: Any) -> ColumnElement[bool]:
+        """Shared saved-content gate, independent of provider execution status."""
+        return (
+            select(cls.id)
+            .where(
+                cls.id == run_id,
+                cls.release_status == schemas.RunReleaseStatus.RELEASED,
+            )
+            .correlate_except(cls)
+            .exists()
+        )
 
     @classmethod
     def for_thread(cls, thread: "Thread", **kwargs: Any) -> "Run":
@@ -10062,6 +10112,7 @@ class Thread(Base):
         stmt = (
             select(Thread)
             .where(Thread.id == int(id_))
+            .execution_options(populate_existing=True)
             .options(
                 selectinload(Thread.users),
                 selectinload(Thread.voice_mode_recording),
@@ -10081,23 +10132,35 @@ class Thread(Base):
                         defer(APIKey.api_key),
                     ),
                 ),
-                selectinload(Thread.image_files),
+                selectinload(
+                    Thread.image_files.and_(File.visible_in_thread_clause(id_))
+                ),
                 selectinload(Thread.runs).options(
-                    selectinload(Run.tool_calls).options(
+                    selectinload(
+                        Run.tool_calls.and_(
+                            Run.generated_content_visible_clause(ToolCall.run_id)
+                        )
+                    ).options(
                         selectinload(ToolCall.outputs),
                         selectinload(ToolCall.results),
                         selectinload(ToolCall.web_search_actions).options(
                             selectinload(WebSearchCallAction.sources),
                         ),
                     ),
-                    selectinload(Run.messages).options(
+                    selectinload(
+                        Run.messages.and_(Message.visible_content_clause())
+                    ).options(
                         selectinload(Message.content).selectinload(
                             MessagePart.annotations
                         ),
                         selectinload(Message.code_interpreter_attachments),
                         selectinload(Message.file_search_attachments),
                     ),
-                    selectinload(Run.reasoning_steps).options(
+                    selectinload(
+                        Run.reasoning_steps.and_(
+                            Run.generated_content_visible_clause(ReasoningStep.run_id)
+                        )
+                    ).options(
                         selectinload(ReasoningStep.summary_parts),
                         selectinload(ReasoningStep.content_parts),
                     ),
@@ -10558,6 +10621,7 @@ class Thread(Base):
                 and_(
                     image_file_thread_association.c.thread_id == thread_id,
                     File.file_id == file_id,
+                    File.visible_in_thread_clause(thread_id),
                 )
             )
             .options(selectinload(File.s3_file))
@@ -10815,7 +10879,9 @@ class Thread(Base):
         order: Literal["asc", "desc"] = "desc",
         include_annotations: bool = False,
     ) -> list["Message"]:
-        stmt = select(Message).where(Message.thread_id == thread_id)
+        stmt = select(Message).where(
+            Message.thread_id == thread_id, Message.visible_content_clause()
+        )
 
         if before is not None:
             stmt = stmt.where(Message.id < before)
@@ -10884,7 +10950,7 @@ class Thread(Base):
     ) -> AsyncGenerator["Message", None]:
         stmt = (
             select(Message)
-            .where(*filters)
+            .where(*filters, Message.visible_content_clause())
             .options(
                 selectinload(Message.content).selectinload(MessagePart.annotations),
                 selectinload(Message.content).selectinload(MessagePart.input_file),
@@ -10904,7 +10970,10 @@ class Thread(Base):
     ) -> AsyncGenerator["ToolCall", None]:
         stmt = (
             select(ToolCall)
-            .where(ToolCall.thread_id == thread_id)
+            .where(
+                ToolCall.thread_id == thread_id,
+                Run.generated_content_visible_clause(ToolCall.run_id),
+            )
             .options(
                 selectinload(ToolCall.results),
                 selectinload(ToolCall.outputs),
@@ -10927,7 +10996,10 @@ class Thread(Base):
     ) -> AsyncGenerator["ReasoningStep", None]:
         stmt = (
             select(ReasoningStep)
-            .where(ReasoningStep.thread_id == thread_id)
+            .where(
+                ReasoningStep.thread_id == thread_id,
+                Run.generated_content_visible_clause(ReasoningStep.run_id),
+            )
             .options(
                 selectinload(ReasoningStep.content_parts),
                 selectinload(ReasoningStep.summary_parts),
@@ -10966,6 +11038,7 @@ class Thread(Base):
         message_filters = [
             Message.thread_id == thread_id,
             Message.run_id.in_(run_ids),
+            Message.visible_content_clause(),
         ]
         if not include_hidden_messages:
             message_filters.append(Message.is_hidden.is_(False))
@@ -10990,6 +11063,7 @@ class Thread(Base):
             .where(
                 ToolCall.thread_id == thread_id,
                 ToolCall.run_id.in_(run_ids),
+                Run.generated_content_visible_clause(ToolCall.run_id),
             )
             .order_by(tool_ordering)
             .options(
@@ -11007,6 +11081,7 @@ class Thread(Base):
             .where(
                 ReasoningStep.thread_id == thread_id,
                 ReasoningStep.run_id.in_(run_ids),
+                Run.generated_content_visible_clause(ReasoningStep.run_id),
             )
             .order_by(reasoning_ordering)
             .options(
