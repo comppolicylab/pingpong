@@ -171,6 +171,7 @@ from .ai import (
     get_ci_messages_from_step,
     get_initial_thread_conversation_name,
     get_openai_client_by_class_id,
+    get_openai_client_from_api_key,
     get_original_model_name_by_azure_equivalent,
     get_thread_conversation_name,
     inject_timestamp_to_instructions,
@@ -239,6 +240,14 @@ from .permission import (
 )
 from .runs import get_placeholder_ci_calls
 from .saml import get_saml2_attrs, get_saml2_client, get_saml2_settings
+from .model_catalog import (
+    close_model_catalog_cache,
+    ensure_model_available,
+    get_model_catalog,
+    reset_model_catalog_cache,
+    record_model_error,
+    runtime_model_cache_enabled,
+)
 from .login_exchange import integration as saml_login_exchange
 from .login_exchange.exchange import consume_grant, session_redirect
 from .state_types import AppState, StateRequest, StateWebSocket
@@ -4492,7 +4501,7 @@ async def list_class_models(
 ):
     """List available models for the class assistants."""
     try:
-        all_models = await openai_client.models.list()
+        all_models = await get_model_catalog(openai_client)
     except openai.AuthenticationError as e:
         raise HTTPException(
             status_code=401,
@@ -4512,7 +4521,7 @@ async def list_class_models(
 
     filtered: list[dict[str, Any]] = []
     included_model_ids = set()
-    for m in all_models.data:
+    for m in all_models.models:
         model_id = (
             get_original_model_name_by_azure_equivalent(m.id)
             if isinstance(openai_client, openai.AsyncAzureOpenAI)
@@ -4570,7 +4579,7 @@ async def list_class_models(
             }
         )
     if isinstance(openai_client, openai.AsyncAzureOpenAI) and any(
-        m.id == "gpt-4-turbo-2024-04-09" for m in all_models.data
+        m.id == "gpt-4-turbo-2024-04-09" for m in all_models.models
     ):
         filtered.append(
             {
@@ -4601,7 +4610,7 @@ async def list_class_models(
             }
         )
     if isinstance(openai_client, openai.AsyncAzureOpenAI) and any(
-        m.id == "gpt-4-0125-Preview" for m in all_models.data
+        m.id == "gpt-4-0125-Preview" for m in all_models.models
     ):
         filtered.append(
             {
@@ -4693,9 +4702,20 @@ async def list_class_models(
     ]
     return {
         "models": filtered,
+        "cache_mode": all_models.cache_mode,
         "default_prompts": default_prompts,
         "enforce_classic_assistants": False,
     }
+
+
+@v1.post(
+    "/admin/model-cache/reset",
+    dependencies=[Depends(Authz("admin"))],
+    response_model=schemas.GenericStatus,
+)
+async def reset_model_cache():
+    await reset_model_catalog_cache()
+    return {"status": "ok"}
 
 
 @v1.websocket(
@@ -8654,13 +8674,6 @@ async def create_audio_thread(
 
     anonymous_session: models.AnonymousSession | None = None
     anonymous_user: models.User | None = None
-    if request.state["is_anonymous"]:
-        anonymous_session = await models.AnonymousSession.create(
-            request.state["db"],
-            str(uuid.uuid7()),
-            user_id=request.state["anonymous_session"].user.id,
-        )
-        anonymous_user = anonymous_session.user
 
     anonymous_session_with_logged_in_user = False
     parties_ids = req.parties or []
@@ -8677,6 +8690,16 @@ async def create_audio_thread(
             status_code=400,
             detail="This assistant is not compatible with this thread creation endpoint. Provide a voice assistant.",
         )
+
+    await ensure_model_available(openai_client, assistant.model)
+
+    if request.state["is_anonymous"]:
+        anonymous_session = await models.AnonymousSession.create(
+            request.state["db"],
+            str(uuid.uuid7()),
+            user_id=request.state["anonymous_session"].user.id,
+        )
+        anonymous_user = anonymous_session.user
 
     class_ = None
     if assistant.version <= 2:
@@ -8860,13 +8883,6 @@ async def create_lecture_thread(
 
     anonymous_session: models.AnonymousSession | None = None
     anonymous_user: models.User | None = None
-    if request.state["is_anonymous"]:
-        anonymous_session = await models.AnonymousSession.create(
-            request.state["db"],
-            str(uuid.uuid7()),
-            user_id=request.state["anonymous_session"].user.id,
-        )
-        anonymous_user = anonymous_session.user
 
     anonymous_session_with_logged_in_user = False
     parties_ids = req.parties or []
@@ -8886,6 +8902,25 @@ async def create_lecture_thread(
             status_code=400,
             detail="This assistant is not compatible with this thread creation endpoint. Provide a lecture video or lecture slides assistant.",
         )
+
+    if runtime_model_cache_enabled():
+        billing = await models.Class.get_api_key(request.state["db"], int(class_id))
+        if billing and billing.api_key_obj is not None:
+            try:
+                openai_client = get_openai_client_from_api_key(billing.api_key_obj)
+            except GetOpenAIClientException as exc:
+                raise HTTPException(
+                    status_code=exc.code or 400, detail=exc.detail
+                ) from exc
+            await ensure_model_available(openai_client, assistant.model)
+
+    if request.state["is_anonymous"]:
+        anonymous_session = await models.AnonymousSession.create(
+            request.state["db"],
+            str(uuid.uuid7()),
+            user_id=request.state["anonymous_session"].user.id,
+        )
+        anonymous_user = anonymous_session.user
 
     is_slide_lesson = (
         assistant.interaction_mode == schemas.InteractionMode.LECTURE_SLIDES
@@ -9151,6 +9186,8 @@ async def create_thread(
             status_code=400,
             detail="This assistant requires a dedicated thread creation endpoint.",
         )
+
+    await ensure_model_available(openai_client, assistant.model)
 
     if assistant.assistant_should_message_first and req.message:
         raise HTTPException(
@@ -9646,6 +9683,8 @@ async def create_run(
 
             if last_run and last_run.status == schemas.RunStatus.PENDING:
                 run_to_complete = last_run
+                if run_to_complete.model is None:
+                    run_to_complete.model = asst.model
                 file_search_file_ids = (
                     await models.Run.get_file_search_files_from_messages(
                         request.state["db"], last_run.id
@@ -9789,6 +9828,8 @@ async def create_run(
                 lecture_video_followups_mode=_lecture_lesson_followups_enabled(thread),
                 omit_message_ids=_is_lecture_lesson_mode(thread.interaction_mode),
             )
+        except HTTPException:
+            raise
         except Exception as e:
             logger.exception("Error running thread")
             raise HTTPException(
@@ -9857,6 +9898,8 @@ async def create_run(
                 show_code_interpreter_output=is_supervisor
                 or not asst.hide_code_interpreter_output,
             )
+        except HTTPException:
+            raise
         except Exception as e:
             logger.exception("Error running thread")
             raise HTTPException(
@@ -9905,6 +9948,8 @@ async def send_message(
             )
 
         tool_resources: ToolResources = {}
+
+        await ensure_model_available(openai_client, asst.model)
 
         if asst.version is not None and thread.version < asst.version:
             raise HTTPException(
@@ -13301,10 +13346,12 @@ async def create_assistant(
                 tool_resources=tool_resources,
             )
         except openai.BadRequestError as e:
+            await record_model_error(openai_client, e)
             raise HTTPException(
                 400, get_details_from_api_error(e, "OpenAI rejected this request")
             )
         except openai.NotFoundError as e:
+            await record_model_error(openai_client, e)
             if e.code == "DeploymentNotFound":
                 raise HTTPException(
                     404,
@@ -15737,10 +15784,12 @@ async def update_assistant(
                         openai_client, vector_store_id_to_delete
                     )
             except openai.BadRequestError as e:
+                await record_model_error(openai_client, e)
                 raise HTTPException(
                     400, get_details_from_api_error(e, "OpenAI rejected this request")
                 )
             except openai.NotFoundError as e:
+                await record_model_error(openai_client, e)
                 if e.code == "DeploymentNotFound":
                     raise HTTPException(
                         404,
@@ -17396,7 +17445,10 @@ async def lifespan(app: FastAPI):
             await config.authz.driver.init()
 
             async with saml_login_exchange.lifespan():
-                yield
+                try:
+                    yield
+                finally:
+                    await close_model_catalog_cache()
 
 
 app = FastAPI(

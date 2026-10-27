@@ -2995,6 +2995,7 @@ export type LectureLessonEditorConfig = {
  * List of language models.
  */
 export type AssistantModels = {
+	cache_mode?: 'redis' | 'direct';
 	models: AssistantModel[];
 	default_prompts?: AssistantDefaultPrompt[];
 	enforce_classic_assistants?: boolean;
@@ -3017,6 +3018,11 @@ export type AssistantModelLiteResponse = {
 export const getModels = async (f: Fetcher, classId: number) => {
 	const url = `class/${classId}/models`;
 	return await GET<never, AssistantModels>(f, url);
+};
+
+/** Reset all provider model catalogs (root administrators). */
+export const resetModelCache = async (f: Fetcher) => {
+	return await POST<never, GenericStatus>(f, 'admin/model-cache/reset');
 };
 
 /**

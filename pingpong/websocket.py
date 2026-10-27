@@ -18,6 +18,7 @@ from websockets.exceptions import ConnectionClosed
 
 from pingpong import models, schemas
 from pingpong.ai_error import get_ai_error_message
+from pingpong.model_catalog import ensure_model_available, record_model_error
 from pingpong.ai_models import get_reasoning_effort_map
 from pingpong.ai import (
     OpenAIClientType,
@@ -645,7 +646,14 @@ def ws_with_realtime_connection(func):
         )
         extra_headers = build_realtime_extra_headers(safety_identifier)
         handler_started = False
+        # Only availability-check HTTP errors expose their detail to the browser.
+        availability_error = None
         try:
+            try:
+                await ensure_model_available(openai_client, assistant.model)
+            except HTTPException as e:
+                availability_error = e
+                raise
             async with AsyncExitStack() as connection_context:
                 realtime_connection = await connection_context.enter_async_context(
                     openai_client.realtime.connect(
@@ -668,6 +676,7 @@ def ws_with_realtime_connection(func):
                         exc_info=True,
                     )
         except Exception as e:
+            await record_model_error(openai_client, e)
             openai_connection_logger.exception(f"Error in Realtime connection: {e}")
             if not handler_started:
                 # Imported here because realtime uses these websocket decorators.
@@ -681,7 +690,9 @@ def ws_with_realtime_connection(func):
                     )
             await _reject_realtime_session(
                 browser_connection,
-                get_ai_error_message(e, "We were unable to connect to OpenAI."),
+                str(availability_error.detail)
+                if availability_error is not None and e is availability_error
+                else get_ai_error_message(e, "We were unable to connect to OpenAI."),
                 code="openai_realtime_connection",
             )
             raise e

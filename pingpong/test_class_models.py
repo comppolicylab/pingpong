@@ -78,6 +78,13 @@ async def test_openai_class_models_include_latest_gpt_5_models(monkeypatch):
         request=request,
         openai_client=openai_client,
     )
+    assert response["cache_mode"] == "direct"
+    assert set(response) == {
+        "cache_mode",
+        "models",
+        "default_prompts",
+        "enforce_classic_assistants",
+    }
 
     provider_model_ids = {
         model.id for model in (await openai_client.models.list()).data
