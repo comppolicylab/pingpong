@@ -9260,6 +9260,22 @@ class Run(Base):
     run_id = Column(String, unique=True, nullable=True)
 
     status = Column(SQLEnum(schemas.RunStatus), nullable=False)
+    release_type = Column(
+        SQLEnum(schemas.ThreadReleaseType),
+        nullable=False,
+        default=schemas.ThreadReleaseType.IMMEDIATE,
+        server_default=schemas.ThreadReleaseType.IMMEDIATE.name,
+    )
+    release_status = Column(
+        SQLEnum(schemas.RunReleaseStatus),
+        nullable=False,
+        default=schemas.RunReleaseStatus.RELEASED,
+        server_default=schemas.RunReleaseStatus.RELEASED.name,
+    )
+    released_at = Column(DateTime(timezone=True), nullable=True)
+    moderation_checks = relationship(
+        "RunModerationCheck", back_populates="run", cascade="all, delete-orphan"
+    )
     messages = relationship(
         "Message",
         back_populates="run",
@@ -9576,12 +9592,41 @@ mcp_server_tool_thread_association = Table(
 )
 
 
+class RunModerationCheck(Base):
+    __tablename__ = "run_moderation_checks"
+
+    id = Column(Integer, primary_key=True)
+    run_id = Column(
+        Integer, ForeignKey("runs.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    run = relationship("Run", back_populates="moderation_checks", uselist=False)
+    stage = Column(SQLEnum(schemas.ModerationCheckStage), nullable=False)
+    status = Column(
+        SQLEnum(schemas.ModerationCheckStatus),
+        nullable=False,
+        default=schemas.ModerationCheckStatus.PENDING,
+        server_default=schemas.ModerationCheckStatus.PENDING.name,
+    )
+    model = Column(String, nullable=True)
+    result = Column(JSON, nullable=True)
+    error = Column(JSON, nullable=True)
+    created = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+
+
 class Thread(Base):
     __tablename__ = "threads"
 
     id = Column(Integer, primary_key=True)
     name = Column(String, nullable=True)
     version = Column(Integer, default=1)
+    release_type = Column(
+        SQLEnum(schemas.ThreadReleaseType),
+        nullable=False,
+        default=schemas.ThreadReleaseType.IMMEDIATE,
+        server_default=schemas.ThreadReleaseType.IMMEDIATE.name,
+    )
     thread_id = Column(String, unique=True)
     class_id = Column(Integer, ForeignKey("classes.id"))
     class_ = relationship("Class", back_populates="threads")

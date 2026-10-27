@@ -458,6 +458,31 @@ class VectorStoreType(Enum):
     THREAD = "thread"
 
 
+class ThreadReleaseType(StrEnum):
+    IMMEDIATE = "immediate"
+    AFTER_INPUT_MODERATION = "after_input_moderation"
+    AFTER_INPUT_AND_OUTPUT_MODERATION = "after_input_and_output_moderation"
+
+
+class RunReleaseStatus(StrEnum):
+    PENDING = "pending"
+    RELEASED = "released"
+    WITHHELD = "withheld"
+
+
+class ModerationCheckStage(StrEnum):
+    INPUT = "input"
+    OUTPUT = "output"
+
+
+class ModerationCheckStatus(StrEnum):
+    PENDING = "pending"
+    PASSED = "passed"
+    FLAGGED = "flagged"
+    ERRORED = "errored"
+    CANCELLED = "cancelled"
+
+
 class InteractionMode(StrEnum):
     CHAT = "chat"
     VOICE = "voice"
