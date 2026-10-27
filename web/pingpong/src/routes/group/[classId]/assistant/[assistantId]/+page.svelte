@@ -33,6 +33,7 @@
 	import { browser } from '$app/environment';
 	import * as api from '$lib/api';
 	import { setsEqual } from '$lib/set';
+	import { getAssistantModelModes } from '$lib/assistantModelModes';
 	import { happyToast, sadToast } from '$lib/toast';
 	import { errorMessage as formatErrorMessage } from '$lib/errors';
 	import { normalizeNewlines } from '$lib/content.js';
@@ -2218,8 +2219,10 @@
 		: data?.enforceClassicAssistants ||
 			(interactionMode === 'voice' && enforceClassicAssistantsForVoice);
 
-	$: chatModelCount = data.models.filter((model) => model.type === 'chat').length;
-	$: audioModelCount = data.models.filter((model) => model.type === 'voice').length;
+	$: modelModes = getAssistantModelModes(
+		data.models,
+		data.isCreating ? undefined : assistant?.interaction_mode
+	);
 
 	$: initialTools = (assistant?.tools ? (JSON.parse(assistant.tools) as Tool[]) : defaultTools).map(
 		(t) => t.type
@@ -5773,7 +5776,7 @@
 					&nbsp;Lecture video mode cannot be changed after assistant creation.{/if}</Helper
 			>
 			<ButtonGroup>
-				{#if !isEditingLectureAssistant && chatModelCount !== 0}
+				{#if !isEditingLectureAssistant && modelModes.chat}
 					<RadioButton
 						value="chat"
 						bind:group={interactionMode}
@@ -5787,7 +5790,7 @@
 						</div></RadioButton
 					>
 				{/if}
-				{#if !isEditingLectureAssistant && audioModelCount !== 0}
+				{#if !isEditingLectureAssistant && modelModes.voice}
 					<RadioButton
 						value="voice"
 						bind:group={interactionMode}
@@ -5801,7 +5804,7 @@
 						</div></RadioButton
 					>
 				{/if}
-				{#if showLectureModeOption && chatModelCount !== 0}
+				{#if showLectureModeOption && modelModes.chat}
 					{@const lectureDisabled =
 						lectureModeSelectionDisabled || !lectureVideoPolicy.can_select_mode_in_assistant_editor}
 					<RadioButton
@@ -5836,7 +5839,7 @@
 					>
 				{/if}
 			</ButtonGroup>
-			{#if showLectureModeOption && chatModelCount !== 0 && lectureVideoPolicy.message}
+			{#if showLectureModeOption && modelModes.chat && lectureVideoPolicy.message}
 				<Tooltip
 					triggeredBy="#lecture-video-admin-tooltip"
 					class="z-100 text-sm font-light"
@@ -5871,7 +5874,25 @@
 						class="underline">OpenAI's Documentation</a
 					> for detailed descriptions of model capabilities.</Helper
 				>
-				{#if selectedModelDeprecated}
+				{#if selectedModelRecord?.is_available === false}
+					<div
+						role="alert"
+						class="mb-2 flex flex-row items-center gap-4 rounded-lg border border-red-400 bg-gradient-to-b from-red-50 to-red-100 p-4 py-2 text-red-800"
+					>
+						<ExclamationCircleOutline class="h-8 w-8 text-red-800" strokeWidth="2" />
+						<div class="flex flex-col">
+							<span class="text-sm font-semibold">Your selected model is no longer available</span>
+							<span class="text-xs">
+								Your AI provider no longer serves <span class="font-semibold"
+									>{selectedModelRecord.name}</span
+								>. This assistant cannot respond using this model.
+								<span class="font-semibold"
+									>Select an available model below and save your changes to restore this assistant.</span
+								>
+							</span>
+						</div>
+					</div>
+				{:else if selectedModelDeprecated}
 					<div
 						class="mb-2 flex flex-row items-center gap-4 rounded-lg border border-amber-400 bg-gradient-to-b from-amber-50 to-amber-100 p-4 py-2 text-amber-800"
 					>
