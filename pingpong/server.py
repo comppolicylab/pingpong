@@ -9539,9 +9539,9 @@ async def create_thread(
                     )
                 )
 
-            run = models.Run(
+            run = models.Run.for_thread(
+                thread_db_record,
                 status=schemas.RunStatus.PENDING,
-                thread_id=thread_db_record.id,
                 creator_id=request.state["session"].user.id,
                 assistant_id=assistant.id,
                 model=assistant.model,
@@ -9706,9 +9706,9 @@ async def create_run(
                     request.state["session"].user.id,
                 )
 
-                run_to_complete = models.Run(
+                run_to_complete = models.Run.for_thread(
+                    thread,
                     status=schemas.RunStatus.PENDING,
-                    thread_id=thread.id,
                     creator_id=request.state["session"].user.id,
                     assistant_id=asst.id,
                     model=asst.model,
@@ -10426,9 +10426,9 @@ async def send_message(
                 )
             )
 
-            run_to_complete = models.Run(
+            run_to_complete = models.Run.for_thread(
+                thread,
                 status=schemas.RunStatus.PENDING,
-                thread_id=thread.id,
                 creator_id=request.state["session"].user.id,
                 assistant_id=asst.id,
                 model=asst.model,

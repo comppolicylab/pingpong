@@ -9327,6 +9327,31 @@ class Run(Base):
     completed = Column(DateTime(timezone=True), nullable=True)
 
     @classmethod
+    def for_thread(cls, thread: "Thread", **kwargs: Any) -> "Run":
+        """Create a generation run with a fixed snapshot of its thread's policy.
+
+        Reusing a pending run must preserve these fields rather than resolve the
+        policy again. Defaults on the model remain for historical/imported runs.
+        """
+        release_type = schemas.ThreadReleaseType(
+            thread.release_type
+            if thread.release_type is not None
+            else schemas.ThreadReleaseType.IMMEDIATE
+        )
+        immediate = release_type == schemas.ThreadReleaseType.IMMEDIATE
+        return cls(
+            thread_id=thread.id,
+            release_type=release_type,
+            release_status=(
+                schemas.RunReleaseStatus.RELEASED
+                if immediate
+                else schemas.RunReleaseStatus.PENDING
+            ),
+            released_at=utcnow() if immediate else None,
+            **kwargs,
+        )
+
+    @classmethod
     async def get_file_search_files_from_messages(
         cls, session: AsyncSession, run_id: int
     ) -> list[str]:
