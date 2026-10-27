@@ -44,6 +44,9 @@ def test_release_migration_defaults_results_cascade_and_downgrade(
             migration, "op", Operations(MigrationContext.configure(connection))
         )
         migration.upgrade()
+        assert (
+            "run_moderation_check_items" not in sa.inspect(connection).get_table_names()
+        )
         metadata = sa.MetaData()
         threads = sa.Table("threads", metadata, autoload_with=connection)
         runs = sa.Table("runs", metadata, autoload_with=connection)
@@ -83,12 +86,26 @@ def test_release_migration_defaults_results_cascade_and_downgrade(
         assert rows[0]["created"] is not None
         assert rows[0]["result"] == result
         assert rows[1]["error"] == error
+        assert rows[0]["source_items"] == []
+        sources = [{"source_type": "message", "source_id": 42}]
+        connection.execute(
+            checks.update()
+            .where(checks.c.id == rows[0]["id"])
+            .values(source_items=sources)
+        )
+        assert (
+            connection.scalar(
+                sa.select(checks.c.source_items).where(checks.c.id == rows[0]["id"])
+            )
+            == sources
+        )
         connection.execute(runs.delete().where(runs.c.id == 2))
         assert connection.scalar(sa.select(sa.func.count()).select_from(checks)) == 0
 
         migration.downgrade()
         inspector = sa.inspect(connection)
         assert "run_moderation_checks" not in inspector.get_table_names()
+        assert "run_moderation_check_items" not in inspector.get_table_names()
         assert [c["name"] for c in inspector.get_columns("threads")] == ["id"]
         assert [c["name"] for c in inspector.get_columns("runs")] == [
             "id",
@@ -110,6 +127,7 @@ def test_release_migration_postgres_enum_lifecycle(monkeypatch):
     migration.upgrade()
     migration.downgrade()
     sql = output.getvalue()
+    assert "moderationsourcetype" not in sql
     for name in (
         "threadreleasetype",
         "runreleasestatus",

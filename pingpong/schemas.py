@@ -475,6 +475,11 @@ class ModerationCheckStage(StrEnum):
     OUTPUT = "output"
 
 
+class ModerationSourceType(StrEnum):
+    MESSAGE = "message"
+    REASONING_SUMMARY = "reasoning_summary"
+
+
 class ModerationCheckStatus(StrEnum):
     PENDING = "pending"
     PASSED = "passed"

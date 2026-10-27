@@ -70,6 +70,7 @@ def upgrade() -> None:
         sa.Column("stage", check_stage, nullable=False),
         sa.Column("status", check_status, server_default="PENDING", nullable=False),
         sa.Column("model", sa.String(), nullable=True),
+        sa.Column("source_items", sa.JSON(), server_default="[]", nullable=False),
         sa.Column("result", sa.JSON(), nullable=True),
         sa.Column("error", sa.JSON(), nullable=True),
         sa.Column(

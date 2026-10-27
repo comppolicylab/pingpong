@@ -9683,6 +9683,7 @@ class RunModerationCheck(Base):
         server_default=schemas.ModerationCheckStatus.PENDING.name,
     )
     model = Column(String, nullable=True)
+    source_items = Column(JSON, nullable=False, default=list, server_default="[]")
     result = Column(JSON, nullable=True)
     error = Column(JSON, nullable=True)
     created = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
