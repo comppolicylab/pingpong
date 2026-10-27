@@ -16,6 +16,8 @@ from sqlalchemy.orm import selectinload
 from starlette.datastructures import State
 from starlette.requests import ClientDisconnect
 from starlette.websockets import WebSocketDisconnect, WebSocketState
+from websockets.exceptions import ConnectionClosedError
+from websockets.frames import Close
 
 from pingpong import ai_models
 from pingpong import models
@@ -1959,6 +1961,8 @@ def assistant_response_snapshot(
     [
         (None, None),
         ("server_error", None),
+        ("model_not_found", None),
+        ("model_unavailable", None),
         ("rate_limit_exceeded", None),
         ("rate_limit_exceeded", "open"),
         ("rate_limit_exceeded", "write"),
@@ -2068,7 +2072,12 @@ async def test_failed_greeting_reports_error_and_keeps_processing(
                 "error": {
                     "type": "server_error",
                     "code": "openai_realtime_response",
-                    "message": "The assistant couldn't respond. Please try speaking to continue.",
+                    "message": (
+                        "The selected model is not available. Edit your assistant to select "
+                        "a different model, or contact a group moderator."
+                        if error_code in {"model_not_found", "model_unavailable"}
+                        else "The assistant couldn't respond. Please try speaking to continue."
+                    ),
                     "param": None,
                 },
             }
@@ -2851,12 +2860,15 @@ async def test_openai_session_update_error_notifies_browser_and_closes_websocket
     ]
 
 
-async def test_openai_startup_error_without_param_notifies_browser_and_closes_websocket():
+@pytest.mark.parametrize("code", ["model_not_found", "model_unavailable"])
+async def test_openai_startup_error_without_param_notifies_browser_and_closes_websocket(
+    code,
+):
     websocket = DummyWebSocket()
     error = SimpleNamespace(
         message="Model is unavailable.",
         type="invalid_request_error",
-        code="model_unavailable",
+        code=code,
         event_id="event_1",
         param=None,
     )
@@ -2880,7 +2892,10 @@ async def test_openai_startup_error_without_param_notifies_browser_and_closes_we
             "error": {
                 "type": "invalid_request_error",
                 "code": "openai_realtime_session",
-                "message": "We were unable to start the voice session.",
+                "message": (
+                    "The selected model is not available. Edit your assistant to select "
+                    "a different model, or contact a group moderator."
+                ),
                 "param": None,
             },
         }
@@ -3484,3 +3499,62 @@ def test_update_assistant_accepts_nullable_realtime_vad_idle_timeout(
     req = schemas.UpdateAssistant(realtime_vad_idle_timeout_ms=idle_timeout_ms)
 
     assert req.realtime_vad_idle_timeout_ms == idle_timeout_ms
+
+
+@pytest.mark.parametrize(
+    "reason,expected_message",
+    [
+        (
+            "invalid_request_error.model_not_found",
+            "The selected model is not available. Edit your assistant to select "
+            "a different model, or contact a group moderator.",
+        ),
+        (
+            "invalid_request_error.invalid_api_key",
+            "We were unable to connect to OpenAI.",
+        ),
+        ("", "We were unable to connect to OpenAI."),
+    ],
+)
+@pytest.mark.parametrize("stage", ["connect", "update", "greeting"])
+async def test_model_unavailable_close_notifies_browser(
+    reason, expected_message, stage
+):
+    websocket = DummyWebSocket()
+    connection = FakeRealtimeConnection()
+    client = FakeOpenAIClient(connection)
+    error = ConnectionClosedError(Close(4013, reason), None)
+    if stage == "connect":
+        client.realtime.connect = Mock(side_effect=error)
+    elif stage == "update":
+        connection.session.update = AsyncMock(side_effect=error)
+    else:
+        connection.response.create = AsyncMock(side_effect=error)
+    websocket.state["openai_client"] = client
+    websocket.state["assistant"] = realtime_assistant(
+        assistant_should_message_first=True
+    )
+    websocket.state["thread"] = SimpleNamespace(
+        id=1, assistant_id=None, tools_available="[]"
+    )
+    websocket.state["session"] = SimpleNamespace(user=SimpleNamespace(id=1))
+    websocket.state["conversation_instructions"] = "Speak clearly."
+    websocket.state["after_db_rollback"] = []
+    handler = AsyncMock()
+
+    with pytest.raises(ConnectionClosedError) as raised:
+        await websocket_module.ws_with_realtime_connection(handler)(websocket, "1", "1")
+
+    assert raised.value is error
+    handler.assert_not_awaited()
+    assert websocket.closed
+    assert websocket.sent_json == [
+        {
+            "type": "error",
+            "error": {
+                "type": "invalid_request_error",
+                "code": "openai_realtime_connection",
+                "message": expected_message,
+            },
+        }
+    ]

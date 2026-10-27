@@ -11,6 +11,8 @@ from openai.types.responses import (
     ResponseUsage,
 )
 
+from sqlalchemy import event as sqlalchemy_event
+
 from pingpong import models, schemas
 from pingpong.ai import BufferedResponseStreamHandler
 from pingpong.authz import AuthzClient
@@ -117,3 +119,44 @@ async def test_run_without_reported_usage_stays_null(db):
     async with db.async_session() as session:
         run = await session.get(models.Run, run_id)
         assert run.usage is None
+
+
+@pytest.mark.parametrize("code", [4013, 0, "provider_error", None])
+async def test_text_run_error_code_is_text_before_database_binding(db, code):
+    async with db.async_session() as session:
+        run = models.Run(status=schemas.RunStatus.IN_PROGRESS)
+        session.add(run)
+        await session.flush()
+        run_id = run.id
+        await session.commit()
+
+    async with db.async_session() as session:
+        connection = await session.connection()
+        bound_codes = []
+
+        def check_error_code(conn, cursor, statement, parameters, context, executemany):
+            for values in context.compiled_parameters or []:
+                if "error_code" in values:
+                    bound_codes.append(values["error_code"])
+                    assert values["error_code"] is None or isinstance(
+                        values["error_code"], str
+                    )
+
+        sqlalchemy_event.listen(
+            connection.sync_connection, "before_cursor_execute", check_error_code
+        )
+        await models.Run.mark_as_status(
+            session,
+            run_id,
+            status=schemas.RunStatus.FAILED,
+            error_code=code,
+            error_message="Synthetic provider failure.",
+            incomplete_reason=None,
+        )
+        assert bound_codes == [str(code) if code is not None else None]
+        await session.commit()
+
+    async with db.async_session() as session:
+        run = await session.get(models.Run, run_id)
+        assert run.error_code == (str(code) if code is not None else None)
+        assert run.status == schemas.RunStatus.FAILED

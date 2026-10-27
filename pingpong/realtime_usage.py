@@ -127,7 +127,7 @@ class RealtimeUsage:
         if record not in self.errors:
             self.errors.append(record)
 
-    def record_exception(self, error: Exception, *, code: str) -> None:
+    def record_exception(self, error: Exception, *, code: str | int) -> None:
         record = {
             "event_id": None,
             "error": {
@@ -141,10 +141,10 @@ class RealtimeUsage:
         if record not in self.errors:
             self.errors.append(record)
 
-    def fail(self, code: str, message: str) -> None:
+    def fail(self, code: str | int, message: str) -> None:
         # Preserve the first terminal cause, including across later disconnects.
         if self.error_code is None:
-            self.error_code = code
+            self.error_code = str(code)
             self.error_message = message
 
     def mark_incomplete(self, reason: str) -> None:
