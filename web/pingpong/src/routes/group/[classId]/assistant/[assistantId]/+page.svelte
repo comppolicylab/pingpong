@@ -2349,6 +2349,7 @@
 	$: selectedModelName = modelNameDict[selectedModel];
 	let selectedModelRecord: api.AssistantModel | undefined;
 	$: selectedModelRecord = data.models.find((model) => model.id === selectedModel);
+	$: selectedModelUnavailable = !selectedModelRecord || selectedModelRecord.is_available === false;
 	$: versionedModelOptions = (selectableModels.filter((model) => !model.is_latest) || []).map(
 		buildModelOption
 	);
@@ -4434,6 +4435,12 @@
 	 */
 	const submitForm = async (evt: SubmitEvent) => {
 		evt.preventDefault();
+		if (selectedModelUnavailable) {
+			sadToast(
+				'The selected model is not available. Select an available model before saving the assistant.'
+			);
+			return;
+		}
 		$loadingMessage = 'Saving assistant...';
 		$loading = true;
 
@@ -5874,7 +5881,7 @@
 						class="underline">OpenAI's Documentation</a
 					> for detailed descriptions of model capabilities.</Helper
 				>
-				{#if selectedModelRecord?.is_available === false}
+				{#if selectedModelUnavailable}
 					<div
 						role="alert"
 						class="mb-2 flex flex-row items-center gap-4 rounded-lg border border-red-400 bg-gradient-to-b from-red-50 to-red-100 p-4 py-2 text-red-800"
@@ -5884,7 +5891,7 @@
 							<span class="text-sm font-semibold">Your selected model is no longer available</span>
 							<span class="text-xs">
 								Your AI provider no longer serves <span class="font-semibold"
-									>{selectedModelRecord.name}</span
+									>{selectedModelRecord?.name ?? selectedModel}</span
 								>. This assistant cannot respond using this model.
 								<span class="font-semibold"
 									>Select an available model below and save your changes to restore this assistant.</span
@@ -8419,17 +8426,25 @@
 		<input type="hidden" name="assistantId" value={assistant?.id} />
 
 		<div class="col-span-2 mt-4 flex items-center border-t pt-4">
-			<Button
-				pill
-				class="border border-orange bg-orange text-white hover:bg-orange-dark"
-				type="submit"
-				disabled={$loading ||
-					uploadingFSPrivate ||
-					uploadingCIPrivate ||
-					uploadingLectureVideo ||
-					uploadingLectureSlides ||
-					uploadingLectureSlideContext}>{saveButtonLabel}</Button
-			>
+			<span id="assistant-save-button" class="inline-block">
+				<Button
+					pill
+					class={`border border-orange bg-orange text-white hover:bg-orange-dark ${selectedModelUnavailable ? 'pointer-events-none' : ''}`}
+					type="submit"
+					disabled={selectedModelUnavailable ||
+						$loading ||
+						uploadingFSPrivate ||
+						uploadingCIPrivate ||
+						uploadingLectureVideo ||
+						uploadingLectureSlides ||
+						uploadingLectureSlideContext}>{saveButtonLabel}</Button
+				>
+			</span>
+			{#if selectedModelUnavailable}
+				<Tooltip triggeredBy="#assistant-save-button" placement="top" arrow={false}
+					>Select an available model before saving the assistant.</Tooltip
+				>
+			{/if}
 			<Button
 				disabled={$loading ||
 					uploadingFSPrivate ||
