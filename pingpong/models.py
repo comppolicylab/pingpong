@@ -6186,6 +6186,9 @@ class Assistant(Base):
     )
     allow_user_file_uploads = Column(Boolean, server_default="true")
     allow_user_image_uploads = Column(Boolean, server_default="true")
+    input_moderation_enabled = Column(
+        Boolean, nullable=False, default=False, server_default=false()
+    )
     hide_reasoning_summaries = Column(Boolean, server_default="true")
     hide_file_search_result_quotes = Column(Boolean, server_default="true")
     hide_file_search_document_names = Column(Boolean, server_default="false")

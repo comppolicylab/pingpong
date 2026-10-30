@@ -5682,6 +5682,9 @@ async def get_thread(
                 object="thread.run",
                 tools=[],
             )
+        read_only = await models.Thread.has_flagged_moderation(
+            request.state["db"], thread.id
+        )
         return {
             "thread": thread,
             "assistant_avatar_url": (
@@ -5693,6 +5696,10 @@ async def get_thread(
             "model": assistant.model if assistant else "None",
             "tools_available": thread.tools_available,
             "run": last_run_db if latest_run else None,
+            "read_only": read_only,
+            "read_only_message": (
+                moderation.CONVERSATION_CLOSED_DETAIL if read_only else None
+            ),
             "messages": thread_messages,
             "limit": 20,
             "ci_messages": placeholder_ci_calls,
@@ -8765,6 +8772,7 @@ async def create_audio_thread(
         all_parties.append(anonymous_user)
     new_thread = {
         "name": "Audio Conversation",
+        "input_moderation_enabled": bool(assistant.input_moderation_enabled),
         "class_id": int(class_id),
         "private": True if all_parties else False,
         "interaction_mode": "voice",
@@ -9036,6 +9044,7 @@ async def create_lecture_thread(
         all_parties.append(anonymous_user)
     new_thread = {
         "name": "Lecture Lesson",
+        "input_moderation_enabled": bool(assistant.input_moderation_enabled),
         "class_id": int(class_id),
         "private": True if all_parties else False,
         "interaction_mode": (
@@ -9408,6 +9417,7 @@ async def create_thread(
         all_parties.append(anonymous_user)
     new_thread = {
         "name": thread_name,
+        "input_moderation_enabled": bool(assistant.input_moderation_enabled),
         "class_id": int(class_id),
         "private": True if all_parties else False,
         "users": all_parties,
@@ -9707,6 +9717,7 @@ async def create_run(
                     request.state["session"].user.id,
                 )
 
+                thread.input_moderation_enabled = bool(asst.input_moderation_enabled)
                 run_to_complete = models.Run.for_thread(
                     thread,
                     status=schemas.RunStatus.PENDING,
@@ -10432,6 +10443,7 @@ async def send_message(
                 )
             )
 
+            thread.input_moderation_enabled = bool(asst.input_moderation_enabled)
             run_to_complete = models.Run.for_thread(
                 thread,
                 status=schemas.RunStatus.PENDING,
@@ -13064,6 +13076,14 @@ async def create_assistant(
     #         assistant_version = 2
     del req.create_classic_assistant
 
+    if req.input_moderation_enabled and not _is_lecture_lesson_mode(
+        req.interaction_mode
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="Input monitoring is only available for lecture video and lecture slides assistants.",
+        )
+
     # Check that the class is not private if user information should be recorded
     if class_.private and (
         "should_record_user_information" in req.model_fields_set
@@ -14091,6 +14111,16 @@ async def update_assistant(
         )
         else schemas.InteractionMode(asst.interaction_mode)
     )
+    input_moderation_enabled = (
+        req.input_moderation_enabled
+        if req.input_moderation_enabled is not None
+        else asst.input_moderation_enabled
+    )
+    if input_moderation_enabled and not _is_lecture_lesson_mode(interaction_mode):
+        raise HTTPException(
+            status_code=400,
+            detail="Input monitoring is only available for lecture video and lecture slides assistants.",
+        )
 
     # Only Administrators can edit locked assistants
     allowed_locked_fields = {"published", "use_image_descriptions"}
@@ -15131,6 +15161,12 @@ async def update_assistant(
         and req.allow_user_image_uploads is not None
     ):
         asst.allow_user_image_uploads = req.allow_user_image_uploads
+
+    if (
+        "input_moderation_enabled" in req.model_fields_set
+        and req.input_moderation_enabled is not None
+    ):
+        asst.input_moderation_enabled = req.input_moderation_enabled
 
     if (
         "disable_prompt_randomization" in req.model_fields_set
@@ -17525,7 +17561,11 @@ async def health():
 async def _ensure_thread_accepts_turn(request: StateRequest, thread_id: int) -> None:
     if await models.Thread.has_flagged_moderation(request.state["db"], thread_id):
         raise HTTPException(
-            status_code=403, detail=moderation.CONVERSATION_CLOSED_DETAIL
+            status_code=403,
+            detail={
+                "message": moderation.CONVERSATION_CLOSED_DETAIL,
+                "error_code": "conversation_closed",
+            },
         )
 
 
@@ -17571,7 +17611,11 @@ async def _moderate_run_input(
     async def blocked_stream():
         yield (
             json.dumps(
-                {"type": "error", "detail": moderation.CONVERSATION_CLOSED_DETAIL}
+                {
+                    "type": "error",
+                    "detail": moderation.CONVERSATION_CLOSED_DETAIL,
+                    "read_only": True,
+                }
             ).encode()
             + b"\n"
         )

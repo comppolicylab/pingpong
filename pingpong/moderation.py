@@ -9,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
 from pingpong import models, schemas
+from pingpong import moderation_telemetry as telemetry
 from pingpong.config import config
 from pingpong.now import utcnow
 
@@ -98,6 +99,16 @@ async def check_run_input(client: openai.AsyncOpenAI, run_id: int) -> bool:
     Empty/non-text inputs need no check. Provider errors and timeouts are recorded
     and fail open. Cancellation propagates without starting generation.
     """
+    provider = "azure" if isinstance(client, openai.AsyncAzureOpenAI) else "openai"
+    with telemetry.measure("check", provider) as observation:
+        return await _check_run_input(client, run_id, observation)
+
+
+async def _check_run_input(
+    client: openai.AsyncOpenAI,
+    run_id: int,
+    observation: telemetry.ModerationObservation,
+) -> bool:
     creation = asyncio.create_task(_start_check(run_id))
     try:
         started = await asyncio.shield(creation)
@@ -107,16 +118,22 @@ async def check_run_input(client: openai.AsyncOpenAI, run_id: int) -> bool:
             await _finish_check(started[0], schemas.ModerationCheckStatus.CANCELLED)
         raise
     if started is None:
+        observation.outcome = "skipped"
+        observation.reason = "no_text"
         return True
     check_id, inputs = started
     try:
         # Bound total time, including retries performed by the SDK.
-        async with asyncio.timeout(MODERATION_TIMEOUT_SECONDS):
-            response = await client.moderations.create(
-                input=inputs,
-                model=MODERATION_MODEL,
-                timeout=MODERATION_TIMEOUT_SECONDS,
-            )
+        with telemetry.measure("provider_call", observation.provider) as provider_call:
+            provider_call.reason = "provider_error"
+            async with asyncio.timeout(MODERATION_TIMEOUT_SECONDS):
+                response = await client.moderations.create(
+                    input=inputs,
+                    model=MODERATION_MODEL,
+                    timeout=MODERATION_TIMEOUT_SECONDS,
+                )
+            provider_call.outcome = "ok"
+            provider_call.reason = "none"
         result = response.model_dump(mode="json")
         if (
             not isinstance(result, dict)
@@ -147,6 +164,7 @@ async def check_run_input(client: openai.AsyncOpenAI, run_id: int) -> bool:
         await _finish_check(
             check_id, schemas.ModerationCheckStatus.ERRORED, error=error
         )
+        observation.reason = code
         logger.warning(
             "Input moderation failed for run %s (%s); continuing", run_id, code
         )
@@ -158,4 +176,6 @@ async def check_run_input(client: openai.AsyncOpenAI, run_id: int) -> bool:
         else schemas.ModerationCheckStatus.PASSED,
         result=result,
     )
+    observation.outcome = "flagged" if flagged else "passed"
+    observation.reason = "none"
     return not flagged

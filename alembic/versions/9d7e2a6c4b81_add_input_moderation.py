@@ -25,7 +25,7 @@ check_status = sa.Enum(
 
 def upgrade() -> None:
     _ = revision, down_revision, branch_labels, depends_on
-    for table in ("threads", "runs"):
+    for table in ("assistants", "threads", "runs"):
         op.add_column(
             table,
             sa.Column(
@@ -71,3 +71,4 @@ def downgrade() -> None:
     op.drop_index("ix_runs_thread_id", table_name="runs")
     op.drop_column("runs", "input_moderation_enabled")
     op.drop_column("threads", "input_moderation_enabled")
+    op.drop_column("assistants", "input_moderation_enabled")
