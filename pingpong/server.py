@@ -52,7 +52,7 @@ from sqlalchemy.sql import delete, func, select, update
 import pingpong.metrics as metrics
 import pingpong.models as models
 import pingpong.schemas as schemas
-from pingpong import lesson_checks
+from pingpong import lesson_checks, moderation
 from pingpong.ai_models import (
     ADMIN_ONLY_MODELS,
     AZURE_UNAVAILABLE_MODELS,
@@ -9679,6 +9679,7 @@ async def create_run(
             last_run = await models.Thread.get_latest_run_by_thread_id(
                 request.state["db"], thread.id
             )
+            await _ensure_thread_accepts_turn(request, thread.id)
             file_search_file_ids: list[str] = []
 
             if last_run and last_run.status == schemas.RunStatus.PENDING:
@@ -9783,6 +9784,9 @@ async def create_run(
             await request.state["db"].flush()
             await request.state["db"].refresh(run_to_complete)
 
+            blocked = await _moderate_run_input(request, openai_client, run_to_complete)
+            if blocked is not None:
+                return blocked
             stream = run_response(
                 openai_client,
                 run=run_to_complete,
@@ -9993,6 +9997,7 @@ async def send_message(
                     status_code=500,
                     detail="We're having trouble fetching information about this conversation. If the issue persists, check <a class='underline' href='https://pingpong-hks.statuspage.io' target='_blank'>PingPong's status page</a> for updates.",
                 )
+            await _ensure_thread_accepts_turn(request, thread.id)
 
             if last_run and last_run.status in {
                 schemas.RunStatus.QUEUED,
@@ -10034,11 +10039,12 @@ async def send_message(
             )
         lecture_chat_prep: Any | None = None
 
-        # When we reach 3 user messages, or if we failed to generate a title before, generate a new one. Only use the first 100 words of each user and assistant message to maintain a low token count.
-        if thread.interaction_mode not in {
+        # Keep the title trigger fixed while the turn increments the message count.
+        needs_conversation_name = thread.interaction_mode not in {
             schemas.InteractionMode.LECTURE_VIDEO,
             schemas.InteractionMode.LECTURE_SLIDES,
-        } and (thread.user_message_ct == 3 or thread.name is None):
+        } and (thread.user_message_ct == 3 or thread.name is None)
+        if thread.version <= 2 and needs_conversation_name:
             thread.name = await get_thread_conversation_name(
                 openai_client,
                 request.state["db"],
@@ -10472,6 +10478,22 @@ async def send_message(
                 else None
             )
 
+            blocked = await _moderate_run_input(request, openai_client, run_to_complete)
+            if blocked is not None:
+                return blocked
+            # Name Responses conversations after input review, before generation.
+            if needs_conversation_name:
+                thread.name = await get_thread_conversation_name(
+                    openai_client,
+                    request.state["db"],
+                    data,
+                    str(thread.id) if thread.version == 3 else thread.thread_id,
+                    class_id,
+                    thread_version=thread.version,
+                    response_safety_identifier=request.state[
+                        "response_safety_identifier"
+                    ],
+                )
             stream = run_response(
                 openai_client,
                 run=run_to_complete,
@@ -17492,6 +17514,60 @@ except Exception:
 async def health():
     """Health check."""
     return {"status": "ok"}
+
+
+async def _ensure_thread_accepts_turn(request: StateRequest, thread_id: int) -> None:
+    if await models.Thread.has_flagged_moderation(request.state["db"], thread_id):
+        raise HTTPException(
+            status_code=403, detail=moderation.CONVERSATION_CLOSED_DETAIL
+        )
+
+
+async def _moderate_run_input(
+    request: StateRequest, client: openai.AsyncClient, run: models.Run
+) -> StreamingResponse | None:
+    # Reserve the turn and commit its input before the separate check reads it.
+    # QUEUED also prevents another request from starting during moderation.
+    run.status = schemas.RunStatus.QUEUED
+    await request.state["db"].commit()
+    if not run.input_moderation_enabled:
+        return None
+    try:
+        if await moderation.check_run_input(client, run.id):
+            return None
+    except BaseException:
+        # No generation handler exists yet to settle an interrupted run.
+        await models.Run.mark_as_status(
+            request.state["db"],
+            run.id,
+            status=schemas.RunStatus.INCOMPLETE,
+            error_code=None,
+            error_message=None,
+            incomplete_reason="Input moderation interrupted before generation.",
+        )
+        await request.state["db"].commit()
+        raise
+
+    await models.Run.mark_as_status(
+        request.state["db"],
+        run.id,
+        status=schemas.RunStatus.INCOMPLETE,
+        error_code=None,
+        error_message=None,
+        incomplete_reason="Input flagged by moderation.",
+    )
+    await request.state["db"].commit()
+
+    async def blocked_stream():
+        yield (
+            json.dumps(
+                {"type": "error", "detail": moderation.CONVERSATION_CLOSED_DETAIL}
+            ).encode()
+            + b"\n"
+        )
+        yield b'{"type":"done"}\n'
+
+    return StreamingResponse(blocked_stream(), media_type="text/event-stream")
 
 
 async def _stream_lesson_check(stream, run_id: int, attempt_id: int):

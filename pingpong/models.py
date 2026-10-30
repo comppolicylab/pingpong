@@ -53,7 +53,7 @@ from sqlalchemy import (
     tuple_,
     update,
 )
-from sqlalchemy.sql.elements import BinaryExpression, ColumnElement
+from sqlalchemy.sql.elements import BinaryExpression
 from sqlalchemy.dialects.postgresql import insert as postgres_upsert
 from sqlalchemy.dialects.sqlite import insert as sqlite_upsert
 from sqlalchemy.ext.asyncio import AsyncAttrs, AsyncSession
@@ -5209,35 +5209,6 @@ class S3File(Base):
 class File(Base):
     __tablename__ = "files"
 
-    @classmethod
-    def visible_in_thread_clause(cls, thread_id: int) -> ColumnElement[bool]:
-        """Hide images produced only by unreleased messages, preserving uploads."""
-        annotation_reference = or_(
-            Annotation.file_object_id == cls.id,
-            Annotation.vision_file_object_id == cls.id,
-            Annotation.file_id == cls.file_id,
-            Annotation.vision_file_id == cls.file_id,
-        )
-        references = (
-            select(MessagePart.id)
-            .join(Message, Message.id == MessagePart.message_id)
-            .outerjoin(Annotation, Annotation.message_part_id == MessagePart.id)
-            .where(Message.thread_id == thread_id)
-            .correlate_except(MessagePart, Message, Annotation)
-        )
-        blocked_reference = references.where(
-            annotation_reference, ~Message.visible_content_clause()
-        ).exists()
-        visible_reference = references.where(
-            Message.visible_content_clause(),
-            or_(
-                annotation_reference,
-                MessagePart.input_image_file_object_id == cls.id,
-                MessagePart.input_image_file_id == cls.file_id,
-            ),
-        ).exists()
-        return or_(~blocked_reference, visible_reference)
-
     id: Mapped[int] = mapped_column(primary_key=True)
     name = Column(String)
     content_type = Column(String)
@@ -9097,21 +9068,13 @@ class Message(Base):
     completed = Column(DateTime(timezone=True), nullable=True)
 
     @classmethod
-    def visible_content_clause(cls) -> ColumnElement[bool]:
-        """Prompt inputs remain readable; generated messages require release."""
-        return or_(
-            cls.role != schemas.MessageRole.ASSISTANT,
-            Run.generated_content_visible_clause(cls.run_id),
-        )
-
-    @classmethod
     async def get_messages_by_thread_id(
         cls, session: AsyncSession, thread_id: int
     ) -> AsyncGenerator["Message", None]:
         stmt = (
             select(Message)
             .join(Run)
-            .filter(Run.thread_id == thread_id, cls.visible_content_clause())
+            .filter(Run.thread_id == thread_id)
             .order_by(Message.created.desc())
         )
 
@@ -9125,7 +9088,7 @@ class Message(Base):
     ) -> "Message | None":
         stmt = (
             select(Message)
-            .where(Message.id == id_, cls.visible_content_clause())
+            .where(Message.id == id_)
             .options(
                 selectinload(Message.content).selectinload(MessagePart.annotations),
             )
@@ -9297,19 +9260,9 @@ class Run(Base):
     run_id = Column(String, unique=True, nullable=True)
 
     status = Column(SQLEnum(schemas.RunStatus), nullable=False)
-    release_type = Column(
-        SQLEnum(schemas.ThreadReleaseType),
-        nullable=False,
-        default=schemas.ThreadReleaseType.IMMEDIATE,
-        server_default=schemas.ThreadReleaseType.IMMEDIATE.name,
+    input_moderation_enabled = Column(
+        Boolean, nullable=False, default=False, server_default=false()
     )
-    release_status = Column(
-        SQLEnum(schemas.RunReleaseStatus),
-        nullable=False,
-        default=schemas.RunReleaseStatus.RELEASED,
-        server_default=schemas.RunReleaseStatus.RELEASED.name,
-    )
-    released_at = Column(DateTime(timezone=True), nullable=True)
     moderation_checks = relationship(
         "RunModerationCheck", back_populates="run", cascade="all, delete-orphan"
     )
@@ -9335,7 +9288,9 @@ class Run(Base):
         back_populates="run",
     )
 
-    thread_id = Column(Integer, ForeignKey("threads.id", ondelete="CASCADE"))
+    thread_id = Column(
+        Integer, ForeignKey("threads.id", ondelete="CASCADE"), index=True
+    )
     thread = relationship("Thread", back_populates="runs", uselist=False)
 
     assistant_id = Column(
@@ -9364,40 +9319,11 @@ class Run(Base):
     completed = Column(DateTime(timezone=True), nullable=True)
 
     @classmethod
-    def generated_content_visible_clause(cls, run_id: Any) -> ColumnElement[bool]:
-        """Shared saved-content gate, independent of provider execution status."""
-        return (
-            select(cls.id)
-            .where(
-                cls.id == run_id,
-                cls.release_status == schemas.RunReleaseStatus.RELEASED,
-            )
-            .correlate_except(cls)
-            .exists()
-        )
-
-    @classmethod
     def for_thread(cls, thread: "Thread", **kwargs: Any) -> "Run":
-        """Create a generation run with a fixed snapshot of its thread's policy.
-
-        Reusing a pending run must preserve these fields rather than resolve the
-        policy again. Defaults on the model remain for historical/imported runs.
-        """
-        release_type = schemas.ThreadReleaseType(
-            thread.release_type
-            if thread.release_type is not None
-            else schemas.ThreadReleaseType.IMMEDIATE
-        )
-        immediate = release_type == schemas.ThreadReleaseType.IMMEDIATE
+        """Snapshot the input-moderation setting when a generation run is created."""
         return cls(
             thread_id=thread.id,
-            release_type=release_type,
-            release_status=(
-                schemas.RunReleaseStatus.RELEASED
-                if immediate
-                else schemas.RunReleaseStatus.PENDING
-            ),
-            released_at=utcnow() if immediate else None,
+            input_moderation_enabled=bool(thread.input_moderation_enabled),
             **kwargs,
         )
 
@@ -9668,6 +9594,8 @@ mcp_server_tool_thread_association = Table(
 
 
 class RunModerationCheck(Base):
+    """A standalone input-moderation attempt, independent of provider metadata."""
+
     __tablename__ = "run_moderation_checks"
 
     id = Column(Integer, primary_key=True)
@@ -9675,7 +9603,6 @@ class RunModerationCheck(Base):
         Integer, ForeignKey("runs.id", ondelete="CASCADE"), nullable=False, index=True
     )
     run = relationship("Run", back_populates="moderation_checks", uselist=False)
-    stage = Column(SQLEnum(schemas.ModerationCheckStage), nullable=False)
     status = Column(
         SQLEnum(schemas.ModerationCheckStatus),
         nullable=False,
@@ -9683,7 +9610,7 @@ class RunModerationCheck(Base):
         server_default=schemas.ModerationCheckStatus.PENDING.name,
     )
     model = Column(String, nullable=True)
-    source_items = Column(JSON, nullable=False, default=list, server_default="[]")
+    message_ids = Column(JSON, nullable=False, default=list, server_default="[]")
     result = Column(JSON, nullable=True)
     error = Column(JSON, nullable=True)
     created = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
@@ -9697,11 +9624,8 @@ class Thread(Base):
     id = Column(Integer, primary_key=True)
     name = Column(String, nullable=True)
     version = Column(Integer, default=1)
-    release_type = Column(
-        SQLEnum(schemas.ThreadReleaseType),
-        nullable=False,
-        default=schemas.ThreadReleaseType.IMMEDIATE,
-        server_default=schemas.ThreadReleaseType.IMMEDIATE.name,
+    input_moderation_enabled = Column(
+        Boolean, nullable=False, default=False, server_default=false()
     )
     thread_id = Column(String, unique=True)
     class_id = Column(Integer, ForeignKey("classes.id"))
@@ -10113,7 +10037,6 @@ class Thread(Base):
         stmt = (
             select(Thread)
             .where(Thread.id == int(id_))
-            .execution_options(populate_existing=True)
             .options(
                 selectinload(Thread.users),
                 selectinload(Thread.voice_mode_recording),
@@ -10133,35 +10056,23 @@ class Thread(Base):
                         defer(APIKey.api_key),
                     ),
                 ),
-                selectinload(
-                    Thread.image_files.and_(File.visible_in_thread_clause(id_))
-                ),
+                selectinload(Thread.image_files),
                 selectinload(Thread.runs).options(
-                    selectinload(
-                        Run.tool_calls.and_(
-                            Run.generated_content_visible_clause(ToolCall.run_id)
-                        )
-                    ).options(
+                    selectinload(Run.tool_calls).options(
                         selectinload(ToolCall.outputs),
                         selectinload(ToolCall.results),
                         selectinload(ToolCall.web_search_actions).options(
                             selectinload(WebSearchCallAction.sources),
                         ),
                     ),
-                    selectinload(
-                        Run.messages.and_(Message.visible_content_clause())
-                    ).options(
+                    selectinload(Run.messages).options(
                         selectinload(Message.content).selectinload(
                             MessagePart.annotations
                         ),
                         selectinload(Message.code_interpreter_attachments),
                         selectinload(Message.file_search_attachments),
                     ),
-                    selectinload(
-                        Run.reasoning_steps.and_(
-                            Run.generated_content_visible_clause(ReasoningStep.run_id)
-                        )
-                    ).options(
+                    selectinload(Run.reasoning_steps).options(
                         selectinload(ReasoningStep.summary_parts),
                         selectinload(ReasoningStep.content_parts),
                     ),
@@ -10622,7 +10533,6 @@ class Thread(Base):
                 and_(
                     image_file_thread_association.c.thread_id == thread_id,
                     File.file_id == file_id,
-                    File.visible_in_thread_clause(thread_id),
                 )
             )
             .options(selectinload(File.s3_file))
@@ -10880,9 +10790,7 @@ class Thread(Base):
         order: Literal["asc", "desc"] = "desc",
         include_annotations: bool = False,
     ) -> list["Message"]:
-        stmt = select(Message).where(
-            Message.thread_id == thread_id, Message.visible_content_clause()
-        )
+        stmt = select(Message).where(Message.thread_id == thread_id)
 
         if before is not None:
             stmt = stmt.where(Message.id < before)
@@ -10951,7 +10859,7 @@ class Thread(Base):
     ) -> AsyncGenerator["Message", None]:
         stmt = (
             select(Message)
-            .where(*filters, Message.visible_content_clause())
+            .where(*filters)
             .options(
                 selectinload(Message.content).selectinload(MessagePart.annotations),
                 selectinload(Message.content).selectinload(MessagePart.input_file),
@@ -10971,10 +10879,7 @@ class Thread(Base):
     ) -> AsyncGenerator["ToolCall", None]:
         stmt = (
             select(ToolCall)
-            .where(
-                ToolCall.thread_id == thread_id,
-                Run.generated_content_visible_clause(ToolCall.run_id),
-            )
+            .where(ToolCall.thread_id == thread_id)
             .options(
                 selectinload(ToolCall.results),
                 selectinload(ToolCall.outputs),
@@ -10997,10 +10902,7 @@ class Thread(Base):
     ) -> AsyncGenerator["ReasoningStep", None]:
         stmt = (
             select(ReasoningStep)
-            .where(
-                ReasoningStep.thread_id == thread_id,
-                Run.generated_content_visible_clause(ReasoningStep.run_id),
-            )
+            .where(ReasoningStep.thread_id == thread_id)
             .options(
                 selectinload(ReasoningStep.content_parts),
                 selectinload(ReasoningStep.summary_parts),
@@ -11039,7 +10941,6 @@ class Thread(Base):
         message_filters = [
             Message.thread_id == thread_id,
             Message.run_id.in_(run_ids),
-            Message.visible_content_clause(),
         ]
         if not include_hidden_messages:
             message_filters.append(Message.is_hidden.is_(False))
@@ -11064,7 +10965,6 @@ class Thread(Base):
             .where(
                 ToolCall.thread_id == thread_id,
                 ToolCall.run_id.in_(run_ids),
-                Run.generated_content_visible_clause(ToolCall.run_id),
             )
             .order_by(tool_ordering)
             .options(
@@ -11082,7 +10982,6 @@ class Thread(Base):
             .where(
                 ReasoningStep.thread_id == thread_id,
                 ReasoningStep.run_id.in_(run_ids),
-                Run.generated_content_visible_clause(ReasoningStep.run_id),
             )
             .order_by(reasoning_ordering)
             .options(
@@ -11119,6 +11018,26 @@ class Thread(Base):
         )
         result = await session.execute(stmt)
         return result.scalar_one_or_none()
+
+    @classmethod
+    async def has_flagged_moderation(
+        cls, session: AsyncSession, thread_id: int
+    ) -> bool:
+        """A flagged input closes the conversation, even if moderation is disabled later."""
+        return bool(
+            await session.scalar(
+                select(
+                    select(RunModerationCheck.id)
+                    .join(Run, Run.id == RunModerationCheck.run_id)
+                    .where(
+                        Run.thread_id == thread_id,
+                        RunModerationCheck.status
+                        == schemas.ModerationCheckStatus.FLAGGED,
+                    )
+                    .exists()
+                )
+            )
+        )
 
 
 lti_registration_institution_association = Table(

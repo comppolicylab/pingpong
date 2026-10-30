@@ -195,7 +195,6 @@ async def reconcile(
             models.Message.role == schemas.MessageRole.ASSISTANT,
             models.Message.message_status == schemas.MessageStatus.COMPLETED,
             models.Run.status == schemas.RunStatus.COMPLETED,
-            models.Message.visible_content_clause(),
         )
         .options(selectinload(models.Message.content))
         .order_by(models.Message.id)

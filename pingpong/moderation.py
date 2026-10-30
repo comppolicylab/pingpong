@@ -1,77 +1,68 @@
-"""Standalone moderation checks; callers own activation and content release."""
+"""Standalone input moderation, completed before response generation starts."""
 
 import asyncio
-import math
-from collections.abc import Sequence
+import logging
 from typing import Any
 
 import openai
-from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 
 from pingpong import models, schemas
 from pingpong.config import config
 from pingpong.now import utcnow
 
+logger = logging.getLogger(__name__)
 
+CONVERSATION_CLOSED_DETAIL = (
+    "We're unable to continue this conversation. Please start a new conversation."
+)
 MODERATION_MODEL = "omni-moderation-latest"
 MODERATION_TIMEOUT_SECONDS = 10.0
-
-
-class ModerationTextItem(BaseModel):
-    """Text plus a local source reference; only text is sent to the provider."""
-
-    model_config = ConfigDict(frozen=True, extra="forbid")
-
-    text: str
-    source_type: schemas.ModerationSourceType
-    source_id: int = Field(gt=0)
-
-
-class ModerationOutcome(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
-    check_id: int
-    flagged: bool
-    model: str
-
-
-class ModerationCheckError(Exception):
-    """A persisted check failure. Messages contain no submitted content."""
-
-    def __init__(self, check_id: int, code: str):
-        self.check_id = check_id
-        self.code = code
-        super().__init__(f"Moderation check {check_id} failed ({code}).")
 
 
 class _InvalidModerationResponse(ValueError):
     pass
 
 
-async def _create_check(
-    run_id: int,
-    stage: schemas.ModerationCheckStage,
-    model: str,
-    items: Sequence[ModerationTextItem],
-) -> int:
+async def _start_check(run_id: int) -> tuple[int, list[str]] | None:
     async with config.db.driver.async_session() as session:
         if await session.get(models.Run, run_id) is None:
             raise ValueError("Moderation requires an existing, committed run.")
+        messages = await session.scalars(
+            select(models.Message)
+            .where(
+                models.Message.run_id == run_id,
+                models.Message.role == schemas.MessageRole.USER,
+            )
+            .options(selectinload(models.Message.content))
+            .order_by(models.Message.output_index, models.Message.id)
+        )
+        inputs, message_ids = [], []
+        for message in messages:
+            text = "\n\n".join(
+                part.text
+                for part in sorted(message.content, key=lambda part: part.part_index)
+                if part.type == schemas.MessagePartType.INPUT_TEXT
+                and part.text
+                and part.text.strip()
+            )
+            if text:
+                inputs.append(text)
+                message_ids.append(message.id)
+        if not inputs:
+            return None
         check = models.RunModerationCheck(
             run_id=run_id,
-            stage=stage,
-            status=schemas.ModerationCheckStatus.PENDING,
-            model=model,
+            model=MODERATION_MODEL,
             started_at=utcnow(),
-            source_items=[
-                item.model_dump(mode="json", exclude={"text"}) for item in items
-            ],
+            message_ids=message_ids,
         )
         session.add(check)
         await session.flush()
         check_id = check.id
         await session.commit()
-        return check_id
+        return check_id, inputs
 
 
 async def _finish_check(
@@ -81,30 +72,19 @@ async def _finish_check(
     result: dict[str, Any] | None = None,
     error: dict[str, Any] | None = None,
 ) -> None:
-    async with config.db.driver.async_session() as session:
-        check = await session.get(
-            models.RunModerationCheck, check_id, with_for_update=True
-        )
-        if check is None:
-            raise LookupError("Moderation check no longer exists.")
-        if result is not None and len(check.source_items) != len(result["results"]):
-            raise ValueError(
-                "Moderation source mapping no longer matches the response."
-            )
-        check.status = status
-        check.result = result
-        check.error = error
-        check.completed_at = utcnow()
-        await session.commit()
+    async def save():
+        async with config.db.driver.async_session() as session:
+            check = await session.get(models.RunModerationCheck, check_id)
+            if check is None:
+                raise LookupError("Moderation check no longer exists.")
+            check.status = status
+            check.result = result
+            check.error = error
+            check.completed_at = utcnow()
+            await session.commit()
 
-
-async def _save_terminal_check(
-    check_id: int,
-    status: schemas.ModerationCheckStatus,
-    **kwargs: Any,
-) -> None:
-    # Keep a strong task reference and finish the write before propagating cancellation.
-    task = asyncio.create_task(_finish_check(check_id, status, **kwargs))
+    # Finish the audit write before propagating request cancellation.
+    task = asyncio.create_task(save())
     try:
         await asyncio.shield(task)
     except asyncio.CancelledError:
@@ -112,85 +92,50 @@ async def _save_terminal_check(
         raise
 
 
-async def moderate_run_text(
-    client: openai.AsyncOpenAI,
-    *,
-    run_id: int,
-    stage: schemas.ModerationCheckStage,
-    items: Sequence[ModerationTextItem],
-    model: str = MODERATION_MODEL,
-    timeout_seconds: float = MODERATION_TIMEOUT_SECONDS,
-) -> ModerationOutcome:
-    """Moderate text with the supplied class-scoped client and persist the verdict.
+async def check_run_input(client: openai.AsyncOpenAI, run_id: int) -> bool:
+    """Review a committed run's user text; only a flagged result stops generation.
 
-    Items identify user/assistant messages or individual reasoning-summary parts.
-    The caller establishes source provenance. The ordered source mapping is saved
-    before the call, without copying text.
-    Any flagged item flags the check. All API moderation categories are respected.
-    The run must already be committed. Native Responses moderation and release
-    fields are untouched. API failures raise ModerationCheckError after saving
-    ERRORED; task cancellation saves CANCELLED and propagates CancelledError.
+    Empty/non-text inputs need no check. Provider errors and timeouts are recorded
+    and fail open. Cancellation propagates without starting generation.
     """
-    stage = schemas.ModerationCheckStage(stage)
-    items = tuple(ModerationTextItem.model_validate(item) for item in items)
-    inputs = [item.text for item in items]
-    if not inputs or any(
-        not isinstance(item, str) or not item.strip() for item in inputs
-    ):
-        raise ValueError("Moderation requires non-empty text inputs.")
-    if not model.strip():
-        raise ValueError("Moderation requires a model.")
-    if not math.isfinite(timeout_seconds) or timeout_seconds <= 0:
-        raise ValueError("Moderation timeout must be finite and positive.")
-
-    creation = asyncio.create_task(_create_check(run_id, stage, model, items))
+    creation = asyncio.create_task(_start_check(run_id))
     try:
-        check_id = await asyncio.shield(creation)
+        started = await asyncio.shield(creation)
     except asyncio.CancelledError:
-        check_id = await creation
-        await _save_terminal_check(check_id, schemas.ModerationCheckStatus.CANCELLED)
+        started = await creation
+        if started is not None:
+            await _finish_check(started[0], schemas.ModerationCheckStatus.CANCELLED)
         raise
-
+    if started is None:
+        return True
+    check_id, inputs = started
     try:
-        # Also bound total wall time, including retries performed by the SDK.
-        async with asyncio.timeout(timeout_seconds):
+        # Bound total time, including retries performed by the SDK.
+        async with asyncio.timeout(MODERATION_TIMEOUT_SECONDS):
             response = await client.moderations.create(
                 input=inputs,
-                model=model,
-                timeout=timeout_seconds,
+                model=MODERATION_MODEL,
+                timeout=MODERATION_TIMEOUT_SECONDS,
             )
-        try:
-            if (
-                not isinstance(response.results, list)
-                or len(response.results) != len(inputs)
-                or any(type(item.flagged) is not bool for item in response.results)
-                or not isinstance(response.model, str)
-                or not response.model.strip()
-            ):
-                raise _InvalidModerationResponse()
-            flagged = any(item.flagged for item in response.results)
-            result = response.model_dump(mode="json")
-            if (
-                not isinstance(result, dict)
-                or not isinstance(result.get("results"), list)
-                or len(result["results"]) != len(inputs)
-                or any(
-                    not isinstance(item, dict) or type(item.get("flagged")) is not bool
-                    for item in result["results"]
-                )
-                or [item["flagged"] for item in result["results"]]
-                != [item.flagged for item in response.results]
-            ):
-                raise _InvalidModerationResponse()
-        except (AttributeError, TypeError, ValueError):
-            raise _InvalidModerationResponse() from None
+        result = response.model_dump(mode="json")
+        if (
+            not isinstance(result, dict)
+            or not isinstance(result.get("results"), list)
+            or len(result["results"]) != len(inputs)
+            or any(
+                not isinstance(item, dict) or type(item.get("flagged")) is not bool
+                for item in result["results"]
+            )
+        ):
+            raise _InvalidModerationResponse()
+        flagged = any(item["flagged"] for item in result["results"])
     except asyncio.CancelledError:
-        await _save_terminal_check(check_id, schemas.ModerationCheckStatus.CANCELLED)
+        await _finish_check(check_id, schemas.ModerationCheckStatus.CANCELLED)
         raise
     except Exception as exc:
         if isinstance(exc, (TimeoutError, openai.APITimeoutError)):
             code = "moderation_timeout"
-        elif isinstance(exc, _InvalidModerationResponse):
+        elif isinstance(exc, (_InvalidModerationResponse, AttributeError, TypeError)):
             code = "invalid_moderation_response"
         else:
             code = "moderation_api_error"
@@ -198,17 +143,19 @@ async def moderate_run_text(
         if isinstance(exc, openai.APIStatusError):
             error["status_code"] = exc.status_code
             error["request_id"] = exc.request_id
-        # Provider exception messages/bodies can echo input; retain only safe metadata.
-        await _save_terminal_check(
+        # Exception messages/bodies can echo input; retain only safe metadata.
+        await _finish_check(
             check_id, schemas.ModerationCheckStatus.ERRORED, error=error
         )
-        raise ModerationCheckError(check_id, code) from None
-
-    await _save_terminal_check(
+        logger.warning(
+            "Input moderation failed for run %s (%s); continuing", run_id, code
+        )
+        return True
+    await _finish_check(
         check_id,
         schemas.ModerationCheckStatus.FLAGGED
         if flagged
         else schemas.ModerationCheckStatus.PASSED,
         result=result,
     )
-    return ModerationOutcome(check_id=check_id, flagged=flagged, model=response.model)
+    return not flagged
