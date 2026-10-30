@@ -3203,6 +3203,7 @@ export type Assistant = {
 	disable_prompt_randomization: boolean | null;
 	allow_user_file_uploads: boolean | null;
 	allow_user_image_uploads: boolean | null;
+	input_moderation_enabled: boolean;
 	hide_reasoning_summaries: boolean | null;
 	hide_file_search_result_quotes: boolean | null;
 	hide_file_search_document_names: boolean | null;
@@ -3371,6 +3372,7 @@ export type CreateAssistantRequest = {
 	disable_prompt_randomization?: boolean;
 	allow_user_file_uploads?: boolean;
 	allow_user_image_uploads?: boolean;
+	input_moderation_enabled?: boolean;
 	hide_reasoning_summaries?: boolean;
 	hide_file_search_result_quotes?: boolean;
 	hide_file_search_document_names?: boolean;
@@ -3453,6 +3455,7 @@ export type UpdateAssistantRequest = {
 	disable_prompt_randomization?: boolean;
 	allow_user_file_uploads?: boolean;
 	allow_user_image_uploads?: boolean;
+	input_moderation_enabled?: boolean;
 	hide_reasoning_summaries?: boolean;
 	hide_file_search_result_quotes?: boolean;
 	hide_file_search_document_names?: boolean;
@@ -4533,6 +4536,8 @@ export type ThreadParticipants = {
  */
 export type ThreadWithMeta = {
 	thread: Thread;
+	read_only?: boolean;
+	read_only_message?: string | null;
 	assistant_avatar_url?: string | null;
 	model: string;
 	tools_available: string;
@@ -4895,11 +4900,13 @@ export type ThreadStreamReasoningStepCompletedChunk = {
 export type ThreadStreamErrorChunk = {
 	type: 'error';
 	detail: string;
+	read_only?: boolean;
 };
 
 export type ThreadPreSendErrorChunk = {
 	type: 'presend_error';
 	detail: string;
+	read_only?: boolean;
 };
 
 export type ThreadServerErrorChunk = {
@@ -5018,10 +5025,17 @@ const streamThreadChunks = (res: Response) => {
 			reader,
 			async *[Symbol.asyncIterator]() {
 				const error = await reader.read();
-				const error_ = error.value as ThreadHTTPErrorChunk;
+				const error_ = expandResponse({
+					...(error.value as ErrorResponse),
+					$status: res.status
+				}).error;
 				yield {
 					type: 'presend_error',
-					detail: `We were unable to send your message: ${error_.detail}`
+					detail:
+						error_?.error_code === 'conversation_closed'
+							? error_.detail
+							: `We were unable to send your message: ${error_?.detail}`,
+					read_only: error_?.error_code === 'conversation_closed'
 				} as ThreadPreSendErrorChunk;
 			}
 		};

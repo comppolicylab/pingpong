@@ -48,6 +48,8 @@ export type ThreadManagerState = {
 	loading: boolean;
 	waiting: boolean;
 	submitting: boolean;
+	readOnly: boolean;
+	readOnlyMessage?: string;
 	supportsFileSearch: boolean;
 	supportsCodeInterpreter: boolean;
 	attachments: Record<string, api.ServerFile>;
@@ -207,6 +209,8 @@ export class ThreadManager {
 	 * Whether a message is currently being submitted.
 	 */
 	submitting: Readable<boolean>;
+	readOnly: Readable<boolean>;
+	readOnlyMessage: Readable<string | null>;
 
 	/**
 	 * The users + assistants in the thread.
@@ -289,7 +293,11 @@ export class ThreadManager {
 		this.timezone = timezone;
 		this.#data = writable({
 			data: expanded.data || null,
-			error: expanded.error ? { detail: expanded.error?.detail, wasSent: true } : null,
+			error: expanded.error
+				? { detail: expanded.error.detail, wasSent: true }
+				: expanded.data?.read_only_message
+					? { detail: expanded.data.read_only_message, wasSent: true }
+					: null,
 			limit: expanded.data?.limit || 20,
 			canFetchMore: expanded.data?.has_more || false,
 			supportsFileSearch: expanded.data?.thread?.tools_available?.includes('file_search') || false,
@@ -300,6 +308,7 @@ export class ThreadManager {
 			loading: false,
 			waiting: false,
 			submitting: false,
+			readOnly: false,
 			attachments: expanded.data?.attachments || {},
 			instructions: expanded.data?.instructions || null
 		});
@@ -428,6 +437,14 @@ export class ThreadManager {
 		this.waiting = derived(this.#data, ($data) => !!$data?.waiting);
 
 		this.submitting = derived(this.#data, ($data) => !!$data?.submitting);
+		this.readOnly = derived(
+			this.#data,
+			($data) => $data.readOnly || $data.data?.read_only === true
+		);
+		this.readOnlyMessage = derived(
+			this.#data,
+			($data) => $data.readOnlyMessage || $data.data?.read_only_message || null
+		);
 
 		this.assistantId = derived(this.#data, ($data) => {
 			if ($data?.data?.thread?.assistant_names && $data?.data?.thread?.assistant_names[0]) {
@@ -469,7 +486,7 @@ export class ThreadManager {
 		}
 
 		const expanded = api.expandResponse(threadData);
-		if (!expanded.data) {
+		if (!expanded.data || expanded.data.read_only) {
 			return;
 		}
 
@@ -572,11 +589,13 @@ export class ThreadManager {
 				throw new Error(detail);
 			}
 
-			if (api.finished(expanded.data?.run)) {
+			if (expanded.data?.read_only || api.finished(expanded.data?.run)) {
 				this.#data.update((d) => ({
 					...d,
 					data: expanded.data,
-					error: null,
+					error: expanded.data?.read_only_message
+						? { detail: expanded.data.read_only_message, wasSent: true }
+						: null,
 					activeRunId: null,
 					waiting: false
 				}));
@@ -818,6 +837,15 @@ export class ThreadManager {
 		lecture_video_playback_position_ms?: number,
 		ttsPlaybackReady: Promise<void> = Promise.resolve()
 	) {
+		if (get(this.readOnly)) {
+			callback({
+				success: false,
+				errorMessage: get(this.readOnlyMessage) || "You can't reply in this thread.",
+				message_sent: false
+			});
+			return;
+		}
+
 		if (!message) {
 			callback({
 				success: false,
@@ -1107,7 +1135,13 @@ export class ThreadManager {
 	 */
 	setThreadData(data: BaseResponse & ThreadWithMeta) {
 		this.#data.update((d) => {
-			return { ...d, data };
+			return {
+				...d,
+				data,
+				error:
+					d.error ||
+					(data.read_only_message ? { detail: data.read_only_message, wasSent: true } : null)
+			};
 		});
 	}
 
@@ -1118,6 +1152,9 @@ export class ThreadManager {
 		chunk: api.ThreadStreamChunk,
 		callback: ({ success, errorMessage, message_sent }: CallbackParams) => void = () => {}
 	) {
+		if ('read_only' in chunk && chunk.read_only) {
+			this.#data.update((d) => ({ ...d, readOnly: true, readOnlyMessage: chunk.detail }));
+		}
 		switch (chunk.type) {
 			case 'message_created':
 				this.#data.update((d) => {

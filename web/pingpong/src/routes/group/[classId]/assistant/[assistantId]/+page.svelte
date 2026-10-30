@@ -2648,6 +2648,13 @@
 	}
 
 	let allowUserFileUploads = true;
+	let inputMonitoringEnabled = false;
+	let hasSetInputMonitoringEnabled = false;
+	$: if (assistant && !hasSetInputMonitoringEnabled) {
+		inputMonitoringEnabled = assistant.input_moderation_enabled ?? false;
+		hasSetInputMonitoringEnabled = true;
+	}
+
 	let hasSetAllowUserFileUploads = false;
 	$: if (
 		assistant?.allow_user_file_uploads !== undefined &&
@@ -3156,6 +3163,7 @@
 						: (preventEdits ? !!assistant?.hide_prompt : newValue) !== oldValue;
 				break;
 			case 'disable_prompt_randomization':
+			case 'input_moderation_enabled':
 				dirty = newValue === undefined ? false : newValue !== !!oldValue;
 				break;
 			case 'tools':
@@ -3197,6 +3205,7 @@
 					'use_image_descriptions',
 					'hide_prompt',
 					'disable_prompt_randomization',
+					'input_moderation_enabled',
 					'tools',
 					'temperature',
 					'reasoning_effort',
@@ -3552,6 +3561,7 @@
 			disable_prompt_randomization: disablePromptRandomization,
 			allow_user_file_uploads: allowUserFileUploads,
 			allow_user_image_uploads: allowUserImageUploads,
+			input_moderation_enabled: isLectureMode && inputMonitoringEnabled,
 			hide_reasoning_summaries: hideReasoningSummaries,
 			hide_file_search_result_quotes: hideFileSearchDocumentNames
 				? true
@@ -7527,6 +7537,27 @@
 							>
 						</div>
 						{#if isLectureMode}
+							<div class="col-span-2 mb-1">
+								<Checkbox
+									id="input_moderation_enabled"
+									name="input_moderation_enabled"
+									disabled={preventEdits}
+									bind:checked={inputMonitoringEnabled}
+								>
+									<div class="flex flex-row items-center gap-1.5">
+										<div>Enable Input Monitoring</div>
+										<DropdownBadge
+											extraClasses="border-amber-400 from-amber-100 to-amber-200 text-amber-800 py-0 px-1"
+										>
+											<span slot="name">Experimental</span>
+										</DropdownBadge>
+									</div>
+								</Checkbox>
+								<Helper>
+									Review user text before generating replies. If a message is flagged, the
+									conversation becomes read-only.
+								</Helper>
+							</div>
 							<div class="col-span-2 mb-1">
 								<Checkbox
 									id="allow_lesson_timeline_bypass"

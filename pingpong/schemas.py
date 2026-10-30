@@ -458,6 +458,14 @@ class VectorStoreType(Enum):
     THREAD = "thread"
 
 
+class ModerationCheckStatus(StrEnum):
+    PENDING = "pending"
+    PASSED = "passed"
+    FLAGGED = "flagged"
+    ERRORED = "errored"
+    CANCELLED = "cancelled"
+
+
 class InteractionMode(StrEnum):
     CHAT = "chat"
     VOICE = "voice"
@@ -1881,6 +1889,7 @@ class Assistant(BaseModel):
     disable_prompt_randomization: bool | None = None
     allow_user_file_uploads: bool | None = None
     allow_user_image_uploads: bool | None = None
+    input_moderation_enabled: bool = False
     hide_reasoning_summaries: bool | None = None
     hide_file_search_result_quotes: bool | None = None
     hide_file_search_document_names: bool | None = None
@@ -2292,6 +2301,7 @@ class CreateAssistant(BaseModel):
     disable_prompt_randomization: bool = False
     allow_user_file_uploads: bool = True
     allow_user_image_uploads: bool = True
+    input_moderation_enabled: bool = False
     hide_reasoning_summaries: bool = True
     hide_file_search_result_quotes: bool = True
     hide_file_search_document_names: bool = False
@@ -2419,6 +2429,7 @@ class UpdateAssistant(BaseModel):
     disable_prompt_randomization: bool | None = None
     allow_user_file_uploads: bool | None = None
     allow_user_image_uploads: bool | None = None
+    input_moderation_enabled: bool | None = None
     hide_reasoning_summaries: bool | None = None
     hide_file_search_result_quotes: bool | None = None
     hide_file_search_document_names: bool | None = None
@@ -4076,6 +4087,8 @@ class VoiceModeRecording(BaseModel):
 
 class ThreadWithMeta(BaseModel):
     thread: Thread
+    read_only: bool = False
+    read_only_message: str | None = None
     assistant_avatar_url: str | None = None
     model: str
     tools_available: str

@@ -495,6 +495,7 @@ async def copy_assistant(
         disable_prompt_randomization=assistant.disable_prompt_randomization,
         allow_user_file_uploads=assistant.allow_user_file_uploads,
         allow_user_image_uploads=assistant.allow_user_image_uploads,
+        input_moderation_enabled=assistant.input_moderation_enabled,
         hide_reasoning_summaries=assistant.hide_reasoning_summaries,
         hide_file_search_result_quotes=assistant.hide_file_search_result_quotes,
         hide_file_search_document_names=assistant.hide_file_search_document_names,

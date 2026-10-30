@@ -171,6 +171,7 @@
 		return queryParts.length > 0 ? `${base}?${queryString}` : base;
 	})();
 	$: error = threadMgr.error;
+	$: readOnly = threadMgr.readOnly;
 	$: threadManagerError = $error?.detail || null;
 	$: assistantId = threadMgr.assistantId;
 	$: isCurrentUser = $participants.user.includes('Me');
@@ -430,7 +431,7 @@
 		supportsReasoning = model?.supports_reasoning || false;
 	}
 	// TODO - should figure this out by checking grants instead of participants
-	$: canSubmit = !!$participants.user && $participants.user.includes('Me');
+	$: canSubmit = !$readOnly && !!$participants.user && $participants.user.includes('Me');
 	$: groupArchived = !!data.class?.archived;
 	$: assistantDeleted = !$assistantId && $assistantId === 0;
 	let useLatex = false;

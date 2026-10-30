@@ -6186,6 +6186,9 @@ class Assistant(Base):
     )
     allow_user_file_uploads = Column(Boolean, server_default="true")
     allow_user_image_uploads = Column(Boolean, server_default="true")
+    input_moderation_enabled = Column(
+        Boolean, nullable=False, default=False, server_default=false()
+    )
     hide_reasoning_summaries = Column(Boolean, server_default="true")
     hide_file_search_result_quotes = Column(Boolean, server_default="true")
     hide_file_search_document_names = Column(Boolean, server_default="false")
@@ -9260,6 +9263,12 @@ class Run(Base):
     run_id = Column(String, unique=True, nullable=True)
 
     status = Column(SQLEnum(schemas.RunStatus), nullable=False)
+    input_moderation_enabled = Column(
+        Boolean, nullable=False, default=False, server_default=false()
+    )
+    moderation_checks = relationship(
+        "RunModerationCheck", back_populates="run", cascade="all, delete-orphan"
+    )
     messages = relationship(
         "Message",
         back_populates="run",
@@ -9282,7 +9291,9 @@ class Run(Base):
         back_populates="run",
     )
 
-    thread_id = Column(Integer, ForeignKey("threads.id", ondelete="CASCADE"))
+    thread_id = Column(
+        Integer, ForeignKey("threads.id", ondelete="CASCADE"), index=True
+    )
     thread = relationship("Thread", back_populates="runs", uselist=False)
 
     assistant_id = Column(
@@ -9309,6 +9320,15 @@ class Run(Base):
         onupdate=func.now(),
     )
     completed = Column(DateTime(timezone=True), nullable=True)
+
+    @classmethod
+    def for_thread(cls, thread: "Thread", **kwargs: Any) -> "Run":
+        """Snapshot the input-moderation setting when a generation run is created."""
+        return cls(
+            thread_id=thread.id,
+            input_moderation_enabled=bool(thread.input_moderation_enabled),
+            **kwargs,
+        )
 
     @classmethod
     async def get_file_search_files_from_messages(
@@ -9576,12 +9596,40 @@ mcp_server_tool_thread_association = Table(
 )
 
 
+class RunModerationCheck(Base):
+    """A standalone input-moderation attempt, independent of provider metadata."""
+
+    __tablename__ = "run_moderation_checks"
+
+    id = Column(Integer, primary_key=True)
+    run_id = Column(
+        Integer, ForeignKey("runs.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    run = relationship("Run", back_populates="moderation_checks", uselist=False)
+    status = Column(
+        SQLEnum(schemas.ModerationCheckStatus),
+        nullable=False,
+        default=schemas.ModerationCheckStatus.PENDING,
+        server_default=schemas.ModerationCheckStatus.PENDING.name,
+    )
+    model = Column(String, nullable=True)
+    message_ids = Column(JSON, nullable=False, default=list, server_default="[]")
+    result = Column(JSON, nullable=True)
+    error = Column(JSON, nullable=True)
+    created = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+
+
 class Thread(Base):
     __tablename__ = "threads"
 
     id = Column(Integer, primary_key=True)
     name = Column(String, nullable=True)
     version = Column(Integer, default=1)
+    input_moderation_enabled = Column(
+        Boolean, nullable=False, default=False, server_default=false()
+    )
     thread_id = Column(String, unique=True)
     class_id = Column(Integer, ForeignKey("classes.id"))
     class_ = relationship("Class", back_populates="threads")
@@ -10973,6 +11021,26 @@ class Thread(Base):
         )
         result = await session.execute(stmt)
         return result.scalar_one_or_none()
+
+    @classmethod
+    async def has_flagged_moderation(
+        cls, session: AsyncSession, thread_id: int
+    ) -> bool:
+        """A flagged input closes the conversation, even if moderation is disabled later."""
+        return bool(
+            await session.scalar(
+                select(
+                    select(RunModerationCheck.id)
+                    .join(Run, Run.id == RunModerationCheck.run_id)
+                    .where(
+                        Run.thread_id == thread_id,
+                        RunModerationCheck.status
+                        == schemas.ModerationCheckStatus.FLAGGED,
+                    )
+                    .exists()
+                )
+            )
+        )
 
 
 lti_registration_institution_association = Table(

@@ -52,7 +52,7 @@ from sqlalchemy.sql import delete, func, select, update
 import pingpong.metrics as metrics
 import pingpong.models as models
 import pingpong.schemas as schemas
-from pingpong import lesson_checks
+from pingpong import lesson_checks, moderation
 from pingpong.ai_models import (
     ADMIN_ONLY_MODELS,
     AZURE_UNAVAILABLE_MODELS,
@@ -5682,6 +5682,9 @@ async def get_thread(
                 object="thread.run",
                 tools=[],
             )
+        read_only = await models.Thread.has_flagged_moderation(
+            request.state["db"], thread.id
+        )
         return {
             "thread": thread,
             "assistant_avatar_url": (
@@ -5693,6 +5696,10 @@ async def get_thread(
             "model": assistant.model if assistant else "None",
             "tools_available": thread.tools_available,
             "run": last_run_db if latest_run else None,
+            "read_only": read_only,
+            "read_only_message": (
+                moderation.CONVERSATION_CLOSED_DETAIL if read_only else None
+            ),
             "messages": thread_messages,
             "limit": 20,
             "ci_messages": placeholder_ci_calls,
@@ -8765,6 +8772,7 @@ async def create_audio_thread(
         all_parties.append(anonymous_user)
     new_thread = {
         "name": "Audio Conversation",
+        "input_moderation_enabled": bool(assistant.input_moderation_enabled),
         "class_id": int(class_id),
         "private": True if all_parties else False,
         "interaction_mode": "voice",
@@ -9036,6 +9044,7 @@ async def create_lecture_thread(
         all_parties.append(anonymous_user)
     new_thread = {
         "name": "Lecture Lesson",
+        "input_moderation_enabled": bool(assistant.input_moderation_enabled),
         "class_id": int(class_id),
         "private": True if all_parties else False,
         "interaction_mode": (
@@ -9408,6 +9417,7 @@ async def create_thread(
         all_parties.append(anonymous_user)
     new_thread = {
         "name": thread_name,
+        "input_moderation_enabled": bool(assistant.input_moderation_enabled),
         "class_id": int(class_id),
         "private": True if all_parties else False,
         "users": all_parties,
@@ -9539,9 +9549,9 @@ async def create_thread(
                     )
                 )
 
-            run = models.Run(
+            run = models.Run.for_thread(
+                thread_db_record,
                 status=schemas.RunStatus.PENDING,
-                thread_id=thread_db_record.id,
                 creator_id=request.state["session"].user.id,
                 assistant_id=assistant.id,
                 model=assistant.model,
@@ -9679,6 +9689,7 @@ async def create_run(
             last_run = await models.Thread.get_latest_run_by_thread_id(
                 request.state["db"], thread.id
             )
+            await _ensure_thread_accepts_turn(request, thread.id)
             file_search_file_ids: list[str] = []
 
             if last_run and last_run.status == schemas.RunStatus.PENDING:
@@ -9706,9 +9717,10 @@ async def create_run(
                     request.state["session"].user.id,
                 )
 
-                run_to_complete = models.Run(
+                thread.input_moderation_enabled = bool(asst.input_moderation_enabled)
+                run_to_complete = models.Run.for_thread(
+                    thread,
                     status=schemas.RunStatus.PENDING,
-                    thread_id=thread.id,
                     creator_id=request.state["session"].user.id,
                     assistant_id=asst.id,
                     model=asst.model,
@@ -9783,6 +9795,9 @@ async def create_run(
             await request.state["db"].flush()
             await request.state["db"].refresh(run_to_complete)
 
+            blocked = await _moderate_run_input(request, openai_client, run_to_complete)
+            if blocked is not None:
+                return blocked
             stream = run_response(
                 openai_client,
                 run=run_to_complete,
@@ -9993,6 +10008,7 @@ async def send_message(
                     status_code=500,
                     detail="We're having trouble fetching information about this conversation. If the issue persists, check <a class='underline' href='https://pingpong-hks.statuspage.io' target='_blank'>PingPong's status page</a> for updates.",
                 )
+            await _ensure_thread_accepts_turn(request, thread.id)
 
             if last_run and last_run.status in {
                 schemas.RunStatus.QUEUED,
@@ -10034,7 +10050,7 @@ async def send_message(
             )
         lecture_chat_prep: Any | None = None
 
-        # When we reach 3 user messages, or if we failed to generate a title before, generate a new one. Only use the first 100 words of each user and assistant message to maintain a low token count.
+        # Generate the title before adding this turn's messages to the transcript.
         if thread.interaction_mode not in {
             schemas.InteractionMode.LECTURE_VIDEO,
             schemas.InteractionMode.LECTURE_SLIDES,
@@ -10426,9 +10442,10 @@ async def send_message(
                 )
             )
 
-            run_to_complete = models.Run(
+            thread.input_moderation_enabled = bool(asst.input_moderation_enabled)
+            run_to_complete = models.Run.for_thread(
+                thread,
                 status=schemas.RunStatus.PENDING,
-                thread_id=thread.id,
                 creator_id=request.state["session"].user.id,
                 assistant_id=asst.id,
                 model=asst.model,
@@ -10472,6 +10489,9 @@ async def send_message(
                 else None
             )
 
+            blocked = await _moderate_run_input(request, openai_client, run_to_complete)
+            if blocked is not None:
+                return blocked
             stream = run_response(
                 openai_client,
                 run=run_to_complete,
@@ -13036,6 +13056,14 @@ async def create_assistant(
     #         assistant_version = 2
     del req.create_classic_assistant
 
+    if req.input_moderation_enabled and not _is_lecture_lesson_mode(
+        req.interaction_mode
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="Input monitoring is only available for lecture video and lecture slides assistants.",
+        )
+
     # Check that the class is not private if user information should be recorded
     if class_.private and (
         "should_record_user_information" in req.model_fields_set
@@ -14063,6 +14091,16 @@ async def update_assistant(
         )
         else schemas.InteractionMode(asst.interaction_mode)
     )
+    input_moderation_enabled = (
+        req.input_moderation_enabled
+        if req.input_moderation_enabled is not None
+        else asst.input_moderation_enabled
+    )
+    if input_moderation_enabled and not _is_lecture_lesson_mode(interaction_mode):
+        raise HTTPException(
+            status_code=400,
+            detail="Input monitoring is only available for lecture video and lecture slides assistants.",
+        )
 
     # Only Administrators can edit locked assistants
     allowed_locked_fields = {"published", "use_image_descriptions"}
@@ -15103,6 +15141,12 @@ async def update_assistant(
         and req.allow_user_image_uploads is not None
     ):
         asst.allow_user_image_uploads = req.allow_user_image_uploads
+
+    if (
+        "input_moderation_enabled" in req.model_fields_set
+        and req.input_moderation_enabled is not None
+    ):
+        asst.input_moderation_enabled = req.input_moderation_enabled
 
     if (
         "disable_prompt_randomization" in req.model_fields_set
@@ -17492,6 +17536,73 @@ except Exception:
 async def health():
     """Health check."""
     return {"status": "ok"}
+
+
+async def _ensure_thread_accepts_turn(request: StateRequest, thread_id: int) -> None:
+    if await models.Thread.has_flagged_moderation(request.state["db"], thread_id):
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "message": moderation.CONVERSATION_CLOSED_DETAIL,
+                "error_code": "conversation_closed",
+            },
+        )
+
+
+async def _moderate_run_input(
+    request: StateRequest, client: openai.AsyncClient, run: models.Run
+) -> StreamingResponse | None:
+    if not run.input_moderation_enabled:
+        return None
+
+    # Reserve the turn and commit its input before the separate check reads it.
+    # QUEUED also prevents another request from starting during moderation.
+    run.status = schemas.RunStatus.QUEUED
+    await request.state["db"].commit()
+    try:
+        if await moderation.check_run_input(client, run.id):
+            return None
+    except Exception:
+        # Audit-write failures also fail open, including a failed FLAGGED write.
+        logger.exception("Input moderation failed for run %s; continuing", run.id)
+        return None
+    except BaseException:
+        # No generation handler exists yet to settle an interrupted run.
+        await models.Run.mark_as_status(
+            request.state["db"],
+            run.id,
+            status=schemas.RunStatus.INCOMPLETE,
+            error_code=None,
+            error_message=None,
+            incomplete_reason="Input moderation interrupted before generation.",
+        )
+        await request.state["db"].commit()
+        raise
+
+    await models.Run.mark_as_status(
+        request.state["db"],
+        run.id,
+        status=schemas.RunStatus.INCOMPLETE,
+        error_code=None,
+        error_message=None,
+        incomplete_reason="Input flagged by moderation.",
+    )
+    await request.state["db"].commit()
+
+    async def blocked_stream():
+        yield (
+            json.dumps(
+                {
+                    "type": "error",
+                    "detail": moderation.CONVERSATION_CLOSED_DETAIL,
+                    "read_only": True,
+                }
+            ).encode()
+            + b"\n"
+        )
+        yield b'{"type":"done"}\n'
+
+    return StreamingResponse(blocked_stream(), media_type="text/event-stream")
 
 
 async def _stream_lesson_check(stream, run_id: int, attempt_id: int):
