@@ -10483,17 +10483,23 @@ async def send_message(
                 return blocked
             # Name Responses conversations after input review, before generation.
             if needs_conversation_name:
-                thread.name = await get_thread_conversation_name(
-                    openai_client,
-                    request.state["db"],
-                    data,
-                    str(thread.id) if thread.version == 3 else thread.thread_id,
-                    class_id,
-                    thread_version=thread.version,
-                    response_safety_identifier=request.state[
-                        "response_safety_identifier"
-                    ],
-                )
+                try:
+                    thread.name = await get_thread_conversation_name(
+                        openai_client,
+                        request.state["db"],
+                        data,
+                        str(thread.id),
+                        class_id,
+                        thread_version=thread.version,
+                        response_safety_identifier=request.state[
+                            "response_safety_identifier"
+                        ],
+                    )
+                except Exception:
+                    logger.exception(
+                        "Error generating conversation name for thread %s", thread.id
+                    )
+                    thread.name = None
             stream = run_response(
                 openai_client,
                 run=run_to_complete,
@@ -17526,15 +17532,19 @@ async def _ensure_thread_accepts_turn(request: StateRequest, thread_id: int) -> 
 async def _moderate_run_input(
     request: StateRequest, client: openai.AsyncClient, run: models.Run
 ) -> StreamingResponse | None:
+    if not run.input_moderation_enabled:
+        return None
+
     # Reserve the turn and commit its input before the separate check reads it.
     # QUEUED also prevents another request from starting during moderation.
     run.status = schemas.RunStatus.QUEUED
     await request.state["db"].commit()
-    if not run.input_moderation_enabled:
-        return None
     try:
         if await moderation.check_run_input(client, run.id):
             return None
+    except Exception:
+        logger.exception("Input moderation failed for run %s; continuing", run.id)
+        return None
     except BaseException:
         # No generation handler exists yet to settle an interrupted run.
         await models.Run.mark_as_status(
