@@ -302,7 +302,7 @@ async def test_interrupted_input_review_settles_run(db):
         await asyncio.wait_for(started.wait(), timeout=2)
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
-            await task
+            _ = await task
         await session.refresh(run)
         assert run.status == schemas.RunStatus.INCOMPLETE
         check = await session.scalar(select(models.RunModerationCheck))
@@ -341,10 +341,14 @@ async def test_chat_naming_uses_previous_messages_and_preserves_title_on_excepti
             class_id=1,
         )
         await session.commit()
+
+    def empty_client():
+        return SimpleNamespace()
+
     monkeypatch.setitem(
         server.v1.dependency_overrides,
         server.get_openai_client_for_class,
-        lambda: SimpleNamespace(),
+        empty_client,
     )
     monkeypatch.setattr(server, "ensure_model_available", AsyncMock())
     generate_name = AsyncMock(

@@ -90,7 +90,7 @@ async def _finish_check(
     try:
         await asyncio.shield(task)
     except asyncio.CancelledError:
-        await task
+        _ = await task
         raise
 
 
