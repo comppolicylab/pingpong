@@ -10050,12 +10050,11 @@ async def send_message(
             )
         lecture_chat_prep: Any | None = None
 
-        # Keep the title trigger fixed while the turn increments the message count.
-        needs_conversation_name = thread.interaction_mode not in {
+        # Generate the title before adding this turn's messages to the transcript.
+        if thread.interaction_mode not in {
             schemas.InteractionMode.LECTURE_VIDEO,
             schemas.InteractionMode.LECTURE_SLIDES,
-        } and (thread.user_message_ct == 3 or thread.name is None)
-        if thread.version <= 2 and needs_conversation_name:
+        } and (thread.user_message_ct == 3 or thread.name is None):
             thread.name = await get_thread_conversation_name(
                 openai_client,
                 request.state["db"],
@@ -10493,25 +10492,6 @@ async def send_message(
             blocked = await _moderate_run_input(request, openai_client, run_to_complete)
             if blocked is not None:
                 return blocked
-            # Name Responses conversations after input review, before generation.
-            if needs_conversation_name:
-                try:
-                    thread.name = await get_thread_conversation_name(
-                        openai_client,
-                        request.state["db"],
-                        data,
-                        str(thread.id),
-                        class_id,
-                        thread_version=thread.version,
-                        response_safety_identifier=request.state[
-                            "response_safety_identifier"
-                        ],
-                    )
-                except Exception:
-                    logger.exception(
-                        "Error generating conversation name for thread %s", thread.id
-                    )
-                    thread.name = None
             stream = run_response(
                 openai_client,
                 run=run_to_complete,
@@ -17583,6 +17563,7 @@ async def _moderate_run_input(
         if await moderation.check_run_input(client, run.id):
             return None
     except Exception:
+        # Audit-write failures also fail open, including a failed FLAGGED write.
         logger.exception("Input moderation failed for run %s; continuing", run.id)
         return None
     except BaseException:

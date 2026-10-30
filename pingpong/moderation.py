@@ -35,6 +35,7 @@ async def _start_check(run_id: int) -> tuple[int, list[str]] | None:
             .where(
                 models.Message.run_id == run_id,
                 models.Message.role == schemas.MessageRole.USER,
+                models.Message.is_hidden.is_not(True),
             )
             .options(selectinload(models.Message.content))
             .order_by(models.Message.output_index, models.Message.id)

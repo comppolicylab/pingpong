@@ -28,6 +28,7 @@ async def conversation(db, path):
                 version=3,
                 model="gpt-4o-mini",
                 instructions="Be helpful.",
+                input_moderation_enabled=True,
             )
         )
         thread = models.Thread(
@@ -38,7 +39,7 @@ async def conversation(db, path):
             name="Conversation",
             tools_available="[]",
             instructions="Be helpful.",
-            user_message_ct=3,
+            user_message_ct=4,
             input_moderation_enabled=True,
         )
         run = models.Run.for_thread(
@@ -90,6 +91,8 @@ async def test_input_review_precedes_generation_and_closes_flagged_threads(
         async with db.async_session() as session:
             thread = await session.get(models.Thread, 20)
             run = await session.get(models.Run, 30)
+            assistant = await session.get(models.Assistant, 2)
+            assistant.input_moderation_enabled = False
             thread.input_moderation_enabled = False
             run.input_moderation_enabled = False
             await session.commit()
@@ -212,28 +215,38 @@ async def test_input_loader_skips_empty_and_non_user_text(db):
                 models.Message(
                     thread_id=thread.id,
                     role=role,
+                    is_hidden=hidden,
                     message_status=schemas.MessageStatus.COMPLETED,
                     output_index=index,
                     content=[
                         models.MessagePart(part_index=0, type=part_type, text=text)
                     ],
                 )
-                for index, (role, part_type, text) in enumerate(
+                for index, (role, part_type, text, hidden) in enumerate(
                     [
                         (
                             schemas.MessageRole.USER,
                             schemas.MessagePartType.INPUT_TEXT,
                             "  ",
+                            False,
                         ),
                         (
                             schemas.MessageRole.DEVELOPER,
                             schemas.MessagePartType.INPUT_TEXT,
                             "Private instructions",
+                            True,
                         ),
                         (
                             schemas.MessageRole.ASSISTANT,
                             schemas.MessagePartType.OUTPUT_TEXT,
                             "Prior answer",
+                            False,
+                        ),
+                        (
+                            schemas.MessageRole.USER,
+                            schemas.MessagePartType.INPUT_TEXT,
+                            "Hidden system-authored context",
+                            True,
                         ),
                     ]
                 )
@@ -294,3 +307,66 @@ async def test_interrupted_input_review_settles_run(db):
         assert run.status == schemas.RunStatus.INCOMPLETE
         check = await session.scalar(select(models.RunModerationCheck))
         assert check.status == schemas.ModerationCheckStatus.CANCELLED
+
+
+@with_user(123)
+@with_authz(
+    grants=[
+        ("user:123", "can_participate", "thread:20"),
+        ("user:123", "can_interact_with", "assistant:2"),
+    ]
+)
+@pytest.mark.parametrize("path", ["message"])
+@pytest.mark.parametrize("naming_error", [False, True])
+async def test_chat_naming_uses_previous_messages_and_preserves_title_on_exception(
+    api, db, conversation, valid_user_token, monkeypatch, path, naming_error
+):
+    from pingpong import ai
+
+    server = importlib.import_module("pingpong.server")
+    async with db.async_session() as session:
+        thread = await session.get(models.Thread, 20)
+        thread.user_message_ct = 3
+        assistant = await session.get(models.Assistant, 2)
+        assistant.input_moderation_enabled = False
+        assistant.allow_user_image_uploads = True
+        await models.File.create(
+            session,
+            {
+                "file_id": "file-image",
+                "name": "image.png",
+                "content_type": "image/png",
+                "private": False,
+            },
+            class_id=1,
+        )
+        await session.commit()
+    monkeypatch.setitem(
+        server.v1.dependency_overrides,
+        server.get_openai_client_for_class,
+        lambda: SimpleNamespace(),
+    )
+    monkeypatch.setattr(server, "ensure_model_available", AsyncMock())
+    generate_name = AsyncMock(
+        return_value="New title",
+        side_effect=RuntimeError("Title generation failed") if naming_error else None,
+    )
+    monkeypatch.setattr(ai, "generate_thread_name", generate_name)
+
+    async def generate(*args, **kwargs):
+        yield b'{"type":"done"}\n'
+
+    monkeypatch.setattr(server, "run_response", generate)
+    response = api.post(
+        "/api/v1/class/1/thread/20",
+        json={"message": "Hello", "vision_file_ids": ["file-image"]},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert response.status_code == (500 if naming_error else 200), response.text
+    generate_name.assert_awaited_once()
+    transcript = generate_name.await_args.args[2]
+    assert transcript.count("USER: Uploaded an image file") == 1
+    assert "Hello" not in transcript
+    async with db.async_session() as session:
+        thread = await session.get(models.Thread, 20)
+        assert thread.name == ("Conversation" if naming_error else "New title")

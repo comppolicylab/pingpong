@@ -35,7 +35,6 @@ def upgrade() -> None:
                 nullable=False,
             ),
         )
-    op.create_index("ix_runs_thread_id", "runs", ["thread_id"])
     op.create_table(
         "run_moderation_checks",
         sa.Column("id", sa.Integer(), primary_key=True),
@@ -68,7 +67,6 @@ def downgrade() -> None:
     op.drop_index("ix_run_moderation_checks_run_id", table_name="run_moderation_checks")
     op.drop_table("run_moderation_checks")
     check_status.drop(op.get_bind(), checkfirst=True)
-    op.drop_index("ix_runs_thread_id", table_name="runs")
     op.drop_column("runs", "input_moderation_enabled")
     op.drop_column("threads", "input_moderation_enabled")
     op.drop_column("assistants", "input_moderation_enabled")
