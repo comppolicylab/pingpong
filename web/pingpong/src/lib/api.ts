@@ -5031,9 +5031,10 @@ const streamThreadChunks = (res: Response) => {
 				}).error;
 				yield {
 					type: 'presend_error',
-					detail: error_?.error_code === 'conversation_closed'
-						? error_.detail
-						: `We were unable to send your message: ${error_?.detail}`,
+					detail:
+						error_?.error_code === 'conversation_closed'
+							? error_.detail
+							: `We were unable to send your message: ${error_?.detail}`,
 					read_only: error_?.error_code === 'conversation_closed'
 				} as ThreadPreSendErrorChunk;
 			}

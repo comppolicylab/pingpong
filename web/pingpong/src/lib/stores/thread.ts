@@ -1138,9 +1138,9 @@ export class ThreadManager {
 			return {
 				...d,
 				data,
-				error: d.error || (data.read_only_message
-					? { detail: data.read_only_message, wasSent: true }
-					: null)
+				error:
+					d.error ||
+					(data.read_only_message ? { detail: data.read_only_message, wasSent: true } : null)
 			};
 		});
 	}

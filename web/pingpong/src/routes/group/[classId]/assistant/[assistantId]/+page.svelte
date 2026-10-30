@@ -7544,7 +7544,14 @@
 									disabled={preventEdits}
 									bind:checked={inputMonitoringEnabled}
 								>
-									Enable Input Monitoring
+									<div class="flex flex-row items-center gap-1.5">
+										<div>Enable Input Monitoring</div>
+										<DropdownBadge
+											extraClasses="border-amber-400 from-amber-100 to-amber-200 text-amber-800 py-0 px-1"
+										>
+											<span slot="name">Experimental</span>
+										</DropdownBadge>
+									</div>
 								</Checkbox>
 								<Helper>
 									Review user text before generating replies. If a message is flagged, the
