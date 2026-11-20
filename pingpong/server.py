@@ -240,6 +240,8 @@ from .permission import (
 )
 from .runs import get_placeholder_ci_calls
 from .saml import get_saml2_attrs, get_saml2_client, get_saml2_settings
+from .gemini import DEFAULT_LECTURE_GEMINI_MODEL
+from .gemini_model_catalog import list_class_generation_models
 from .model_catalog import (
     close_model_catalog_cache,
     ensure_model_available,
@@ -4489,6 +4491,18 @@ async def list_model_capabilities(request: StateRequest):
         for model_id, model_data in KNOWN_MODELS.items()
     ]
     return schemas.AssistantModelLiteResponse(models=lite_models)
+
+
+@v1.get(
+    "/class/{class_id}/gemini/models",
+    dependencies=[Depends(Authz("can_view", "class:{class_id}"))],
+    response_model=schemas.LectureGenerationModels,
+)
+async def list_class_gemini_models(
+    class_id: str, request: StateRequest, response: Response
+):
+    response.headers["Cache-Control"] = "private, no-store"
+    return await list_class_generation_models(request.state["db"], int(class_id))
 
 
 @v1.get(
@@ -10309,7 +10323,10 @@ async def send_message(
 
             check_attempt_id = (
                 await lesson_checks.prepare_check(
-                    request.state["db"], thread, lecture_chat_prep
+                    request.state["db"],
+                    thread,
+                    lecture_chat_prep,
+                    evaluation_instructions=asst.lecture_check_instructions,
                 )
                 if lecture_chat_prep is not None
                 else None
@@ -11704,6 +11721,7 @@ async def get_class_lecture_lesson_editor_config(
     )
 
     return schemas.LectureLessonEditorConfig(
+        lecture_check_instructions=lesson_checks.DEFAULT_EVALUATION_INSTRUCTIONS,
         lecture_lesson_available=lecture_video_context["lecture_video_enabled"],
         instructions=lecture_video_manifest_generation.DEFAULT_LECTURE_VIDEO_INSTRUCTIONS,
         generation_prompt=lecture_video_manifest_generation.DEFAULT_GENERATION_PROMPT_CONTENT,
@@ -12847,6 +12865,51 @@ async def delete_assistant_avatar(
     )
 
 
+async def _validate_lecture_gemini_model(
+    request: StateRequest, class_id: str, model_id: str | None
+) -> None:
+    if model_id is None:
+        return
+    available = await list_class_generation_models(request.state["db"], int(class_id))
+    if not any(model.id == model_id for model in available.models):
+        raise HTTPException(
+            400, "The selected Google material creation model is not available."
+        )
+
+
+async def _validate_lecture_generation_model(
+    request: StateRequest,
+    class_id: str,
+    model_id: str | None,
+    available_models: list[schemas.AssistantModel],
+    *,
+    current_model: str | None = None,
+) -> None:
+    if model_id is None:
+        return
+    model = next((item for item in available_models if item.id == model_id), None)
+    if (
+        model is None
+        or not model.is_available
+        or (model.hide_in_model_selector and model_id != current_model)
+        or model.type != schemas.InteractionMode.CHAT
+        or not model.supports_next_gen_assistants
+    ):
+        raise HTTPException(
+            400, "The selected material creation model is not available."
+        )
+    if (
+        model_id != current_model
+        and model_id in ADMIN_ONLY_MODELS
+        and not await request.state["authz"].test(
+            f"user:{request.state['session'].user.id}", "admin", f"class:{class_id}"
+        )
+    ):
+        raise HTTPException(
+            400, "The selected material creation model is not available."
+        )
+
+
 @v1.post(
     "/class/{class_id}/assistant",
     dependencies=[
@@ -12875,6 +12938,13 @@ async def create_assistant(
         )
     )
     class_models = class_models_response.models
+    if req.interaction_mode == schemas.InteractionMode.LECTURE_VIDEO:
+        await _validate_lecture_gemini_model(
+            request, class_id, req.lecture_gemini_model
+        )
+    await _validate_lecture_generation_model(
+        request, class_id, req.lecture_generation_model, class_models
+    )
 
     model_record = next(
         (model for model in class_models if model.id == req.model), None
@@ -13141,6 +13211,8 @@ async def create_assistant(
     is_video = req.interaction_mode == schemas.InteractionMode.LECTURE_VIDEO
     is_slides = req.interaction_mode == schemas.InteractionMode.LECTURE_SLIDES
     is_lesson_mode = is_video or is_slides
+    if is_video and req.lecture_gemini_model is None:
+        req.lecture_gemini_model = DEFAULT_LECTURE_GEMINI_MODEL
     if is_lesson_mode:
         req.use_latex = True
         req.use_mermaid = True
@@ -14494,6 +14566,25 @@ async def update_assistant(
             detail=f"Model {selected_model} is not available for use in {interaction_mode} mode.",
         )
 
+    if "lecture_generation_model" in req.model_fields_set:
+        await _validate_lecture_generation_model(
+            request,
+            class_id,
+            req.lecture_generation_model,
+            class_models_response.models,
+            current_model=asst.lecture_generation_model or current_model,
+        )
+    if is_video and "lecture_gemini_model" in req.model_fields_set:
+        await _validate_lecture_gemini_model(
+            request, class_id, req.lecture_gemini_model
+        )
+    if "lecture_check_instructions" in req.model_fields_set:
+        asst.lecture_check_instructions = req.lecture_check_instructions
+    if "lecture_generation_model" in req.model_fields_set:
+        asst.lecture_generation_model = req.lecture_generation_model
+    if req.lecture_gemini_model is not None:
+        asst.lecture_gemini_model = req.lecture_gemini_model
+
     if "model" in req.model_fields_set and req.model is not None:
         _model = (
             get_azure_model_deployment_name_equivalent(req.model)
@@ -15720,6 +15811,7 @@ async def update_assistant(
                         request.state["db"],
                         target_lecture_slide_deck,
                         requested_by_assistant_id=asst.id,
+                        force_manifest_generation=needs_questions,
                     )
                 )
             elif (

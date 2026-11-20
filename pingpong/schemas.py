@@ -1616,7 +1616,18 @@ class LectureSlideTranslationStatusResponse(BaseModel):
     error_message: str | None = None
 
 
+class LectureGenerationModel(BaseModel):
+    id: str
+    name: str
+
+
+class LectureGenerationModels(BaseModel):
+    models: list[LectureGenerationModel]
+    default_model: LectureGenerationModel
+
+
 class LectureLessonEditorConfig(BaseModel):
+    lecture_check_instructions: str
     lecture_lesson_available: bool
     instructions: str
     generation_prompt: str
@@ -1859,6 +1870,11 @@ class Assistant(BaseModel):
     interaction_mode: InteractionMode
     tools: str
     model: str
+    lecture_check_instructions: str | None = Field(None, max_length=20000)
+    lecture_generation_model: str | None = Field(None, min_length=2, max_length=200)
+    lecture_gemini_model: str | None = Field(
+        None, min_length=2, max_length=200, pattern=r"^gemini-[A-Za-z0-9._-]+$"
+    )
     temperature: float | None
     verbosity: int | None
     reasoning_effort: int | None
@@ -2243,6 +2259,11 @@ class CreateAssistant(BaseModel):
     notes: str | None = None
     interaction_mode: InteractionMode = InteractionMode.CHAT
     model: str = Field(..., min_length=2)
+    lecture_check_instructions: str | None = Field(None, min_length=3, max_length=20000)
+    lecture_generation_model: str | None = Field(None, min_length=2, max_length=200)
+    lecture_gemini_model: str | None = Field(
+        None, min_length=2, max_length=200, pattern=r"^gemini-[A-Za-z0-9._-]+$"
+    )
     temperature: float | None = Field(None, ge=0.0, le=2.0)
     reasoning_effort: int | None = Field(None, ge=-1, le=2)
     verbosity: int | None = Field(None, ge=0, le=2)
@@ -2397,6 +2418,11 @@ class UpdateAssistant(BaseModel):
     regenerate_audio_requested: bool | None = None
     overwrite_manifest: bool | None = None
     model: str | None = Field(None, min_length=2)
+    lecture_check_instructions: str | None = Field(None, min_length=3, max_length=20000)
+    lecture_generation_model: str | None = Field(None, min_length=2, max_length=200)
+    lecture_gemini_model: str | None = Field(
+        None, min_length=2, max_length=200, pattern=r"^gemini-[A-Za-z0-9._-]+$"
+    )
     temperature: float | None = Field(None, ge=0.0, le=2.0)
     reasoning_effort: int | None = Field(None, ge=-1, le=2)
     verbosity: int | None = Field(None, ge=0, le=2)

@@ -288,6 +288,50 @@ async def _create_class_and_deck(
         return deck
 
 
+@pytest.mark.parametrize("generation_model", [None, "gpt-5.6-sol"])
+@pytest.mark.parametrize("started_by_assistant", [False, True])
+async def test_material_model_is_separate_from_chat_model(
+    db, generation_model, started_by_assistant
+):
+    await _create_class_and_deck(db)
+    async with db.async_session() as session:
+        assistant = models.Assistant(
+            name="Slides",
+            class_id=1,
+            lecture_slide_deck_id=1,
+            model="gpt-4o-mini",
+            lecture_generation_model=generation_model,
+        )
+        session.add(assistant)
+        await session.flush()
+        deck = await session.get(models.LectureSlideDeck, 1)
+        run = await lecture_slide_processing.queue_lecture_slide_processing_run(
+            session,
+            deck,
+            requested_by_assistant_id=assistant.id if started_by_assistant else None,
+        )
+        await session.flush()
+        assert await lecture_slide_processing._get_responses_model_for_run(
+            session, run.id, deck.id
+        ) == (generation_model or "gpt-4o-mini")
+        assert assistant.model == "gpt-4o-mini"
+
+
+async def test_narration_regeneration_can_force_question_regeneration(db):
+    await _create_class_and_deck(db)
+    async with db.async_session() as session:
+        deck = await session.get(models.LectureSlideDeck, 1)
+        run = await lecture_slide_processing.queue_narration_text_processing_run(
+            session,
+            deck,
+            requested_by_assistant_id=42,
+            force_manifest_generation=True,
+        )
+        assert run is not None
+        assert run.stage == schemas.LectureSlideProcessingStage.NARRATION_TEXT
+        assert run.force_manifest_generation is True
+
+
 async def test_queue_lecture_slide_processing_run_reuses_active_run(db):
     await _create_class_and_deck(db)
     async with db.async_session() as session:

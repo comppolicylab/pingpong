@@ -22,6 +22,10 @@ const triggers = (
 	});
 
 describe('deriveLectureSlideProcessingTriggers', () => {
+	it('leaves existing material alone when no processing changes are requested', () => {
+		expect(triggers()).toEqual({ full: false, narration: false, questions: false, audio: false });
+	});
+
 	it('regenerates narration for note-only edits', () => {
 		expect(triggers({ notesChanged: true })).toEqual({
 			full: false,

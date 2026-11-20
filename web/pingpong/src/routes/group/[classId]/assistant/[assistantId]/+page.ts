@@ -19,7 +19,8 @@ import {
 	getLectureVideoEditorPolicy,
 	getLectureLessonEditorConfig,
 	expandResponse,
-	getModels
+	getModels,
+	getGeminiModels
 } from '$lib/api';
 import { modelsPromptsStore } from '$lib/stores/general';
 import { get } from 'svelte/store';
@@ -161,7 +162,7 @@ async function loadLectureLessonEditorConfig(
 	classId: number
 ): Promise<LectureLessonEditorConfig | null> {
 	const response = await getLectureLessonEditorConfig(fetchFn, classId).then(expandResponse);
-	return response.error || !response.data.lecture_lesson_available ? null : response.data;
+	return response.error ? null : response.data;
 }
 
 /**
@@ -171,17 +172,34 @@ export const load: PageLoad = async ({ params, fetch, parent }) => {
 	const classId = parseInt(params.classId, 10);
 	const isCreating = params.assistantId === 'new';
 	const parentData = await parent();
+	const assistant: Assistant | null = isCreating
+		? null
+		: ((parentData.assistants ?? []).find((item) => item.id === parseInt(params.assistantId, 10)) ??
+			null);
+	const policyPromise = loadLectureVideoEditorPolicy(fetch, classId);
+	const geminiModelsPromise =
+		assistant?.interaction_mode === 'lecture_video'
+			? getGeminiModels(fetch, classId).then(expandResponse)
+			: isCreating
+				? policyPromise.then((policy) =>
+						policy.can_select_mode_in_assistant_editor
+							? getGeminiModels(fetch, classId).then(expandResponse)
+							: null
+					)
+				: Promise.resolve(null);
+
 	const [
 		{ models, defaultPrompts, enforceClassicAssistants },
 		lectureVideoPolicy,
-		lectureLessonEditorConfig
+		lectureLessonEditorConfig,
+		geminiModelsResponse
 	] = await Promise.all([
 		ensureModels(fetch, classId),
-		loadLectureVideoEditorPolicy(fetch, classId),
-		loadLectureLessonEditorConfig(fetch, classId)
+		policyPromise,
+		loadLectureLessonEditorConfig(fetch, classId),
+		geminiModelsPromise
 	]);
 
-	let assistant: Assistant | null = null;
 	let assistantFiles: AssistantFiles | null = null;
 	let mcpServers: MCPServerToolInput[] = [];
 	let lectureVideoConfig: LectureVideoConfigResponse | null = null;
@@ -189,35 +207,29 @@ export const load: PageLoad = async ({ params, fetch, parent }) => {
 	let lectureSlideConfig: LectureSlideConfigResponse | null = null;
 	let lectureSlideConfigLoadError: (ApiError & { $status: number }) | null = null;
 
-	if (!isCreating) {
-		const assistants = parentData.assistants ?? [];
-		const id = parseInt(params.assistantId, 10);
-		assistant = assistants.find((a) => a.id === id) ?? null;
-
-		if (assistant) {
-			const [files, servers] = await Promise.all([
-				loadAssistantFilesOrNull(fetch, classId, assistant.id),
-				loadAssistantMCPServers(fetch, classId, assistant.id)
-			]);
-			assistantFiles = files;
-			mcpServers = servers;
-			if (assistant.interaction_mode === 'lecture_video') {
-				const lectureVideoConfigResult = await loadAssistantLectureVideoConfig(
-					fetch,
-					classId,
-					assistant.id
-				);
-				lectureVideoConfig = lectureVideoConfigResult.lectureVideoConfig;
-				lectureVideoConfigLoadError = lectureVideoConfigResult.lectureVideoConfigLoadError;
-			} else if (assistant.interaction_mode === 'lecture_slides') {
-				const lectureSlideConfigResult = await loadAssistantLectureSlideConfig(
-					fetch,
-					classId,
-					assistant.id
-				);
-				lectureSlideConfig = lectureSlideConfigResult.lectureSlideConfig;
-				lectureSlideConfigLoadError = lectureSlideConfigResult.lectureSlideConfigLoadError;
-			}
+	if (assistant) {
+		const [files, servers] = await Promise.all([
+			loadAssistantFilesOrNull(fetch, classId, assistant.id),
+			loadAssistantMCPServers(fetch, classId, assistant.id)
+		]);
+		assistantFiles = files;
+		mcpServers = servers;
+		if (assistant.interaction_mode === 'lecture_video') {
+			const lectureVideoConfigResult = await loadAssistantLectureVideoConfig(
+				fetch,
+				classId,
+				assistant.id
+			);
+			lectureVideoConfig = lectureVideoConfigResult.lectureVideoConfig;
+			lectureVideoConfigLoadError = lectureVideoConfigResult.lectureVideoConfigLoadError;
+		} else if (assistant.interaction_mode === 'lecture_slides') {
+			const lectureSlideConfigResult = await loadAssistantLectureSlideConfig(
+				fetch,
+				classId,
+				assistant.id
+			);
+			lectureSlideConfig = lectureSlideConfigResult.lectureSlideConfig;
+			lectureSlideConfigLoadError = lectureSlideConfigResult.lectureSlideConfigLoadError;
 		}
 	}
 
@@ -241,6 +253,9 @@ export const load: PageLoad = async ({ params, fetch, parent }) => {
 		defaultPrompts,
 		enforceClassicAssistants,
 		lectureLessonEditorConfig,
+		geminiModels:
+			geminiModelsResponse && !geminiModelsResponse.error ? geminiModelsResponse.data : null,
+		geminiModelsLoadError: geminiModelsResponse?.error?.detail || null,
 		lectureVideoPolicy: effectiveLectureVideoPolicy,
 		lectureVideoConfig,
 		lectureVideoConfigLoadError,

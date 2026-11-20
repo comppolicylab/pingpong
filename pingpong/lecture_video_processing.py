@@ -98,6 +98,7 @@ class ManifestGenerationRunContext:
     transcript: list[schemas.LectureVideoManifestWordV3] | None
     openai_client: Any
     gemini_client: Any
+    gemini_model: str
 
 
 class NarrationWorkerPoolManager(WorkerPoolManager):
@@ -790,6 +791,18 @@ async def _load_manifest_generation_run_context(
             class_id,
         )
         gemini_client = await gemini.get_gemini_client_by_class_id(session, class_id)
+        assistant = await models.Assistant.get_by_lecture_video_id(
+            session, lecture_video_id
+        )
+        gemini_model = (
+            assistant.lecture_gemini_model
+            if assistant
+            else gemini.DEFAULT_LECTURE_GEMINI_MODEL
+        )
+        if not gemini_model:
+            raise RuntimeError(
+                "Lecture video processing requires a material creation model."
+            )
 
     return ManifestGenerationRunContext(
         class_id=class_id,
@@ -799,6 +812,7 @@ async def _load_manifest_generation_run_context(
         transcript=transcript,
         openai_client=openai_client,
         gemini_client=gemini_client,
+        gemini_model=gemini_model,
     )
 
 
@@ -965,6 +979,7 @@ async def _upload_and_generate_manifest(
     transcript: list[schemas.LectureVideoManifestWordV3],
     temp_dir: str,
     video_description_duration_ms: int,
+    gemini_model: str,
 ) -> None:
     async with gemini_client.aio as gemini_async_client:
         logger.info(
@@ -976,6 +991,7 @@ async def _upload_and_generate_manifest(
             run_id,
             lease_token,
             lecture_video_manifest_generation.upload_and_generate_manifest(
+                model=gemini_model,
                 video_path=video_path,
                 gemini_client=gemini_async_client,
                 generation_prompt_content=generation_prompt,
@@ -1071,6 +1087,7 @@ async def _process_claimed_manifest_run(run_id: int, lease_token: str) -> None:
                 transcript,
                 temp_dir,
                 context.video_description_duration_ms,
+                context.gemini_model,
             )
     except Exception as exc:
         logger.exception("Lecture video manifest generation failed. run_id=%s", run_id)

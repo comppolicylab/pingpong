@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from fastapi import Response
 
 from pingpong import (
+    lesson_checks,
     lecture_slide_processing,
     lecture_video_manifest_generation,
     models,
@@ -121,6 +122,7 @@ async def test_lecture_lesson_editor_config_endpoint_serializes_config(
     assert response.status_code == 200
     assert response.headers["cache-control"] == "private, no-store"
     assert response.json() == {
+        "lecture_check_instructions": lesson_checks.DEFAULT_EVALUATION_INSTRUCTIONS,
         "lecture_lesson_available": False,
         "instructions": (
             lecture_video_manifest_generation.DEFAULT_LECTURE_VIDEO_INSTRUCTIONS

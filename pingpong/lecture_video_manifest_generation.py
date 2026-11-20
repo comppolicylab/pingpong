@@ -200,7 +200,6 @@ GUIDELINES FOR QUESTIONS:
   (b) Skip the question entirely and wait for the next genuine conceptual breakpoint.
   A question that any attentive student can answer without thinking is worse than no question at all."""
 
-_GEMINI_MODEL = "gemini-3.5-flash"
 DEFAULT_VIDEO_DESCRIPTION_DURATION_MS = 30_000
 _MANIFEST_CHUNK_DURATION_MS = 5 * 60 * 1000
 _MANIFEST_CHUNK_MIN_TAIL_MS = 3 * 60 * 1000
@@ -2096,7 +2095,7 @@ async def generate_manifest(
     gemini_file: GeminiFileRef,
     generation_prompt_content: str,
     transcript: list[schemas.LectureVideoManifestWordV3],
-    model: str = _GEMINI_MODEL,
+    model: str = gemini_helpers.DEFAULT_LECTURE_GEMINI_MODEL,
     video_description_duration_ms: int = DEFAULT_VIDEO_DESCRIPTION_DURATION_MS,
 ) -> schemas.LectureVideoManifestV4:
     video_duration_ms = await _ffprobe_duration_ms(video_path)
@@ -2346,7 +2345,7 @@ async def upload_and_generate_manifest(
     generation_prompt_content: str,
     transcript: list[schemas.LectureVideoManifestWordV3],
     temp_dir: str,
-    model: str = _GEMINI_MODEL,
+    model: str = gemini_helpers.DEFAULT_LECTURE_GEMINI_MODEL,
     video_description_duration_ms: int = DEFAULT_VIDEO_DESCRIPTION_DURATION_MS,
 ) -> schemas.LectureVideoManifestV4:
     video_duration_ms = await _ffprobe_duration_ms(video_path)

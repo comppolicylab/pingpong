@@ -33,7 +33,12 @@
 	import { browser } from '$app/environment';
 	import * as api from '$lib/api';
 	import { setsEqual } from '$lib/set';
-	import { getAssistantModelModes } from '$lib/assistantModelModes';
+	import {
+		getAssistantModelModes,
+		getEffectiveReasoningEffort,
+		getEffectiveTemperature
+	} from '$lib/assistantModelModes';
+
 	import { happyToast, sadToast } from '$lib/toast';
 	import { errorMessage as formatErrorMessage } from '$lib/errors';
 	import { normalizeNewlines } from '$lib/content.js';
@@ -2320,6 +2325,13 @@
 			!versionedModelOptions.map((m) => m.value).includes(selectedModel))
 	) {
 		if (
+			!data.isCreating &&
+			assistant?.model &&
+			!data.models.some((model) => model.id === assistant.model) &&
+			modelInteractionMode === (assistant.interaction_mode === 'voice' ? 'voice' : 'chat')
+		) {
+			selectedModel = assistant.model;
+		} else if (
 			latestModelOptions.map((m) => m.value).includes(assistant?.model || '') ||
 			hiddenModelNames.includes(assistant?.model || '')
 		) {
@@ -2339,14 +2351,20 @@
 			selectedModel = '';
 		}
 	}
-	$: if (isLectureMode && data.isCreating && latestModelOptions.length > 0) {
-		const highlighted = latestModelOptions.find((model) => model.highlight);
-		selectedModel = highlighted ? highlighted.value : latestModelOptions[0].value;
-	}
-	$: if (isLectureMode && !data.isCreating && assistant?.model) {
-		selectedModel = assistant.model;
-	}
-	$: selectedModelName = modelNameDict[selectedModel];
+	const defaultCheckInstructions = data.lectureLessonEditorConfig?.lecture_check_instructions ?? '';
+	let lectureCheckInstructions =
+		data.assistant?.lecture_check_instructions ?? defaultCheckInstructions;
+	let lectureGenerationModel = data.assistant?.lecture_generation_model ?? '';
+	let lectureGeminiModel =
+		data.assistant?.lecture_gemini_model ?? data.geminiModels?.default_model.id ?? '';
+	$: generationModels = data.models.filter(
+		(model) =>
+			model.type === 'chat' &&
+			model.supports_next_gen_assistants &&
+			model.is_available !== false &&
+			!model.hide_in_model_selector
+	);
+	$: selectedModelName = modelNameDict[selectedModel] || selectedModel;
 	let selectedModelRecord: api.AssistantModel | undefined;
 	$: selectedModelRecord = data.models.find((model) => model.id === selectedModel);
 	$: selectedModelUnavailable = !selectedModelRecord || selectedModelRecord.is_available === false;
@@ -2993,7 +3011,7 @@
 		reasoningEffortLevels.length > 0 &&
 		!reasoningEffortLevels.includes(reasoningEffortValue)
 	) {
-		reasoningEffortValue = reasoningEffortLevels[0];
+		reasoningEffortValue = getEffectiveReasoningEffort(reasoningEffortValue, reasoningEffortLevels);
 	}
 	let verbosityValue: number;
 	$: if (
@@ -3049,19 +3067,39 @@
 					normalizeNewlines((newValue as string | undefined) || '') !==
 					((oldValue as string) || '');
 				break;
+			case 'lecture_check_instructions':
+				dirty =
+					isLectureMode &&
+					normalizeNewlines((newValue as string | null) ?? defaultCheckInstructions) !==
+						normalizeNewlines(original?.lecture_check_instructions ?? defaultCheckInstructions);
+				break;
 			case 'instructions':
 				dirty =
 					normalizeNewlines((newValue as string | undefined) || '') !==
 					((oldValue as string) || '');
 				break;
+			case 'lecture_generation_model':
+			case 'lecture_gemini_model':
+				dirty = (newValue || null) !== (oldValue || null);
+				break;
 			case 'model':
 				dirty = newValue !== oldValue;
 				break;
 			case 'temperature':
-				dirty = newValue !== oldValue;
+				dirty =
+					newValue !==
+					getEffectiveTemperature(
+						original?.temperature,
+						supportsTemperatureForCurrentReasoning,
+						interactionMode === 'voice' ? defaultAudioTemperature : defaultChatTemperature
+					);
 				break;
 			case 'reasoning_effort':
-				dirty = newValue !== oldValue;
+				dirty =
+					newValue !==
+					(supportsReasoning
+						? getEffectiveReasoningEffort(original?.reasoning_effort, reasoningEffortLevels)
+						: null);
 				break;
 			case 'realtime_eagerness':
 				dirty =
@@ -3136,22 +3174,13 @@
 				dirty = newValue === undefined ? false : newValue !== !!oldValue;
 				break;
 			case 'use_latex':
-				dirty =
-					newValue === undefined
-						? false
-						: (preventEdits ? !!assistant?.use_latex : newValue) !== oldValue;
-				break;
 			case 'use_mermaid':
-				dirty =
-					newValue === undefined
-						? false
-						: (preventEdits ? !!assistant?.use_mermaid : newValue) !== oldValue;
-				break;
 			case 'use_svg':
 				dirty =
-					newValue === undefined
-						? false
-						: (preventEdits ? !!assistant?.use_svg : newValue) !== oldValue;
+					interactionMode !== 'voice' &&
+					!preventEdits &&
+					newValue !== undefined &&
+					newValue !== !!oldValue;
 				break;
 			case 'use_image_descriptions':
 				dirty = newValue === undefined ? false : newValue !== !!oldValue;
@@ -3198,6 +3227,9 @@
 					'notes',
 					'interaction_mode',
 					'model',
+					'lecture_check_instructions',
+					'lecture_generation_model',
+					'lecture_gemini_model',
 					'published',
 					'use_latex',
 					'use_mermaid',
@@ -3221,7 +3253,7 @@
 					'realtime_transcription_model',
 					'elevenlabs_config'
 				]
-			: ['name', 'description', 'instructions'];
+			: ['name', 'description', 'instructions', 'lecture_check_instructions'];
 		if (
 			data.isCreating &&
 			isLectureMode &&
@@ -3418,11 +3450,12 @@
 			description: preventEdits ? assistant?.description || '' : normalizeNewlines(description),
 			instructions: preventEdits ? assistant?.instructions || '' : normalizeNewlines(instructions),
 			notes: preventEdits ? assistant?.notes || '' : normalizeNewlines(notes),
-			model: isLectureMode
-				? data.isCreating
-					? selectedModel
-					: assistant?.model || selectedModel
-				: selectedModel,
+			model: selectedModel,
+			lecture_check_instructions: isLectureMode
+				? normalizeNewlines(lectureCheckInstructions)
+				: undefined,
+			lecture_generation_model: isLectureSlideMode ? lectureGenerationModel || null : undefined,
+			lecture_gemini_model: isLectureVideoMode ? lectureGeminiModel.trim() || null : undefined,
 			tools,
 			code_interpreter_file_ids:
 				includeTooling &&
@@ -3438,21 +3471,9 @@
 				fileSearchToolSelect
 					? $selectedFileSearchFiles
 					: [],
-			temperature: isLectureMode
-				? (assistant?.temperature ?? null)
-				: supportsTemperatureForCurrentReasoning
-					? temperatureValue
-					: null,
-			reasoning_effort: isLectureMode
-				? (assistant?.reasoning_effort ?? null)
-				: supportsReasoning
-					? reasoningEffortValue
-					: null,
-			verbosity: isLectureMode
-				? (assistant?.verbosity ?? (data.isCreating && supportsVerbosity ? verbosityValue : null))
-				: supportsVerbosity
-					? verbosityValue
-					: null,
+			temperature: supportsTemperatureForCurrentReasoning ? temperatureValue : null,
+			reasoning_effort: supportsReasoning ? reasoningEffortValue : null,
+			verbosity: supportsVerbosity ? verbosityValue : null,
 			realtime_eagerness:
 				interactionMode === 'voice'
 					? realtimeEagernessValue
@@ -3536,9 +3557,9 @@
 			video_description_duration_ms: isLectureVideoMode ? videoDescriptionDurationMs : undefined,
 			overwrite_manifest: isLectureVideoMode ? overwriteManifest : undefined,
 			published: body.published?.toString() === 'on',
-			use_latex: isLectureMode ? true : body.use_latex?.toString() === 'on',
-			use_mermaid: isLectureMode ? true : body.use_mermaid?.toString() === 'on',
-			use_svg: isLectureMode ? true : body.use_svg?.toString() === 'on',
+			use_latex: isLectureMode ? true : interactionMode === 'chat' && useLatex,
+			use_mermaid: isLectureMode ? true : interactionMode === 'chat' && useMermaid,
+			use_svg: isLectureMode ? true : interactionMode === 'chat' && useSvg,
 			use_image_descriptions: isLectureMode
 				? (assistant?.use_image_descriptions ?? false)
 				: isUsingClassicAssistantVersion && body.use_image_descriptions?.toString() === 'on',
@@ -4380,9 +4401,9 @@
 
 		const result = await api.previewAssistantInstructions(fetch, data.class.id, {
 			instructions,
-			use_latex: isLectureMode ? true : useLatex,
-			use_mermaid: isLectureMode ? true : useMermaid,
-			use_svg: isLectureMode ? true : useSvg,
+			use_latex: isLectureMode ? true : interactionMode === 'chat' && useLatex,
+			use_mermaid: isLectureMode ? true : interactionMode === 'chat' && useMermaid,
+			use_svg: isLectureMode ? true : interactionMode === 'chat' && useSvg,
 			disable_prompt_randomization: disablePromptRandomization,
 			interaction_mode: interactionMode
 		});
@@ -5869,194 +5890,194 @@
 				>
 			{/if}
 		</div>
-		{#if !isLectureMode}
-			<div class="mb-4">
-				<div class="flex flex-row flex-wrap items-center gap-2">
-					<Label for="model" class="mb-0">Model</Label>
-					{#if showNewerModelsAvailableBadge}
-						<DropdownBadge
-							extraClasses="flex max-h-fit max-w-fit shrink-0 flex-row items-center gap-x-2 rounded-lg border border-blue-300 bg-gradient-to-b from-blue-50 to-blue-100 px-2 py-0 text-xs text-blue-800 normal-case"
-							><span slot="name">Newer models available</span></DropdownBadge
-						>
-					{/if}
-				</div>
-				<Helper class="pb-1"
-					>Select the model to use for this assistant. You can update your model selection at any
-					time. Auto-updating models move to the newest release in that model family for you and are
-					recommended for most users. Fixed versions stay on one specific release until you change
-					them. See <a
-						href="https://platform.openai.com/docs/models"
-						rel="noopener noreferrer"
-						target="_blank"
-						class="underline">OpenAI's Documentation</a
-					> for detailed descriptions of model capabilities.</Helper
+		<div class="mb-4">
+			<div class="flex flex-row flex-wrap items-center gap-2">
+				<Label for="model" class="mb-0"
+					>{isLectureMode
+						? `Chat Model (${selectedModelRecord?.name || selectedModel})`
+						: 'Model'}</Label
 				>
-				{#if selectedModelUnavailable}
-					<div
-						role="alert"
-						class="mb-2 flex flex-row items-center gap-4 rounded-lg border border-red-400 bg-gradient-to-b from-red-50 to-red-100 p-4 py-2 text-red-800"
+				{#if showNewerModelsAvailableBadge}
+					<DropdownBadge
+						extraClasses="flex max-h-fit max-w-fit shrink-0 flex-row items-center gap-x-2 rounded-lg border border-blue-300 bg-gradient-to-b from-blue-50 to-blue-100 px-2 py-0 text-xs text-blue-800 normal-case"
+						><span slot="name">Newer models available</span></DropdownBadge
 					>
-						<ExclamationCircleOutline class="h-8 w-8 text-red-800" strokeWidth="2" />
-						<div class="flex flex-col">
-							<span class="text-sm font-semibold">Your selected model is no longer available</span>
-							<span class="text-xs">
-								Your AI provider no longer serves <span class="font-semibold"
-									>{selectedModelRecord?.name ?? selectedModel}</span
-								>. This assistant cannot respond using this model.
-								<span class="font-semibold"
-									>Select an available model below and save your changes to restore this assistant.</span
-								>
-							</span>
-						</div>
-					</div>
-				{:else if selectedModelDeprecated}
-					<div
-						class="mb-2 flex flex-row items-center gap-4 rounded-lg border border-amber-400 bg-gradient-to-b from-amber-50 to-amber-100 p-4 py-2 text-amber-800"
-					>
-						<ArchiveOutline class="h-8 w-8 text-amber-800" strokeWidth="1.5" />
-						<div class="flex flex-col">
-							<span class="text-sm font-semibold">Legacy Model</span>
-							<span class="text-xs"
-								>This model is no longer available for new assistants on PingPong. You can continue
-								using it with this assistant, but you won't be able to switch back after saving a
-								new model selection. <span class="font-semibold"
-									>We recommend upgrading to one of the recommended models for the best experience.</span
-								></span
-							>
-						</div>
-					</div>
-				{/if}
-				{#if supportsVision && effectiveVisionSupportOverride === false}
-					<div
-						class="mb-2 flex flex-row items-center gap-4 rounded-lg border border-amber-400 bg-gradient-to-b from-amber-50 to-amber-100 p-4 py-2 text-amber-800"
-					>
-						<div class="relative flex h-8 w-12 items-center justify-center">
-							<BanOutline class="absolute z-10 h-12 w-12 text-amber-600" strokeWidth="1.5" />
-							<FileImageOutline class="h-8 w-8 text-stone-400" strokeWidth="1" />
-						</div>
-						<div class="flex flex-col">
-							<span class="text-sm font-semibold"
-								>Vision capabilities are currently unavailable</span
-							>
-							<span class="text-xs"
-								>Your AI Provider doesn't support Vision capabilities for this model. We are working
-								on adding Vision support. You can still use supported image files with Code
-								Interpreter.</span
-							>
-						</div>
-					</div>
-				{/if}
-				<div class="flex flex-row gap-2">
-					{#key selectedModel}
-						<DropdownContainer
-							footer
-							placeholder={selectedModelName || 'Select a model...'}
-							optionNodes={modelNodes}
-							optionHeaders={modelHeaders}
-							disabled={preventEdits}
-							selectedOptionScrollAlign="keep-visible"
-							topOverflowLabel="More models above"
-							bind:selectedOption={selectedModel}
-							bind:dropdownOpen
-						>
-							<DropdownHeader
-								order={1}
-								name="latest-models"
-								colorClasses="from-orange-dark to-orange"
-								topHeader>Auto-updating models (same model family only)</DropdownHeader
-							>
-							<ModelDropdownOptions
-								modelOptions={latestModelOptions}
-								{selectedModel}
-								{updateSelectedModel}
-								headerClass="latest-models"
-								bind:modelNodes
-								bind:modelHeaders
-							/>
-							{#if versionedModelOptions.length > 0}
-								<DropdownHeader
-									order={2}
-									name="versioned-models"
-									colorClasses="from-blue-dark-40 to-blue-dark-30">Fixed Versions</DropdownHeader
-								>
-								<ModelDropdownOptions
-									modelOptions={versionedModelOptions}
-									{selectedModel}
-									{updateSelectedModel}
-									headerClass="versioned-models"
-									bind:modelNodes
-									bind:modelHeaders
-									smallNameText
-								/>
-							{/if}
-							<div slot="footer">
-								<DropdownFooter
-									colorClasses="from-gray-800 to-gray-600"
-									hoverable
-									hoverColorClasses="hover:from-gray-900 hover:to-gray-700"
-									link="https://platform.openai.com/docs/models"
-									><div class="flex flex-row justify-between">
-										<div class="flex flex-row gap-2">
-											<QuestionCircleSolid /> Unsure which model to choose? Check out OpenAI's documentation
-										</div>
-										<ArrowUpRightFromSquareOutline />
-									</div></DropdownFooter
-								>
-							</div>
-						</DropdownContainer>
-					{/key}
-					{#if allowVisionUpload}
-						<Badge
-							class="flex flex-row items-center gap-x-2 rounded-lg border px-2 py-0.5 text-xs normal-case {finalVisionSupport
-								? 'border-green-400 bg-gradient-to-b from-emerald-100 to-emerald-200 text-green-800'
-								: 'border-gray-100 bg-gray-50 text-gray-600'}"
-							>{#if finalVisionSupport}<ImageOutline size="sm" />{:else}<CloseOutline
-									size="sm"
-								/>{/if}
-							<div class="flex flex-col">
-								<div>{finalVisionSupport ? 'Vision' : 'No Vision'}</div>
-								<div>capabilities</div>
-							</div></Badge
-						>
-					{/if}
-				</div>
-				{#if supportsReasoning}
-					<div class="mt-4 flex items-start justify-between gap-6">
-						<div>
-							<Label for="reasoning-effort">Reasoning effort</Label>
-							<Helper class="pb-1"
-								>Select your desired reasoning effort, which gives the model guidance on how much
-								time it should spend "reasoning" before creating a response to the prompt. {#if reasoningEffortLabels.length === 1}This
-									model supports only <span class="font-mono">{reasoningEffortLabels[0]}</span>
-									reasoning effort.{:else}You can specify one of
-									{#each reasoningEffortLabels as label, idx (label)}
-										<span class="font-mono">{label}</span>{idx < reasoningEffortLabels.length - 1
-											? ', '
-											: ''}
-									{/each} for this setting, where <span class="font-mono">low</span> will favor
-									speed, and <span class="font-mono">high</span> will favor more complete reasoning
-									at the cost of slower responses. The default value is
-									<span class="font-mono">{defaultReasoningLabel}</span>. Set reasoning effort to
-									<span class="font-mono">none</span> for the non-thinking version of this model.{/if}
-								{#if supportsTemperatureWithReasoningNone}Temperature controls become available only
-									when reasoning effort is set to <span class="font-mono">none</span>.{/if}</Helper
-							>
-						</div>
-						<select
-							id="reasoning-effort"
-							name="reasoning-effort"
-							class="block w-40 shrink-0 rounded-lg border border-gray-300 bg-gray-50 p-2.5 text-sm text-gray-900 focus:border-blue-500 focus:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
-							bind:value={reasoningEffortValue}
-							disabled={preventEdits || reasoningEffortLevels.length === 1}
-						>
-							{#each reasoningEffortLevels as level (level)}
-								<option value={level}>{getReasoningEffortLabel(level)}</option>
-							{/each}
-						</select>
-					</div>
 				{/if}
 			</div>
-		{/if}
+			<Helper class="pb-1"
+				>Select the model to use for this assistant. You can update your model selection at any
+				time. Auto-updating models move to the newest release in that model family for you and are
+				recommended for most users. Fixed versions stay on one specific release until you change
+				them. See <a
+					href="https://platform.openai.com/docs/models"
+					rel="noopener noreferrer"
+					target="_blank"
+					class="underline">OpenAI's Documentation</a
+				> for detailed descriptions of model capabilities.</Helper
+			>
+			{#if selectedModelUnavailable}
+				<div
+					role="alert"
+					class="mb-2 flex flex-row items-center gap-4 rounded-lg border border-red-400 bg-gradient-to-b from-red-50 to-red-100 p-4 py-2 text-red-800"
+				>
+					<ExclamationCircleOutline class="h-8 w-8 text-red-800" strokeWidth="2" />
+					<div class="flex flex-col">
+						<span class="text-sm font-semibold">Your selected model is no longer available</span>
+						<span class="text-xs">
+							Your AI provider no longer serves <span class="font-semibold"
+								>{selectedModelRecord?.name ?? selectedModel}</span
+							>. This assistant cannot respond using this model.
+							<span class="font-semibold"
+								>Select an available model below and save your changes to restore this assistant.</span
+							>
+						</span>
+					</div>
+				</div>
+			{:else if selectedModelDeprecated}
+				<div
+					class="mb-2 flex flex-row items-center gap-4 rounded-lg border border-amber-400 bg-gradient-to-b from-amber-50 to-amber-100 p-4 py-2 text-amber-800"
+				>
+					<ArchiveOutline class="h-8 w-8 text-amber-800" strokeWidth="1.5" />
+					<div class="flex flex-col">
+						<span class="text-sm font-semibold">Legacy Model</span>
+						<span class="text-xs"
+							>This model is no longer available for new assistants on PingPong. You can continue
+							using it with this assistant, but you won't be able to switch back after saving a new
+							model selection. <span class="font-semibold"
+								>We recommend upgrading to one of the recommended models for the best experience.</span
+							></span
+						>
+					</div>
+				</div>
+			{/if}
+			{#if supportsVision && effectiveVisionSupportOverride === false}
+				<div
+					class="mb-2 flex flex-row items-center gap-4 rounded-lg border border-amber-400 bg-gradient-to-b from-amber-50 to-amber-100 p-4 py-2 text-amber-800"
+				>
+					<div class="relative flex h-8 w-12 items-center justify-center">
+						<BanOutline class="absolute z-10 h-12 w-12 text-amber-600" strokeWidth="1.5" />
+						<FileImageOutline class="h-8 w-8 text-stone-400" strokeWidth="1" />
+					</div>
+					<div class="flex flex-col">
+						<span class="text-sm font-semibold">Vision capabilities are currently unavailable</span>
+						<span class="text-xs"
+							>Your AI Provider doesn't support Vision capabilities for this model. We are working
+							on adding Vision support. You can still use supported image files with Code
+							Interpreter.</span
+						>
+					</div>
+				</div>
+			{/if}
+			<div class="flex flex-row gap-2">
+				{#key selectedModel}
+					<DropdownContainer
+						footer
+						placeholder={selectedModelName || 'Select a model...'}
+						optionNodes={modelNodes}
+						optionHeaders={modelHeaders}
+						disabled={preventEdits}
+						selectedOptionScrollAlign="keep-visible"
+						topOverflowLabel="More models above"
+						bind:selectedOption={selectedModel}
+						bind:dropdownOpen
+					>
+						<DropdownHeader
+							order={1}
+							name="latest-models"
+							colorClasses="from-orange-dark to-orange"
+							topHeader>Auto-updating models (same model family only)</DropdownHeader
+						>
+						<ModelDropdownOptions
+							modelOptions={latestModelOptions}
+							{selectedModel}
+							{updateSelectedModel}
+							headerClass="latest-models"
+							bind:modelNodes
+							bind:modelHeaders
+						/>
+						{#if versionedModelOptions.length > 0}
+							<DropdownHeader
+								order={2}
+								name="versioned-models"
+								colorClasses="from-blue-dark-40 to-blue-dark-30">Fixed Versions</DropdownHeader
+							>
+							<ModelDropdownOptions
+								modelOptions={versionedModelOptions}
+								{selectedModel}
+								{updateSelectedModel}
+								headerClass="versioned-models"
+								bind:modelNodes
+								bind:modelHeaders
+								smallNameText
+							/>
+						{/if}
+						<div slot="footer">
+							<DropdownFooter
+								colorClasses="from-gray-800 to-gray-600"
+								hoverable
+								hoverColorClasses="hover:from-gray-900 hover:to-gray-700"
+								link="https://platform.openai.com/docs/models"
+								><div class="flex flex-row justify-between">
+									<div class="flex flex-row gap-2">
+										<QuestionCircleSolid /> Unsure which model to choose? Check out OpenAI's documentation
+									</div>
+									<ArrowUpRightFromSquareOutline />
+								</div></DropdownFooter
+							>
+						</div>
+					</DropdownContainer>
+				{/key}
+				{#if allowVisionUpload}
+					<Badge
+						class="flex flex-row items-center gap-x-2 rounded-lg border px-2 py-0.5 text-xs normal-case {finalVisionSupport
+							? 'border-green-400 bg-gradient-to-b from-emerald-100 to-emerald-200 text-green-800'
+							: 'border-gray-100 bg-gray-50 text-gray-600'}"
+						>{#if finalVisionSupport}<ImageOutline size="sm" />{:else}<CloseOutline
+								size="sm"
+							/>{/if}
+						<div class="flex flex-col">
+							<div>{finalVisionSupport ? 'Vision' : 'No Vision'}</div>
+							<div>capabilities</div>
+						</div></Badge
+					>
+				{/if}
+			</div>
+			{#if supportsReasoning}
+				<div class="mt-4 flex items-start justify-between gap-6">
+					<div>
+						<Label for="reasoning-effort">Reasoning effort</Label>
+						<Helper class="pb-1"
+							>Select your desired reasoning effort, which gives the model guidance on how much time
+							it should spend "reasoning" before creating a response to the prompt. {#if reasoningEffortLabels.length === 1}This
+								model supports only <span class="font-mono">{reasoningEffortLabels[0]}</span>
+								reasoning effort.{:else}You can specify one of
+								{#each reasoningEffortLabels as label, idx (label)}
+									<span class="font-mono">{label}</span>{idx < reasoningEffortLabels.length - 1
+										? ', '
+										: ''}
+								{/each} for this setting, where <span class="font-mono">low</span> will favor speed,
+								and <span class="font-mono">high</span> will favor more complete reasoning at the
+								cost of slower responses. The default value is
+								<span class="font-mono">{defaultReasoningLabel}</span>. Set reasoning effort to
+								<span class="font-mono">none</span> for the non-thinking version of this model.{/if}
+							{#if supportsTemperatureWithReasoningNone}Temperature controls become available only
+								when reasoning effort is set to <span class="font-mono">none</span>.{/if}</Helper
+						>
+					</div>
+					<select
+						id="reasoning-effort"
+						name="reasoning-effort"
+						class="block w-40 shrink-0 rounded-lg border border-gray-300 bg-gray-50 p-2.5 text-sm text-gray-900 focus:border-blue-500 focus:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
+						bind:value={reasoningEffortValue}
+						disabled={preventEdits || reasoningEffortLevels.length === 1}
+					>
+						{#each reasoningEffortLevels as level (level)}
+							<option value={level}>{getReasoningEffortLabel(level)}</option>
+						{/each}
+					</select>
+				</div>
+			{/if}
+		</div>
 
 		<div class="col-span-2 mb-4">
 			<Label for="description">Description</Label>
@@ -6071,6 +6092,7 @@
 				disabled={preventEdits}
 			/>
 		</div>
+
 		{#if isLectureMode}
 			{#if isLectureVideoMode}
 				<div class="col-span-2 mb-4">
@@ -6999,6 +7021,65 @@
 						</div></span
 					>
 					<div class="flex flex-col gap-4 px-1">
+						{#if isLectureSlideMode}
+							<div>
+								<Label for="lecture-generation-model">Material Creation Model</Label>
+								<Helper class="pb-1"
+									>Select the model used to create slide narration and questions.</Helper
+								>
+								<select
+									id="lecture-generation-model"
+									bind:value={lectureGenerationModel}
+									disabled={preventEdits}
+									class="block w-full rounded-lg border border-gray-300 bg-gray-50 p-2.5 text-sm text-gray-900 disabled:cursor-not-allowed disabled:opacity-60"
+								>
+									<option value=""
+										>Use Chat Model ({selectedModelRecord?.name || selectedModel})</option
+									>
+									{#if lectureGenerationModel && !generationModels.some((model) => model.id === lectureGenerationModel)}
+										<option value={lectureGenerationModel}
+											>{lectureGenerationModel} (Saved Model)</option
+										>
+									{/if}
+									{#each generationModels as model (model.id)}
+										<option value={model.id}>{modelNameDict[model.id]}</option>
+									{/each}
+								</select>
+							</div>
+						{:else if isLectureVideoMode}
+							{@const effectiveGeminiModelName =
+								data.geminiModels?.models.find((model) => model.id === lectureGeminiModel)?.name ||
+								(lectureGeminiModel === data.geminiModels?.default_model.id
+									? data.geminiModels.default_model.name
+									: null) ||
+								'Saved Model'}
+							<div>
+								<Label for="lecture-gemini-model">Material Creation Model</Label>
+								<Helper class="pb-1"
+									>Select the Google model used to analyze the video and create questions.</Helper
+								>
+								<select
+									id="lecture-gemini-model"
+									bind:value={lectureGeminiModel}
+									disabled={preventEdits}
+									class="block w-full rounded-lg border border-gray-300 bg-gray-50 p-2.5 text-sm text-gray-900 disabled:cursor-not-allowed disabled:opacity-60"
+								>
+									{#if !data.geminiModels?.models.some((model) => model.id === lectureGeminiModel)}
+										<option value={lectureGeminiModel}>{effectiveGeminiModelName}</option>
+									{/if}
+									{#each data.geminiModels?.models || [] as model (model.id)}
+										<option value={model.id}>{model.name}</option>
+									{/each}
+								</select>
+								{#if data.geminiModelsLoadError}
+									<Helper class="mt-1" color="red">{data.geminiModelsLoadError}</Helper>
+								{:else if data.geminiModels?.models.length === 0}
+									<Helper class="mt-1"
+										>No supported Google models are available. Check the group's Gemini credential.</Helper
+									>
+								{/if}
+							</div>
+						{/if}
 						{#if isLectureMode}
 							{@const haveInstructionsChanged =
 								normalizeNewlines(instructions) !==
@@ -7058,6 +7139,38 @@
 									name="instructions"
 									rows={6}
 									bind:value={instructions}
+									disabled={preventEdits}
+								/>
+							</div>
+
+							<div class="col-span-2 mb-1">
+								<div class="flex items-end justify-between gap-3">
+									<div>
+										<Label for="lecture-check-instructions"
+											>Open-Ended Answer Evaluation Instructions</Label
+										>
+										<Helper class="pb-1"
+											>Used to evaluate and guide students through open-ended learning checks.</Helper
+										>
+									</div>
+									<button
+										type="button"
+										class="shrink-0 pb-1 text-xs text-blue-800 hover:underline disabled:cursor-not-allowed disabled:text-gray-400 disabled:no-underline"
+										disabled={preventEdits ||
+											lectureCheckInstructions === defaultCheckInstructions ||
+											!defaultCheckInstructions}
+										onclick={() => {
+											lectureCheckInstructions = defaultCheckInstructions;
+										}}>Switch to latest default</button
+									>
+								</div>
+								<Textarea
+									id="lecture-check-instructions"
+									minlength={3}
+									required
+									rows={8}
+									maxlength={20000}
+									bind:value={lectureCheckInstructions}
 									disabled={preventEdits}
 								/>
 							</div>
@@ -7841,182 +7954,182 @@
 							{/if}
 						{/if}
 
-						{#if !isLectureMode}
-							{#if supportsTemperatureForCurrentReasoning && !isLectureMode}
-								<div class="flex flex-col">
-									<Label for="temperature">Temperature</Label>
-									{#if interactionMode === 'voice'}
-										<Helper class="pb-1"
-											>Select the model's "temperature," a setting from 0.6 to 1.2 that controls how
-											creative or predictable the assistant's responses are. For audio models, a
-											temperature of 0.8 is highly recommended for best performance. You can change
-											this setting anytime.</Helper
-										>
-									{:else}
-										<Helper class="pb-1"
-											>Select the model's "temperature," a setting from 0 to 2 that controls how
-											creative or predictable the assistant's responses are. For reliable, focused
-											answers, choose a temperature closer to 0.2. For more varied or creative
-											responses, try a setting closer to 1. Avoid setting the temperature much above
-											1 unless you need very experimental responses, as it may lead to less
-											predictable and more random answers.</Helper
-										>
-									{/if}
-								</div>
-								<div class="mt-2 flex flex-row justify-between">
-									<div class="flex flex-row items-center gap-1 text-sm">
-										<ArrowLeftOutline />
-										<div>More focused</div>
-									</div>
-									<Badge
-										class="flex shrink-0 flex-row items-center gap-x-2 rounded-md border border-sky-400 bg-gradient-to-b from-sky-100 to-sky-200 px-2 py-0.5 text-xs text-sky-800 normal-case"
-									>
-										<div>Temperature: {temperatureValue.toFixed(1)}</div>
-									</Badge>
-									<div class="flex flex-row items-center gap-1 text-sm">
-										<div>More creative</div>
-										<ArrowRightOutline />
-									</div>
-								</div>
-								{#if interactionMode !== 'voice'}
-									<Range
-										id="temperature"
-										name="temperature"
-										min={minChatTemperature}
-										max={maxChatTemperature}
-										bind:value={temperatureValue}
-										step="0.1"
-										disabled={preventEdits}
-										onchange={checkForLargeTemperatureChat}
-										class="appearance-auto"
-									/>
-									<div class="mx-2 grid grid-cols-20 gap-0">
-										<button
-											type="button"
-											class="col-span-4 ml-1 flex flex-col items-center justify-start border-0 bg-transparent"
-											onclick={() => {
-												temperatureValue = defaultChatTemperature;
-												_temperatureValue = defaultChatTemperature;
-											}}
-											onkeydown={(e) => {
-												if (e.key === 'Enter' || e.key === ' ') {
-													temperatureValue = defaultChatTemperature;
-													_temperatureValue = defaultChatTemperature;
-												}
-											}}
-										>
-											<HeartSolid class="max-w-fit text-gray-500" />
-											<div class="mx-10 mt-1 text-center text-sm text-wrap">
-												Default (recommended)
-											</div>
-										</button>
-										<button
-											type="button"
-											class="col-span-4 col-start-6 flex flex-col items-center justify-start border-0 bg-transparent"
-											onclick={() => {
-												temperatureValue = 0.7;
-												_temperatureValue = 0.7;
-											}}
-											onkeydown={(e) => {
-												if (e.key === 'Enter' || e.key === ' ') {
-													temperatureValue = 0.7;
-													_temperatureValue = 0.7;
-												}
-											}}
-										>
-											<LightbulbSolid class="max-w-fit text-gray-500" />
-											<div class="mx-10 mt-1 text-center text-sm text-wrap">
-												Great for creative tasks and brainstorming
-											</div>
-										</button>
-										<div
-											class="col-span-9 col-start-12 -mr-2 -ml-2 h-6 h-fit rounded-md border border-amber-400 bg-gradient-to-b from-amber-100 to-amber-200 py-1 text-center text-sm text-amber-800"
-										>
-											Output may be unpredictable
-										</div>
-									</div>
-								{:else}
-									<Range
-										id="temperature"
-										name="temperature"
-										min={minAudioTemperature}
-										max={maxAudioTemperature}
-										bind:value={temperatureValue}
-										step="0.1"
-										disabled={preventEdits}
-										onchange={checkForLargeTemperatureAudio}
-										class="appearance-auto"
-									/>
-									<div class="mx-2 grid grid-cols-6 gap-0">
-										<button
-											type="button"
-											class="col-span-4 ml-1 flex flex-col items-center justify-start border-0 bg-transparent"
-											onclick={() => {
-												temperatureValue = defaultAudioTemperature;
-												_temperatureValue = defaultAudioTemperature;
-											}}
-											onkeydown={(e) => {
-												if (e.key === 'Enter' || e.key === ' ') {
-													temperatureValue = defaultAudioTemperature;
-													_temperatureValue = defaultAudioTemperature;
-												}
-											}}
-										>
-											<HeartSolid class="max-w-fit text-gray-500" />
-											<div class="mx-10 mt-1 text-center text-sm text-wrap">
-												Default (highly recommended)
-											</div>
-										</button>
-									</div>
-								{/if}
-							{/if}
-							{#if supportsVerbosity}
-								<div class="flex flex-col">
-									<Label for="verbosity">Verbosity</Label>
+						{#if supportsTemperatureForCurrentReasoning}
+							<div class="flex flex-col">
+								<Label for="temperature">Temperature</Label>
+								{#if interactionMode === 'voice'}
 									<Helper class="pb-1"
-										>Select your desired verbosity. Verbosity determines how many output tokens are
-										generated. Lowering the number of tokens reduces overall latency. While the
-										model's reasoning approach stays mostly the same, the model finds ways to answer
-										more concisely—which can either improve or diminish answer quality, depending on
-										your use case. Here are some scenarios for both ends of the verbosity spectrum:
-										<ol class="ml-7 list-disc">
-											<li class="my-1">
-												<span class="font-medium">High verbosity:</span> Use when you need the model to
-												provide thorough explanations of documents or perform extensive code refactoring.
-											</li>
-											<li class="my-1">
-												<span class="font-medium">Low verbosity:</span> Best for situations where you
-												want concise answers or simple code generation, such as SQL queries.
-											</li>
-										</ol>
-										Models before GPT-5 have used medium verbosity by default. With GPT-5, this option
-										is configurable as one of&nbsp;<span class="font-mono">high</span>,
-										<span class="font-mono">medium</span>, or <span class="font-mono">low</span>.
-										When generating code, <span class="font-mono">medium</span> and
-										<span class="font-mono">high</span>
-										verbosity levels yield longer, more structured code with inline explanations, while
-										<span class="font-mono">low</span>
-										verbosity produces shorter, more concise code with minimal commentary. The default
-										value is
-										<span class="font-mono">low</span>.</Helper
+										>Select the model's "temperature," a setting from 0.6 to 1.2 that controls how
+										creative or predictable the assistant's responses are. For audio models, a
+										temperature of 0.8 is highly recommended for best performance. You can change
+										this setting anytime.</Helper
 									>
+								{:else}
+									<Helper class="pb-1"
+										>Select the model's "temperature," a setting from 0 to 2 that controls how
+										creative or predictable the assistant's responses are. For reliable, focused
+										answers, choose a temperature closer to 0.2. For more varied or creative
+										responses, try a setting closer to 1. Avoid setting the temperature much above 1
+										unless you need very experimental responses, as it may lead to less predictable
+										and more random answers.</Helper
+									>
+								{/if}
+							</div>
+							<div class="mt-2 flex flex-row justify-between">
+								<div class="flex flex-row items-center gap-1 text-sm">
+									<ArrowLeftOutline />
+									<div>More focused</div>
 								</div>
+								<Badge
+									class="flex shrink-0 flex-row items-center gap-x-2 rounded-md border border-sky-400 bg-gradient-to-b from-sky-100 to-sky-200 px-2 py-0.5 text-xs text-sky-800 normal-case"
+								>
+									<div>Temperature: {temperatureValue.toFixed(1)}</div>
+								</Badge>
+								<div class="flex flex-row items-center gap-1 text-sm">
+									<div>More creative</div>
+									<ArrowRightOutline />
+								</div>
+							</div>
+							{#if interactionMode !== 'voice'}
 								<Range
-									id="verbosity"
-									name="verbosity"
-									min="0"
-									max="2"
-									bind:value={verbosityValue}
-									step="1"
+									id="temperature"
+									name="temperature"
+									min={minChatTemperature}
+									max={maxChatTemperature}
+									bind:value={temperatureValue}
+									step="0.1"
 									disabled={preventEdits}
+									onchange={checkForLargeTemperatureChat}
 									class="appearance-auto"
 								/>
-								<div class="mt-2 flex flex-row justify-between">
-									<p class="text-sm">low</p>
-									<p class="text-sm">medium</p>
-									<p class="text-sm">high</p>
+								<div class="mx-2 grid grid-cols-20 gap-0">
+									<button
+										type="button"
+										class="col-span-4 ml-1 flex flex-col items-center justify-start border-0 bg-transparent"
+										onclick={() => {
+											temperatureValue = defaultChatTemperature;
+											_temperatureValue = defaultChatTemperature;
+										}}
+										onkeydown={(e) => {
+											if (e.key === 'Enter' || e.key === ' ') {
+												temperatureValue = defaultChatTemperature;
+												_temperatureValue = defaultChatTemperature;
+											}
+										}}
+									>
+										<HeartSolid class="max-w-fit text-gray-500" />
+										<div class="mx-10 mt-1 text-center text-sm text-wrap">
+											Default (recommended)
+										</div>
+									</button>
+									<button
+										type="button"
+										class="col-span-4 col-start-6 flex flex-col items-center justify-start border-0 bg-transparent"
+										onclick={() => {
+											temperatureValue = 0.7;
+											_temperatureValue = 0.7;
+										}}
+										onkeydown={(e) => {
+											if (e.key === 'Enter' || e.key === ' ') {
+												temperatureValue = 0.7;
+												_temperatureValue = 0.7;
+											}
+										}}
+									>
+										<LightbulbSolid class="max-w-fit text-gray-500" />
+										<div class="mx-10 mt-1 text-center text-sm text-wrap">
+											Great for creative tasks and brainstorming
+										</div>
+									</button>
+									<div
+										class="col-span-9 col-start-12 -mr-2 -ml-2 h-6 h-fit rounded-md border border-amber-400 bg-gradient-to-b from-amber-100 to-amber-200 py-1 text-center text-sm text-amber-800"
+									>
+										Output may be unpredictable
+									</div>
+								</div>
+							{:else}
+								<Range
+									id="temperature"
+									name="temperature"
+									min={minAudioTemperature}
+									max={maxAudioTemperature}
+									bind:value={temperatureValue}
+									step="0.1"
+									disabled={preventEdits}
+									onchange={checkForLargeTemperatureAudio}
+									class="appearance-auto"
+								/>
+								<div class="mx-2 grid grid-cols-6 gap-0">
+									<button
+										type="button"
+										class="col-span-4 ml-1 flex flex-col items-center justify-start border-0 bg-transparent"
+										onclick={() => {
+											temperatureValue = defaultAudioTemperature;
+											_temperatureValue = defaultAudioTemperature;
+										}}
+										onkeydown={(e) => {
+											if (e.key === 'Enter' || e.key === ' ') {
+												temperatureValue = defaultAudioTemperature;
+												_temperatureValue = defaultAudioTemperature;
+											}
+										}}
+									>
+										<HeartSolid class="max-w-fit text-gray-500" />
+										<div class="mx-10 mt-1 text-center text-sm text-wrap">
+											Default (highly recommended)
+										</div>
+									</button>
 								</div>
 							{/if}
+						{/if}
+						{#if supportsVerbosity}
+							<div class="flex flex-col">
+								<Label for="verbosity">Verbosity</Label>
+								<Helper class="pb-1"
+									>Select your desired verbosity. Verbosity determines how many output tokens are
+									generated. Lowering the number of tokens reduces overall latency. While the
+									model's reasoning approach stays mostly the same, the model finds ways to answer
+									more concisely—which can either improve or diminish answer quality, depending on
+									your use case. Here are some scenarios for both ends of the verbosity spectrum:
+									<ol class="ml-7 list-disc">
+										<li class="my-1">
+											<span class="font-medium">High verbosity:</span> Use when you need the model to
+											provide thorough explanations of documents or perform extensive code refactoring.
+										</li>
+										<li class="my-1">
+											<span class="font-medium">Low verbosity:</span> Best for situations where you want
+											concise answers or simple code generation, such as SQL queries.
+										</li>
+									</ol>
+									Models before GPT-5 have used medium verbosity by default. With GPT-5, this option is
+									configurable as one of&nbsp;<span class="font-mono">high</span>,
+									<span class="font-mono">medium</span>, or <span class="font-mono">low</span>. When
+									generating code, <span class="font-mono">medium</span> and
+									<span class="font-mono">high</span>
+									verbosity levels yield longer, more structured code with inline explanations, while
+									<span class="font-mono">low</span>
+									verbosity produces shorter, more concise code with minimal commentary. The default value
+									is
+									<span class="font-mono">low</span>.</Helper
+								>
+							</div>
+							<Range
+								id="verbosity"
+								name="verbosity"
+								min="0"
+								max="2"
+								bind:value={verbosityValue}
+								step="1"
+								disabled={preventEdits}
+								class="appearance-auto"
+							/>
+							<div class="mt-2 flex flex-row justify-between">
+								<p class="text-sm">low</p>
+								<p class="text-sm">medium</p>
+								<p class="text-sm">high</p>
+							</div>
+						{/if}
+						{#if !isLectureMode}
 							<hr />
 							<div class="col-span-2 mb-1">
 								<Checkbox
