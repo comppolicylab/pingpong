@@ -2237,14 +2237,9 @@
 	$: initialTools = (assistant?.tools ? (JSON.parse(assistant.tools) as Tool[]) : defaultTools).map(
 		(t) => t.type
 	);
-	const autoUpdatingModelLabel = 'Auto-updating';
 	const fixedVersionModelLabel = 'Fixed version';
 	$: modelNameDict = data.models.reduce<{ [key: string]: string }>((acc, model) => {
-		acc[model.id] =
-			model.name +
-			(model.is_latest
-				? ` (${autoUpdatingModelLabel} when new ${model.name} version is available)`
-				: ` (${fixedVersionModelLabel})`);
+		acc[model.id] = model.name + (model.is_latest ? '' : ` (${fixedVersionModelLabel})`);
 		return acc;
 	}, {});
 	let forcedAssistantVersion: number | null = null;
@@ -2265,9 +2260,11 @@
 		highlight: model.highlight
 	});
 	const getModelReleaseFamily = (modelId: string) =>
-		modelId.match(/^(gpt-5(?:\.\d+)?)(?:-(?:sol|terra|luna|mini|nano))?$/)?.[1] ??
+		modelId.match(/^(gpt-[56](?:\.\d+)?)(?:-(?:astra|sol|terra|luna|mini|nano))?$/)?.[1] ??
 		modelId.match(/^(gpt-realtime-\d+(?:\.\d+)?)(?:-mini)?$/)?.[1] ??
 		modelId;
+	const getModelVariant = (modelId: string) =>
+		modelId.match(/^gpt-\d+(?:\.\d+)?-(astra|sol|terra|luna|mini|nano)(?:-|$)/)?.[1] ?? 'standard';
 	let allowSwitchingAssistantVersion = false;
 	let convertToNextGen: boolean | null = null;
 	$: canSwitchAssistantVersion =
@@ -2394,6 +2391,7 @@
 		!!selectedModelRecord &&
 		selectedModelGroupModels.some(
 			(model) =>
+				getModelVariant(model.id) === getModelVariant(selectedModelRecord.id) &&
 				getModelReleaseFamily(model.id) !== getModelReleaseFamily(selectedModelRecord.id) &&
 				model.sort_order < selectedModelRecord.sort_order
 		);
@@ -5911,9 +5909,7 @@
 			</div>
 			<Helper class="pb-1"
 				>Select the model to use for this assistant. You can update your model selection at any
-				time. Auto-updating models move to the newest release in that model family for you and are
-				recommended for most users. Fixed versions stay on one specific release until you change
-				them. See <a
+				time. See <a
 					href="https://platform.openai.com/docs/models"
 					rel="noopener noreferrer"
 					target="_blank"
@@ -5990,7 +5986,7 @@
 							order={1}
 							name="latest-models"
 							colorClasses="from-orange-dark to-orange"
-							topHeader>Auto-updating models (same model family only)</DropdownHeader
+							topHeader>Models</DropdownHeader
 						>
 						<ModelDropdownOptions
 							modelOptions={latestModelOptions}

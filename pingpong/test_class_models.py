@@ -15,12 +15,27 @@ class _AllowingAuthz:
         return [True]
 
 
-async def test_openai_class_models_include_latest_gpt_5_models(monkeypatch):
+async def test_openai_class_models_include_latest_gpt_models(monkeypatch):
     openai_client = openai.AsyncOpenAI(api_key="test-key")
     openai_client.models = SimpleNamespace(
         list=AsyncMock(
             return_value=SimpleNamespace(
                 data=[
+                    *[
+                        SimpleNamespace(
+                            id=model_id,
+                            created=0,
+                            created_at=0,
+                            owned_by="openai",
+                        )
+                        for model_id in [
+                            "gpt-6.2-astra",
+                            "gpt-6.2-sol",
+                            "gpt-6.1-sol",
+                            "gpt-6.1-terra",
+                            "gpt-6-astra",
+                        ]
+                    ],
                     SimpleNamespace(
                         id="gpt-5.5",
                         created=0,
@@ -92,6 +107,11 @@ async def test_openai_class_models_include_latest_gpt_5_models(monkeypatch):
     assert [
         model["id"] for model in response["models"] if model["id"] in provider_model_ids
     ] == [
+        "gpt-6.2-astra",
+        "gpt-6.2-sol",
+        "gpt-6.1-sol",
+        "gpt-6.1-terra",
+        "gpt-6-astra",
         "gpt-5.6-sol",
         "gpt-5.6-terra",
         "gpt-5.6-luna",
@@ -103,7 +123,7 @@ async def test_openai_class_models_include_latest_gpt_5_models(monkeypatch):
         for model in response["models"]
         if model["highlight"] and model["is_available"]
     ]
-    assert highlighted_models == ["gpt-5.6-terra"]
+    assert highlighted_models == ["gpt-6.1-terra"]
     reasoning_models = [
         model
         for model in response["models"]
@@ -112,8 +132,17 @@ async def test_openai_class_models_include_latest_gpt_5_models(monkeypatch):
     for model in reasoning_models:
         assert model["is_latest"] is True
         assert model["supports_next_gen_assistants"] is True
-        assert model["supports_none_reasoning_effort"] is True
-        assert model["supports_tools_with_none_reasoning_effort"] is True
+        supports_none = model["id"] not in {
+            "gpt-6.2-astra",
+            "gpt-6.2-sol",
+            "gpt-6.1-sol",
+            "gpt-6-astra",
+        }
+        assert model["supports_none_reasoning_effort"] is supports_none
+        assert model["supports_tools_with_none_reasoning_effort"] is supports_none
+        assert bool(model["hide_in_model_selector"]) is (
+            model["id"] in ai_models.HIDDEN_MODELS
+        )
         assert model["supports_verbosity"] is True
         assert model["supports_web_search"] is True
         assert model["supports_mcp_server"] is True
