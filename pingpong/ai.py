@@ -4090,7 +4090,9 @@ async def run_response(
                 tools.append(
                     CodeInterpreter(
                         container=CodeInterpreterContainerCodeInterpreterToolAuto(
-                            file_ids=code_interpreter_file_ids or [], type="auto"
+                            file_ids=code_interpreter_file_ids or [],
+                            type="auto",
+                            memory_limit="4g",
                         ),
                         type="code_interpreter",
                     )
