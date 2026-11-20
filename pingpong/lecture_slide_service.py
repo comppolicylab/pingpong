@@ -1255,7 +1255,7 @@ async def apply_lecture_slide_content_items(
             narration_generation_positions.add(position)
         if narration_text is not None:
             # A supplied script takes precedence over automatic narration for
-            # newly inserted images and GIFs.
+            # newly inserted images, GIFs, and muted videos.
             narration_generation_positions.discard(position)
         if page.user_notes != user_notes:
             page.user_notes = user_notes

@@ -3033,7 +3033,7 @@ async def test_update_slides_carries_pending_work_and_note_edits_after_reorder(
 @pytest.mark.asyncio
 @with_institution(11, "Test Institution")
 @pytest.mark.parametrize("has_audio", [True, False])
-async def test_muting_video_invalidates_original_audio_and_unmuting_clears_narration(
+async def test_video_narration_mode_switches_respect_audio_availability(
     db, institution, has_audio
 ):
     async with db.async_session() as session:
@@ -3103,7 +3103,10 @@ async def test_muting_video_invalidates_original_audio_and_unmuting_clears_narra
                     position=1,
                     content_kind=schemas.LectureSlideContentKind.VIDEO,
                     media_stored_object_id=media.id,
-                    narration_text="Original clip transcript.",
+                    video_muted=not has_audio,
+                    narration_text="Original clip transcript."
+                    if has_audio
+                    else "Previous narration.",
                     narration_id=narration.id,
                     start_offset_ms=1000,
                     end_offset_ms=6000,

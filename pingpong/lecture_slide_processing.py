@@ -187,8 +187,8 @@ DEFAULT_LECTURE_SLIDE_INSTRUCTIONS = DEFAULT_LECTURE_INSTRUCTIONS.safe_substitut
 DEFAULT_NARRATION_PROMPT = """You are the instructor giving a lecture from an ordered slide lesson that may include PDF slides, inserted images, GIFs, and video clips.
 
 Critical rules:
-- Use the visible content at each timeline position as the source of truth. PDF pages come from the deck; inserted images and GIFs are supplied separately.
-- When multiple labeled frames are provided for a GIF, treat them as chronological snapshots from one animated slide and write one narration item for that slide position.
+- Use the visible content at each timeline position as the source of truth. PDF pages come from the deck; inserted images, GIFs, and muted video frames are supplied separately.
+- When multiple labeled frames are provided for a GIF or muted video, treat them as chronological snapshots from one timeline item and write one narration item for that slide position.
 - Write narration as if you are speaking live to students while each slide is visible.
 - Teach the material on the slide; do not merely describe the slide's layout.
 - Stay grounded in what appears on the current slide and the necessary connective context from earlier slides.
@@ -3601,12 +3601,10 @@ async def _lecture_slide_media_input_images(
             schemas.LectureSlideContentKind.GIF,
             schemas.LectureSlideContentKind.VIDEO,
         }:
-            gif_frames = await asyncio.to_thread(
+            frames = await asyncio.to_thread(
                 _extract_gif_narration_frames, media_bytes, media.duration_ms
             )
-            for frame_index, (timestamp_ms, frame_bytes) in enumerate(
-                gif_frames, start=1
-            ):
+            for frame_index, (timestamp_ms, frame_bytes) in enumerate(frames, start=1):
                 encoded = base64.b64encode(frame_bytes).decode("ascii")
                 content.extend(
                     [
@@ -3614,7 +3612,7 @@ async def _lecture_slide_media_input_images(
                             "type": "input_text",
                             "text": (
                                 f"{media.content_kind.value.upper()} at slide_position {position} — frame "
-                                f"{frame_index} of {len(gif_frames)}, "
+                                f"{frame_index} of {len(frames)}, "
                                 f"t={timestamp_ms / 1000:.2f}s:"
                             ),
                         },
@@ -3742,10 +3740,12 @@ def _extract_gif_narration_frames(
     gif_bytes: bytes,
     duration_ms: int | None,
 ) -> list[tuple[int, bytes]]:
-    # ffmpeg detects the container from its contents, including inserted videos.
+    """Sample distinct frames from a GIF or video; ffmpeg detects the container."""
     ffmpeg_path = shutil.which("ffmpeg")
     if ffmpeg_path is None:
-        raise RuntimeError("ffmpeg is required for lecture slide GIF processing.")
+        raise RuntimeError(
+            "ffmpeg is required for lecture slide animated media processing."
+        )
     with tempfile.TemporaryDirectory(prefix="pingpong_ls_gif_") as temp_dir:
         input_path = Path(temp_dir) / "input.gif"
         input_path.write_bytes(gif_bytes)
@@ -3787,7 +3787,7 @@ def _extract_gif_narration_frames(
             kept_signatures.append(signature)
         if not kept_frames:
             raise RuntimeError(
-                "ffmpeg could not extract narration frames from the inserted GIF."
+                "ffmpeg could not extract narration frames from the inserted GIF or video."
             )
         return kept_frames
 

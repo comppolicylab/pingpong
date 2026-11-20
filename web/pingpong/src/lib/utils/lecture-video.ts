@@ -61,3 +61,16 @@ export function getLectureSlideDisplayOffsetMs(
 	}
 	return Math.max(page.start_offset_ms ?? 0, questionBoundaryMs - 1);
 }
+
+export function getLectureSlideVideoTimeSeconds(
+	offsetMs: number,
+	startOffsetMs: number,
+	endOffsetMs: number,
+	videoDuration: number
+): number {
+	// Hold the last frame when narration extends beyond the clip.
+	return Math.min(
+		videoDuration,
+		Math.max(0, Math.min(offsetMs - startOffsetMs, endOffsetMs - startOffsetMs) / 1000)
+	);
+}

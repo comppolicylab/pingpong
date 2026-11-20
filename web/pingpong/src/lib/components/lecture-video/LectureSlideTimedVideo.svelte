@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { getLectureSlideVideoTimeSeconds } from '$lib/utils/lecture-video';
 	let {
 		src,
 		onready = () => {},
@@ -34,9 +35,11 @@
 
 	$effect(() => {
 		if (!video) return;
-		const localTimeSeconds = Math.min(
-			videoDuration,
-			Math.max(0, Math.min(offsetMs - startOffsetMs, endOffsetMs - startOffsetMs) / 1000)
+		const localTimeSeconds = getLectureSlideVideoTimeSeconds(
+			offsetMs,
+			startOffsetMs,
+			endOffsetMs,
+			videoDuration
 		);
 		if (Math.abs(video.currentTime - localTimeSeconds) > 0.3) {
 			video.currentTime = localTimeSeconds;

@@ -5116,7 +5116,6 @@
 					{:else if selectedLectureSlidePage?.media_url}
 						<div class="relative flex h-full w-full items-center justify-center bg-black">
 							{#if selectedLectureSlidePage.content_kind === 'video'}
-								<!-- svelte-ignore a11y_media_has_caption -->
 								<video
 									src={selectedLectureSlidePage.media_url}
 									muted={selectedLectureSlidePage.video_muted ?? false}
