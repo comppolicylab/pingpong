@@ -64,10 +64,10 @@ ReleaseNotes = "https://github.com/comppolicylab/pingpong/releases"
 
 [dependency-groups]
 dev = [
-    "locust~=2.46.7",
+    "locust~=2.47.0",
     "pre-commit~=4.7.0",
-    "pytest~=9.1.1",
-    "pytest-asyncio~=1.4.0",
+    "pytest~=9.2.0",
+    "pytest-asyncio~=1.4.1",
     "pytest-xdist~=3.8.0",
 ]
 
