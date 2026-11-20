@@ -2259,7 +2259,7 @@ class CreateAssistant(BaseModel):
     notes: str | None = None
     interaction_mode: InteractionMode = InteractionMode.CHAT
     model: str = Field(..., min_length=2)
-    lecture_check_instructions: str | None = Field(None, max_length=20000)
+    lecture_check_instructions: str | None = Field(None, min_length=3, max_length=20000)
     lecture_generation_model: str | None = Field(None, min_length=2, max_length=200)
     lecture_gemini_model: str | None = Field(
         None, min_length=2, max_length=200, pattern=r"^gemini-[A-Za-z0-9._-]+$"
@@ -2418,7 +2418,7 @@ class UpdateAssistant(BaseModel):
     regenerate_audio_requested: bool | None = None
     overwrite_manifest: bool | None = None
     model: str | None = Field(None, min_length=2)
-    lecture_check_instructions: str | None = Field(None, max_length=20000)
+    lecture_check_instructions: str | None = Field(None, min_length=3, max_length=20000)
     lecture_generation_model: str | None = Field(None, min_length=2, max_length=200)
     lecture_gemini_model: str | None = Field(
         None, min_length=2, max_length=200, pattern=r"^gemini-[A-Za-z0-9._-]+$"

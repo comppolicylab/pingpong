@@ -14,7 +14,7 @@ from pingpong.testutil import with_authz, with_institution, with_user
 
 
 @pytest.mark.parametrize(
-    "custom", [None, "Accept a short explanation. Ask one hint at a time.", ""]
+    "custom", [None, "Accept a short explanation. Ask one hint at a time."]
 )
 async def test_check_instructions_replace_only_editable_passage(monkeypatch, custom):
     adapter = object()
@@ -109,3 +109,20 @@ async def test_evaluation_instructions_persist_without_regenerating_material(
         async with db.async_session() as session:
             saved = await session.get(models.Assistant, 1)
             assert saved.lecture_check_instructions == text
+
+
+@pytest.mark.parametrize("text", ["", "a", "ab"])
+def test_evaluation_instructions_use_the_chat_prompt_minimum(text):
+    from pydantic import ValidationError
+    from pingpong import schemas
+
+    with pytest.raises(ValidationError):
+        schemas.UpdateAssistant(lecture_check_instructions=text)
+    with pytest.raises(ValidationError):
+        schemas.CreateAssistant(
+            name="Lesson",
+            instructions="Chat prompt",
+            description="",
+            model="gpt-4o-mini",
+            lecture_check_instructions=text,
+        )

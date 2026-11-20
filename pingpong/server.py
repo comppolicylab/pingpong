@@ -12865,24 +12865,6 @@ async def delete_assistant_avatar(
     )
 
 
-def _lecture_material_model_changes(
-    asst: models.Assistant, req: schemas.UpdateAssistant
-) -> tuple[bool, bool]:
-    old_google = asst.lecture_gemini_model
-    new_google = req.lecture_gemini_model or old_google
-    old_generation = asst.lecture_generation_model or asst.model
-    new_generation = (
-        (
-            req.lecture_generation_model
-            if "lecture_generation_model" in req.model_fields_set
-            else asst.lecture_generation_model
-        )
-        or req.model
-        or asst.model
-    )
-    return new_google != old_google, new_generation != old_generation
-
-
 async def _validate_lecture_gemini_model(
     request: StateRequest, class_id: str, model_id: str | None
 ) -> None:
@@ -14254,40 +14236,6 @@ async def update_assistant(
     is_video = interaction_mode == schemas.InteractionMode.LECTURE_VIDEO
     is_slides = interaction_mode == schemas.InteractionMode.LECTURE_SLIDES
     is_lesson_mode = is_video or is_slides
-    google_model_changed, generation_model_changed = _lecture_material_model_changes(
-        asst, req
-    )
-    google_model_changed = is_video and google_model_changed
-    generation_model_changed = is_slides and generation_model_changed
-    video_model_update = (
-        google_model_changed
-        and asst.lecture_video is not None
-        and not asst.lecture_video.manual_manifest
-    )
-    video_id = (
-        req.lecture_video_id
-        if "lecture_video_id" in req.model_fields_set
-        else (asst.lecture_video_id if video_model_update else None)
-    )
-    slide_deck_id = (
-        req.lecture_slide_deck_id
-        if "lecture_slide_deck_id" in req.model_fields_set
-        else (asst.lecture_slide_deck_id if generation_model_changed else None)
-    )
-    video_voice_id = (
-        req.voice_id
-        if "voice_id" in req.model_fields_set
-        else (asst.lecture_video.voice_id if video_model_update else None)
-    )
-    slide_voice_id = (
-        req.voice_id
-        if "voice_id" in req.model_fields_set
-        else (
-            asst.lecture_slide_deck.voice_id
-            if generation_model_changed and asst.lecture_slide_deck is not None
-            else None
-        )
-    )
     lecture_video = asst.lecture_video
     lecture_video_manifest = None
     lecture_video_voice_id = None
@@ -14331,13 +14279,8 @@ async def update_assistant(
         or "generation_prompt" in req.model_fields_set
         or "regenerate_audio_requested" in req.model_fields_set
     )
-    lecture_video_fields_present = (
-        video_model_update
-        or lecture_video_specific_fields_present
-        or (
-            is_video
-            and (shared_lecture_fields_present or knowledge_check_profile_changed)
-        )
+    lecture_video_fields_present = lecture_video_specific_fields_present or (
+        is_video and (shared_lecture_fields_present or knowledge_check_profile_changed)
     )
     lecture_slide_deck = asst.lecture_slide_deck
     lecture_slide_voice_id = None
@@ -14353,16 +14296,12 @@ async def update_assistant(
         or "regenerate_narration_requested" in req.model_fields_set
         or "regenerate_questions_requested" in req.model_fields_set
     )
-    lecture_slide_fields_present = (
-        generation_model_changed
-        or lecture_slide_specific_fields_present
-        or (
-            is_slides
-            and (
-                shared_lecture_fields_present
-                or narration_profile_changed
-                or knowledge_check_profile_changed
-            )
+    lecture_slide_fields_present = lecture_slide_specific_fields_present or (
+        is_slides
+        and (
+            shared_lecture_fields_present
+            or narration_profile_changed
+            or knowledge_check_profile_changed
         )
     )
 
@@ -14413,7 +14352,7 @@ async def update_assistant(
                 status_code=400,
                 detail="Lecture video data can only be set for assistants in Lecture Video mode.",
             )
-        if video_id is None:
+        if req.lecture_video_id is None:
             raise HTTPException(
                 status_code=400,
                 detail="Specifying a lecture_video_id is required when updating lecture video data.",
@@ -14431,7 +14370,7 @@ async def update_assistant(
                 status_code=400,
                 detail="lecture_video_manifest cannot be supplied when overwrite_manifest is false.",
             )
-        if video_voice_id is None:
+        if req.voice_id is None:
             raise HTTPException(
                 status_code=400,
                 detail="Specifying a voice_id is required when updating lecture video data.",
@@ -14445,7 +14384,7 @@ async def update_assistant(
                 detail="Lecture video description duration is required.",
             )
         lecture_video = await models.LectureVideo.get_by_id_for_class(
-            request.state["db"], video_id, int(class_id)
+            request.state["db"], req.lecture_video_id, int(class_id)
         )
         if not lecture_video:
             raise HTTPException(
@@ -14456,7 +14395,7 @@ async def update_assistant(
             request.state["db"], lecture_video.id, exclude_assistant_id=asst.id
         )
         lecture_video_manifest = req.lecture_video_manifest
-        lecture_video_voice_id = video_voice_id
+        lecture_video_voice_id = req.voice_id
         lecture_video_generation_prompt = req.generation_prompt
         lecture_video_video_description_duration_ms = req.video_description_duration_ms
         try:
@@ -14479,18 +14418,18 @@ async def update_assistant(
                 status_code=400,
                 detail="Lecture slide data can only be set for assistants in Lecture Slides mode.",
             )
-        if slide_deck_id is None:
+        if req.lecture_slide_deck_id is None:
             raise HTTPException(
                 status_code=400,
                 detail="Specifying a lecture_slide_deck_id is required when updating lecture slide data.",
             )
-        if slide_voice_id is None:
+        if req.voice_id is None:
             raise HTTPException(
                 status_code=400,
                 detail="Specifying a voice_id is required when updating lecture slide data.",
             )
         lecture_slide_deck = await models.LectureSlideDeck.get_by_id_for_class(
-            request.state["db"], slide_deck_id, int(class_id)
+            request.state["db"], req.lecture_slide_deck_id, int(class_id)
         )
         if not lecture_slide_deck:
             raise HTTPException(
@@ -14500,7 +14439,7 @@ async def update_assistant(
         await lecture_slide_service.ensure_lecture_slide_deck_is_unassigned(
             request.state["db"], lecture_slide_deck.id, exclude_assistant_id=asst.id
         )
-        lecture_slide_voice_id = slide_voice_id
+        lecture_slide_voice_id = req.voice_id
         lecture_slide_generation_prompt = req.generation_prompt
         lecture_slide_narration_prompt = req.narration_prompt
         try:
@@ -15439,8 +15378,7 @@ async def update_assistant(
             # - generated -> generated: queue generation only for explicit retry,
             #   failed/missing output, or generation prompt changes.
             needs_manifest_generation = not overwrite_lecture_video_manifest and (
-                google_model_changed
-                or regenerate_requested
+                regenerate_requested
                 or lecture_video.manual_manifest
                 or await lecture_video_service.should_regenerate_manifest(
                     request.state["db"],
@@ -15691,7 +15629,6 @@ async def update_assistant(
                 or narration_profile_changed
                 or knowledge_check_profile_changed
                 or generation_prompt_changed
-                or generation_model_changed
                 or narration_prompt_changed
                 or notes_present
                 or content_items_present
@@ -15793,16 +15730,14 @@ async def update_assistant(
                 request.state["db"], target_lecture_slide_deck.id
             )
             needs_narration_text = (
-                generation_model_changed
-                or regenerate_narration_requested
+                regenerate_narration_requested
                 or content_requires_narration
                 or narration_prompt_changed
                 or additional_context_files_changed
                 or (notes_changed and not narration_text_changed)
             )
             needs_questions = (
-                generation_model_changed
-                or regenerate_questions_requested
+                regenerate_questions_requested
                 or content_items_changed
                 or generation_prompt_changed
                 or additional_context_files_changed

@@ -173,50 +173,6 @@ async def test_google_model_endpoint_requires_class_access(
     assert provider[0] == []
 
 
-@pytest.mark.parametrize(
-    "saved_google,saved_generation,updates,expected",
-    [
-        (None, None, {}, (False, False)),
-        (
-            "gemini-3.6-flash",
-            None,
-            {"lecture_gemini_model": "gemini-3.6-flash"},
-            (False, False),
-        ),
-        (
-            "gemini-3.6-flash",
-            None,
-            {"lecture_gemini_model": "gemini-4-hydrogen"},
-            (True, False),
-        ),
-        (
-            "gemini-4-hydrogen",
-            None,
-            {"lecture_gemini_model": "gemini-4-hydrogen"},
-            (False, False),
-        ),
-        (None, None, {"lecture_generation_model": "chat-b"}, (False, True)),
-        (None, None, {"model": "chat-b"}, (False, True)),
-        (None, "chat-a", {"model": "chat-b"}, (False, False)),
-        (None, None, {"lecture_generation_model": "chat-a"}, (False, False)),
-    ],
-)
-def test_only_effective_material_model_changes_trigger_regeneration(
-    saved_google, saved_generation, updates, expected
-):
-    assistant = SimpleNamespace(
-        model="chat-a",
-        lecture_gemini_model=saved_google,
-        lecture_generation_model=saved_generation,
-    )
-    assert (
-        server._lecture_material_model_changes(
-            assistant, schemas.UpdateAssistant(**updates)
-        )
-        == expected
-    )
-
-
 @with_user(123)
 @with_institution(11, "Test Institution")
 @with_authz(
@@ -227,20 +183,16 @@ def test_only_effective_material_model_changes_trigger_regeneration(
     ]
 )
 @pytest.mark.parametrize(
-    "selected_model,should_regenerate",
-    [
-        ("gemini-3.6-flash", False),
-        ("gemini-4-hydrogen", True),
-    ],
+    "selected_model",
+    ["gemini-3.6-flash", "gemini-4-hydrogen"],
 )
-async def test_model_only_video_save_preserves_legacy_or_regenerates(
+async def test_video_model_selection_waits_for_regeneration(
     api,
     db,
     institution,
     valid_user_token,
     monkeypatch,
     selected_model,
-    should_regenerate,
 ):
     from sqlalchemy import select
     from .test_lecture_video_server import (
@@ -309,19 +261,42 @@ async def test_model_only_video_save_preserves_legacy_or_regenerates(
         headers=headers,
     )
     assert updated.status_code == 200, updated.text
-    new_video_id = updated.json()["lecture_video"]["id"]
-    assert (new_video_id != video_id) is should_regenerate
-    if should_regenerate:
-        async with db.async_session() as session:
-            run = await session.scalar(
-                select(models.LectureVideoProcessingRun).where(
-                    models.LectureVideoProcessingRun.lecture_video_id == new_video_id,
-                    models.LectureVideoProcessingRun.stage
-                    == schemas.LectureVideoProcessingStage.MANIFEST_GENERATION,
-                )
+    assert updated.json()["lecture_gemini_model"] == selected_model
+    assert updated.json()["lecture_video"]["id"] == video_id
+    async with db.async_session() as session:
+        manifest_run = await session.scalar(
+            select(models.LectureVideoProcessingRun).where(
+                models.LectureVideoProcessingRun.lecture_video_id == video_id,
+                models.LectureVideoProcessingRun.stage
+                == schemas.LectureVideoProcessingStage.MANIFEST_GENERATION,
             )
-            assert run is not None
-            assert run.status == schemas.LectureVideoProcessingRunStatus.QUEUED
+        )
+        assert manifest_run is None
+
+    regenerated = api.put(
+        "/api/v1/class/1/assistant/1",
+        json={
+            "lecture_video_id": video_id,
+            "voice_id": DEFAULT_LECTURE_VIDEO_VOICE_ID,
+            "overwrite_manifest": False,
+            "regenerate_requested": True,
+        },
+        headers=headers,
+    )
+    assert regenerated.status_code == 200, regenerated.text
+    assert regenerated.json()["lecture_gemini_model"] == selected_model
+    new_video_id = regenerated.json()["lecture_video"]["id"]
+    assert new_video_id != video_id
+    async with db.async_session() as session:
+        run = await session.scalar(
+            select(models.LectureVideoProcessingRun).where(
+                models.LectureVideoProcessingRun.lecture_video_id == new_video_id,
+                models.LectureVideoProcessingRun.stage
+                == schemas.LectureVideoProcessingStage.MANIFEST_GENERATION,
+            )
+        )
+        assert run is not None
+        assert run.status == schemas.LectureVideoProcessingRunStatus.QUEUED
 
 
 def test_migration_pins_existing_video_material_to_gemini_36():
@@ -386,3 +361,88 @@ async def test_material_model_validation_matches_retained_model_policy(
         with pytest.raises(HTTPException) as exc:
             await validate()
         assert exc.value.status_code == 400
+
+
+@with_user(123)
+@with_institution(11, "Test Institution")
+@with_authz(
+    grants=[("user:123", "can_edit", "assistant:1"), ("user:123", "admin", "class:1")]
+)
+@pytest.mark.parametrize("selection", ["gpt-5.6-sol", None])
+async def test_slide_model_selection_waits_for_regeneration(
+    api, db, institution, valid_user_token, monkeypatch, selection
+):
+    from sqlalchemy import select
+    from pingpong import lecture_slide_processing
+    from .test_lecture_slide_runtime import _create_slide_runtime_fixture
+    from .test_lecture_video_server import fake_class_models_response
+
+    async def available_models(**kwargs):
+        response = fake_class_models_response()
+        response["models"].extend(fake_class_models_response("gpt-5.6-sol")["models"])
+        return response
+
+    monkeypatch.setattr(server, "list_class_models", available_models)
+    monkeypatch.setattr(server, "validate_lecture_video_voice_id_or_raise", AsyncMock())
+    async with db.async_session() as session:
+        _, deck, assistant, _, _ = await _create_slide_runtime_fixture(
+            session, institution, with_questions=False
+        )
+        assistant.creator_id = 123
+        assistant.interaction_mode = schemas.InteractionMode.LECTURE_SLIDES
+        assistant.lecture_generation_model = "gpt-4o-mini"
+        deck.voice_id = "voice-test-id"
+        session.add(
+            models.LectureSlidePage(
+                lecture_slide_deck=deck,
+                position=0,
+                narration_text="Keep this narration.",
+            )
+        )
+        await session.commit()
+        deck_id = deck.id
+
+    headers = {"Authorization": f"Bearer {valid_user_token}"}
+    updated = api.put(
+        "/api/v1/class/1/assistant/1",
+        json={"lecture_generation_model": selection},
+        headers=headers,
+    )
+    assert updated.status_code == 200, updated.text
+    assert updated.json()["lecture_generation_model"] == selection
+    assert updated.json()["lecture_slide_deck"]["id"] == deck_id
+    async with db.async_session() as session:
+        assert await session.scalar(select(models.LectureSlideProcessingRun.id)) is None
+        assert (
+            await session.scalar(
+                select(models.LectureSlidePage.narration_text).where(
+                    models.LectureSlidePage.lecture_slide_deck_id == deck_id
+                )
+            )
+            == "Keep this narration."
+        )
+
+    regenerated = api.put(
+        "/api/v1/class/1/assistant/1",
+        json={
+            "lecture_slide_deck_id": deck_id,
+            "voice_id": "voice-test-id",
+            "regenerate_questions_requested": True,
+        },
+        headers=headers,
+    )
+    assert regenerated.status_code == 200, regenerated.text
+    new_deck_id = regenerated.json()["lecture_slide_deck"]["id"]
+    assert new_deck_id != deck_id
+    async with db.async_session() as session:
+        run = await session.scalar(
+            select(models.LectureSlideProcessingRun).where(
+                models.LectureSlideProcessingRun.lecture_slide_deck_id == new_deck_id
+            )
+        )
+        assert run is not None
+        assert run.status == schemas.LectureSlideProcessingRunStatus.QUEUED
+        assert run.stage == schemas.LectureSlideProcessingStage.MANIFEST_GENERATION
+        assert await lecture_slide_processing._get_responses_model_for_run(
+            session, run.id, new_deck_id
+        ) == (selection or "gpt-4o-mini")

@@ -1455,7 +1455,6 @@
 		(originalOverwriteManifest ||
 			lectureVideoIdChanged ||
 			generationPromptChanged ||
-			lectureGoogleModelChanged ||
 			videoDescriptionDurationChanged ||
 			lastManifestRunFailed ||
 			!data.lectureVideoConfig?.lecture_video_manifest);
@@ -1516,14 +1515,12 @@
 			knowledgeCheckProfileChanged ||
 			liveChatProfileChanged ||
 			slideGenerationPromptChanged ||
-			lectureSlideGenerationModelChanged ||
 			slideNarrationPromptChanged ||
 			regenerateSlideNarrationRequested ||
 			regenerateSlideQuestionsRequested ||
 			regenerateSlideAudioRequested);
 	$: lectureSlideProcessingTriggers = deriveLectureSlideProcessingTriggers({
 		isLectureSlideMode,
-		modelChanged: lectureSlideGenerationModelChanged,
 		isCreating: data.isCreating,
 		deckIdChanged: lectureSlideDeckIdChanged,
 		structureChanged: lectureSlideStructureChanged,
@@ -2328,6 +2325,13 @@
 			!versionedModelOptions.map((m) => m.value).includes(selectedModel))
 	) {
 		if (
+			!data.isCreating &&
+			assistant?.model &&
+			!data.models.some((model) => model.id === assistant.model) &&
+			modelInteractionMode === (assistant.interaction_mode === 'voice' ? 'voice' : 'chat')
+		) {
+			selectedModel = assistant.model;
+		} else if (
 			latestModelOptions.map((m) => m.value).includes(assistant?.model || '') ||
 			hiddenModelNames.includes(assistant?.model || '')
 		) {
@@ -2353,12 +2357,6 @@
 	let lectureGenerationModel = data.assistant?.lecture_generation_model ?? '';
 	let lectureGeminiModel =
 		data.assistant?.lecture_gemini_model ?? data.geminiModels?.default_model.id ?? '';
-	$: lectureGoogleModelChanged =
-		!data.isCreating && lectureGeminiModel !== (assistant?.lecture_gemini_model ?? '');
-	$: lectureSlideGenerationModelChanged =
-		!data.isCreating &&
-		(lectureGenerationModel || selectedModel) !==
-			(assistant?.lecture_generation_model || assistant?.model);
 	$: generationModels = data.models.filter(
 		(model) =>
 			model.type === 'chat' &&
@@ -2366,7 +2364,7 @@
 			model.is_available !== false &&
 			!model.hide_in_model_selector
 	);
-	$: selectedModelName = modelNameDict[selectedModel];
+	$: selectedModelName = modelNameDict[selectedModel] || selectedModel;
 	let selectedModelRecord: api.AssistantModel | undefined;
 	$: selectedModelRecord = data.models.find((model) => model.id === selectedModel);
 	$: selectedModelUnavailable = !selectedModelRecord || selectedModelRecord.is_available === false;
@@ -3101,7 +3099,7 @@
 					newValue !==
 					(supportsReasoning
 						? getEffectiveReasoningEffort(original?.reasoning_effort, reasoningEffortLevels)
-						: (oldValue ?? null));
+						: null);
 				break;
 			case 'realtime_eagerness':
 				dirty =
@@ -3176,22 +3174,13 @@
 				dirty = newValue === undefined ? false : newValue !== !!oldValue;
 				break;
 			case 'use_latex':
-				dirty =
-					newValue === undefined
-						? false
-						: (preventEdits ? !!assistant?.use_latex : newValue) !== !!oldValue;
-				break;
 			case 'use_mermaid':
-				dirty =
-					newValue === undefined
-						? false
-						: (preventEdits ? !!assistant?.use_mermaid : newValue) !== !!oldValue;
-				break;
 			case 'use_svg':
 				dirty =
-					newValue === undefined
-						? false
-						: (preventEdits ? !!assistant?.use_svg : newValue) !== !!oldValue;
+					interactionMode !== 'voice' &&
+					!preventEdits &&
+					newValue !== undefined &&
+					newValue !== !!oldValue;
 				break;
 			case 'use_image_descriptions':
 				dirty = newValue === undefined ? false : newValue !== !!oldValue;
@@ -3264,7 +3253,7 @@
 					'realtime_transcription_model',
 					'elevenlabs_config'
 				]
-			: ['name', 'description', 'instructions'];
+			: ['name', 'description', 'instructions', 'lecture_check_instructions'];
 		if (
 			data.isCreating &&
 			isLectureMode &&
@@ -3568,9 +3557,9 @@
 			video_description_duration_ms: isLectureVideoMode ? videoDescriptionDurationMs : undefined,
 			overwrite_manifest: isLectureVideoMode ? overwriteManifest : undefined,
 			published: body.published?.toString() === 'on',
-			use_latex: isLectureMode ? true : useLatex,
-			use_mermaid: isLectureMode ? true : useMermaid,
-			use_svg: isLectureMode ? true : useSvg,
+			use_latex: isLectureMode ? true : interactionMode === 'chat' && useLatex,
+			use_mermaid: isLectureMode ? true : interactionMode === 'chat' && useMermaid,
+			use_svg: isLectureMode ? true : interactionMode === 'chat' && useSvg,
 			use_image_descriptions: isLectureMode
 				? (assistant?.use_image_descriptions ?? false)
 				: isUsingClassicAssistantVersion && body.use_image_descriptions?.toString() === 'on',
@@ -4412,9 +4401,9 @@
 
 		const result = await api.previewAssistantInstructions(fetch, data.class.id, {
 			instructions,
-			use_latex: isLectureMode ? true : useLatex,
-			use_mermaid: isLectureMode ? true : useMermaid,
-			use_svg: isLectureMode ? true : useSvg,
+			use_latex: isLectureMode ? true : interactionMode === 'chat' && useLatex,
+			use_mermaid: isLectureMode ? true : interactionMode === 'chat' && useMermaid,
+			use_svg: isLectureMode ? true : interactionMode === 'chat' && useSvg,
 			disable_prompt_randomization: disablePromptRandomization,
 			interaction_mode: interactionMode
 		});
@@ -4564,7 +4553,6 @@
 				lectureVideoVoiceChanged ||
 				knowledgeCheckProfileChanged ||
 				generationPromptChanged ||
-				lectureGoogleModelChanged ||
 				videoDescriptionDurationChanged ||
 				overwriteManifestChanged ||
 				(canRegenerateLectureVideo && regenerateRequested) ||
@@ -4687,7 +4675,6 @@
 				narrationProfileChanged ||
 				knowledgeCheckProfileChanged ||
 				slideGenerationPromptChanged ||
-				lectureSlideGenerationModelChanged ||
 				slideNarrationPromptChanged ||
 				regenerateSlideNarrationRequested ||
 				regenerateSlideQuestionsRequested ||
@@ -7179,6 +7166,8 @@
 								</div>
 								<Textarea
 									id="lecture-check-instructions"
+									minlength={3}
+									required
 									rows={8}
 									maxlength={20000}
 									bind:value={lectureCheckInstructions}
@@ -7965,182 +7954,182 @@
 							{/if}
 						{/if}
 
-						{#if !isLectureMode}
-							{#if supportsTemperatureForCurrentReasoning && !isLectureMode}
-								<div class="flex flex-col">
-									<Label for="temperature">Temperature</Label>
-									{#if interactionMode === 'voice'}
-										<Helper class="pb-1"
-											>Select the model's "temperature," a setting from 0.6 to 1.2 that controls how
-											creative or predictable the assistant's responses are. For audio models, a
-											temperature of 0.8 is highly recommended for best performance. You can change
-											this setting anytime.</Helper
-										>
-									{:else}
-										<Helper class="pb-1"
-											>Select the model's "temperature," a setting from 0 to 2 that controls how
-											creative or predictable the assistant's responses are. For reliable, focused
-											answers, choose a temperature closer to 0.2. For more varied or creative
-											responses, try a setting closer to 1. Avoid setting the temperature much above
-											1 unless you need very experimental responses, as it may lead to less
-											predictable and more random answers.</Helper
-										>
-									{/if}
-								</div>
-								<div class="mt-2 flex flex-row justify-between">
-									<div class="flex flex-row items-center gap-1 text-sm">
-										<ArrowLeftOutline />
-										<div>More focused</div>
-									</div>
-									<Badge
-										class="flex shrink-0 flex-row items-center gap-x-2 rounded-md border border-sky-400 bg-gradient-to-b from-sky-100 to-sky-200 px-2 py-0.5 text-xs text-sky-800 normal-case"
-									>
-										<div>Temperature: {temperatureValue.toFixed(1)}</div>
-									</Badge>
-									<div class="flex flex-row items-center gap-1 text-sm">
-										<div>More creative</div>
-										<ArrowRightOutline />
-									</div>
-								</div>
-								{#if interactionMode !== 'voice'}
-									<Range
-										id="temperature"
-										name="temperature"
-										min={minChatTemperature}
-										max={maxChatTemperature}
-										bind:value={temperatureValue}
-										step="0.1"
-										disabled={preventEdits}
-										onchange={checkForLargeTemperatureChat}
-										class="appearance-auto"
-									/>
-									<div class="mx-2 grid grid-cols-20 gap-0">
-										<button
-											type="button"
-											class="col-span-4 ml-1 flex flex-col items-center justify-start border-0 bg-transparent"
-											onclick={() => {
-												temperatureValue = defaultChatTemperature;
-												_temperatureValue = defaultChatTemperature;
-											}}
-											onkeydown={(e) => {
-												if (e.key === 'Enter' || e.key === ' ') {
-													temperatureValue = defaultChatTemperature;
-													_temperatureValue = defaultChatTemperature;
-												}
-											}}
-										>
-											<HeartSolid class="max-w-fit text-gray-500" />
-											<div class="mx-10 mt-1 text-center text-sm text-wrap">
-												Default (recommended)
-											</div>
-										</button>
-										<button
-											type="button"
-											class="col-span-4 col-start-6 flex flex-col items-center justify-start border-0 bg-transparent"
-											onclick={() => {
-												temperatureValue = 0.7;
-												_temperatureValue = 0.7;
-											}}
-											onkeydown={(e) => {
-												if (e.key === 'Enter' || e.key === ' ') {
-													temperatureValue = 0.7;
-													_temperatureValue = 0.7;
-												}
-											}}
-										>
-											<LightbulbSolid class="max-w-fit text-gray-500" />
-											<div class="mx-10 mt-1 text-center text-sm text-wrap">
-												Great for creative tasks and brainstorming
-											</div>
-										</button>
-										<div
-											class="col-span-9 col-start-12 -mr-2 -ml-2 h-6 h-fit rounded-md border border-amber-400 bg-gradient-to-b from-amber-100 to-amber-200 py-1 text-center text-sm text-amber-800"
-										>
-											Output may be unpredictable
-										</div>
-									</div>
-								{:else}
-									<Range
-										id="temperature"
-										name="temperature"
-										min={minAudioTemperature}
-										max={maxAudioTemperature}
-										bind:value={temperatureValue}
-										step="0.1"
-										disabled={preventEdits}
-										onchange={checkForLargeTemperatureAudio}
-										class="appearance-auto"
-									/>
-									<div class="mx-2 grid grid-cols-6 gap-0">
-										<button
-											type="button"
-											class="col-span-4 ml-1 flex flex-col items-center justify-start border-0 bg-transparent"
-											onclick={() => {
-												temperatureValue = defaultAudioTemperature;
-												_temperatureValue = defaultAudioTemperature;
-											}}
-											onkeydown={(e) => {
-												if (e.key === 'Enter' || e.key === ' ') {
-													temperatureValue = defaultAudioTemperature;
-													_temperatureValue = defaultAudioTemperature;
-												}
-											}}
-										>
-											<HeartSolid class="max-w-fit text-gray-500" />
-											<div class="mx-10 mt-1 text-center text-sm text-wrap">
-												Default (highly recommended)
-											</div>
-										</button>
-									</div>
-								{/if}
-							{/if}
-							{#if supportsVerbosity}
-								<div class="flex flex-col">
-									<Label for="verbosity">Verbosity</Label>
+						{#if supportsTemperatureForCurrentReasoning}
+							<div class="flex flex-col">
+								<Label for="temperature">Temperature</Label>
+								{#if interactionMode === 'voice'}
 									<Helper class="pb-1"
-										>Select your desired verbosity. Verbosity determines how many output tokens are
-										generated. Lowering the number of tokens reduces overall latency. While the
-										model's reasoning approach stays mostly the same, the model finds ways to answer
-										more concisely—which can either improve or diminish answer quality, depending on
-										your use case. Here are some scenarios for both ends of the verbosity spectrum:
-										<ol class="ml-7 list-disc">
-											<li class="my-1">
-												<span class="font-medium">High verbosity:</span> Use when you need the model to
-												provide thorough explanations of documents or perform extensive code refactoring.
-											</li>
-											<li class="my-1">
-												<span class="font-medium">Low verbosity:</span> Best for situations where you
-												want concise answers or simple code generation, such as SQL queries.
-											</li>
-										</ol>
-										Models before GPT-5 have used medium verbosity by default. With GPT-5, this option
-										is configurable as one of&nbsp;<span class="font-mono">high</span>,
-										<span class="font-mono">medium</span>, or <span class="font-mono">low</span>.
-										When generating code, <span class="font-mono">medium</span> and
-										<span class="font-mono">high</span>
-										verbosity levels yield longer, more structured code with inline explanations, while
-										<span class="font-mono">low</span>
-										verbosity produces shorter, more concise code with minimal commentary. The default
-										value is
-										<span class="font-mono">low</span>.</Helper
+										>Select the model's "temperature," a setting from 0.6 to 1.2 that controls how
+										creative or predictable the assistant's responses are. For audio models, a
+										temperature of 0.8 is highly recommended for best performance. You can change
+										this setting anytime.</Helper
 									>
+								{:else}
+									<Helper class="pb-1"
+										>Select the model's "temperature," a setting from 0 to 2 that controls how
+										creative or predictable the assistant's responses are. For reliable, focused
+										answers, choose a temperature closer to 0.2. For more varied or creative
+										responses, try a setting closer to 1. Avoid setting the temperature much above 1
+										unless you need very experimental responses, as it may lead to less predictable
+										and more random answers.</Helper
+									>
+								{/if}
+							</div>
+							<div class="mt-2 flex flex-row justify-between">
+								<div class="flex flex-row items-center gap-1 text-sm">
+									<ArrowLeftOutline />
+									<div>More focused</div>
 								</div>
+								<Badge
+									class="flex shrink-0 flex-row items-center gap-x-2 rounded-md border border-sky-400 bg-gradient-to-b from-sky-100 to-sky-200 px-2 py-0.5 text-xs text-sky-800 normal-case"
+								>
+									<div>Temperature: {temperatureValue.toFixed(1)}</div>
+								</Badge>
+								<div class="flex flex-row items-center gap-1 text-sm">
+									<div>More creative</div>
+									<ArrowRightOutline />
+								</div>
+							</div>
+							{#if interactionMode !== 'voice'}
 								<Range
-									id="verbosity"
-									name="verbosity"
-									min="0"
-									max="2"
-									bind:value={verbosityValue}
-									step="1"
+									id="temperature"
+									name="temperature"
+									min={minChatTemperature}
+									max={maxChatTemperature}
+									bind:value={temperatureValue}
+									step="0.1"
 									disabled={preventEdits}
+									onchange={checkForLargeTemperatureChat}
 									class="appearance-auto"
 								/>
-								<div class="mt-2 flex flex-row justify-between">
-									<p class="text-sm">low</p>
-									<p class="text-sm">medium</p>
-									<p class="text-sm">high</p>
+								<div class="mx-2 grid grid-cols-20 gap-0">
+									<button
+										type="button"
+										class="col-span-4 ml-1 flex flex-col items-center justify-start border-0 bg-transparent"
+										onclick={() => {
+											temperatureValue = defaultChatTemperature;
+											_temperatureValue = defaultChatTemperature;
+										}}
+										onkeydown={(e) => {
+											if (e.key === 'Enter' || e.key === ' ') {
+												temperatureValue = defaultChatTemperature;
+												_temperatureValue = defaultChatTemperature;
+											}
+										}}
+									>
+										<HeartSolid class="max-w-fit text-gray-500" />
+										<div class="mx-10 mt-1 text-center text-sm text-wrap">
+											Default (recommended)
+										</div>
+									</button>
+									<button
+										type="button"
+										class="col-span-4 col-start-6 flex flex-col items-center justify-start border-0 bg-transparent"
+										onclick={() => {
+											temperatureValue = 0.7;
+											_temperatureValue = 0.7;
+										}}
+										onkeydown={(e) => {
+											if (e.key === 'Enter' || e.key === ' ') {
+												temperatureValue = 0.7;
+												_temperatureValue = 0.7;
+											}
+										}}
+									>
+										<LightbulbSolid class="max-w-fit text-gray-500" />
+										<div class="mx-10 mt-1 text-center text-sm text-wrap">
+											Great for creative tasks and brainstorming
+										</div>
+									</button>
+									<div
+										class="col-span-9 col-start-12 -mr-2 -ml-2 h-6 h-fit rounded-md border border-amber-400 bg-gradient-to-b from-amber-100 to-amber-200 py-1 text-center text-sm text-amber-800"
+									>
+										Output may be unpredictable
+									</div>
+								</div>
+							{:else}
+								<Range
+									id="temperature"
+									name="temperature"
+									min={minAudioTemperature}
+									max={maxAudioTemperature}
+									bind:value={temperatureValue}
+									step="0.1"
+									disabled={preventEdits}
+									onchange={checkForLargeTemperatureAudio}
+									class="appearance-auto"
+								/>
+								<div class="mx-2 grid grid-cols-6 gap-0">
+									<button
+										type="button"
+										class="col-span-4 ml-1 flex flex-col items-center justify-start border-0 bg-transparent"
+										onclick={() => {
+											temperatureValue = defaultAudioTemperature;
+											_temperatureValue = defaultAudioTemperature;
+										}}
+										onkeydown={(e) => {
+											if (e.key === 'Enter' || e.key === ' ') {
+												temperatureValue = defaultAudioTemperature;
+												_temperatureValue = defaultAudioTemperature;
+											}
+										}}
+									>
+										<HeartSolid class="max-w-fit text-gray-500" />
+										<div class="mx-10 mt-1 text-center text-sm text-wrap">
+											Default (highly recommended)
+										</div>
+									</button>
 								</div>
 							{/if}
+						{/if}
+						{#if supportsVerbosity}
+							<div class="flex flex-col">
+								<Label for="verbosity">Verbosity</Label>
+								<Helper class="pb-1"
+									>Select your desired verbosity. Verbosity determines how many output tokens are
+									generated. Lowering the number of tokens reduces overall latency. While the
+									model's reasoning approach stays mostly the same, the model finds ways to answer
+									more concisely—which can either improve or diminish answer quality, depending on
+									your use case. Here are some scenarios for both ends of the verbosity spectrum:
+									<ol class="ml-7 list-disc">
+										<li class="my-1">
+											<span class="font-medium">High verbosity:</span> Use when you need the model to
+											provide thorough explanations of documents or perform extensive code refactoring.
+										</li>
+										<li class="my-1">
+											<span class="font-medium">Low verbosity:</span> Best for situations where you want
+											concise answers or simple code generation, such as SQL queries.
+										</li>
+									</ol>
+									Models before GPT-5 have used medium verbosity by default. With GPT-5, this option is
+									configurable as one of&nbsp;<span class="font-mono">high</span>,
+									<span class="font-mono">medium</span>, or <span class="font-mono">low</span>. When
+									generating code, <span class="font-mono">medium</span> and
+									<span class="font-mono">high</span>
+									verbosity levels yield longer, more structured code with inline explanations, while
+									<span class="font-mono">low</span>
+									verbosity produces shorter, more concise code with minimal commentary. The default value
+									is
+									<span class="font-mono">low</span>.</Helper
+								>
+							</div>
+							<Range
+								id="verbosity"
+								name="verbosity"
+								min="0"
+								max="2"
+								bind:value={verbosityValue}
+								step="1"
+								disabled={preventEdits}
+								class="appearance-auto"
+							/>
+							<div class="mt-2 flex flex-row justify-between">
+								<p class="text-sm">low</p>
+								<p class="text-sm">medium</p>
+								<p class="text-sm">high</p>
+							</div>
+						{/if}
+						{#if !isLectureMode}
 							<hr />
 							<div class="col-span-2 mb-1">
 								<Checkbox

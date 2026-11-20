@@ -8,7 +8,6 @@ export type LectureSlideProcessingTriggers = {
 export const deriveLectureSlideProcessingTriggers = ({
 	isLectureSlideMode,
 	isCreating,
-	modelChanged = false,
 	deckIdChanged,
 	structureChanged,
 	narrationPromptChanged,
@@ -22,7 +21,6 @@ export const deriveLectureSlideProcessingTriggers = ({
 }: {
 	isLectureSlideMode: boolean;
 	isCreating: boolean;
-	modelChanged?: boolean;
 	deckIdChanged: boolean;
 	structureChanged: boolean;
 	narrationPromptChanged: boolean;
@@ -41,7 +39,6 @@ export const deriveLectureSlideProcessingTriggers = ({
 	const narration =
 		enabled &&
 		(full ||
-			modelChanged ||
 			structureChanged ||
 			narrationPromptChanged ||
 			additionalContextFilesChanged ||
@@ -49,7 +46,6 @@ export const deriveLectureSlideProcessingTriggers = ({
 	const questions =
 		enabled &&
 		(full ||
-			modelChanged ||
 			structureChanged ||
 			generationPromptChanged ||
 			additionalContextFilesChanged ||
