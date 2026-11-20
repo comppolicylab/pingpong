@@ -22,6 +22,15 @@ const triggers = (
 	});
 
 describe('deriveLectureSlideProcessingTriggers', () => {
+	it('regenerates narration and questions when the material model changes', () => {
+		expect(triggers({ modelChanged: true })).toEqual({
+			full: false,
+			narration: true,
+			questions: true,
+			audio: false
+		});
+	});
+
 	it('regenerates narration for note-only edits', () => {
 		expect(triggers({ notesChanged: true })).toEqual({
 			full: false,

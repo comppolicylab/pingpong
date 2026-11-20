@@ -1184,11 +1184,13 @@ async def queue_narration_text_processing_run(
     deck: models.LectureSlideDeck,
     *,
     requested_by_assistant_id: int | None = None,
+    force_manifest_generation: bool = False,
 ) -> models.LectureSlideProcessingRun | None:
     return await queue_lecture_slide_processing_run(
         session,
         deck,
         requested_by_assistant_id=requested_by_assistant_id,
+        force_manifest_generation=force_manifest_generation,
         stage=schemas.LectureSlideProcessingStage.NARRATION_TEXT,
     )
 
@@ -3069,15 +3071,21 @@ async def _get_responses_model_for_run(
     run = await models.LectureSlideProcessingRun.get_by_id(session, run_id)
     if run is not None and run.assistant_id_at_start is not None:
         model = await session.scalar(
-            select(models.Assistant.model).where(
-                models.Assistant.id == run.assistant_id_at_start
-            )
+            select(
+                func.coalesce(
+                    models.Assistant.lecture_generation_model, models.Assistant.model
+                )
+            ).where(models.Assistant.id == run.assistant_id_at_start)
         )
         if model:
             return str(model)
 
     model = await session.scalar(
-        select(models.Assistant.model)
+        select(
+            func.coalesce(
+                models.Assistant.lecture_generation_model, models.Assistant.model
+            )
+        )
         .where(models.Assistant.lecture_slide_deck_id == deck_id)
         .order_by(models.Assistant.id.asc())
         .limit(1)

@@ -18,6 +18,8 @@ from pingpong.class_credential_validation import (
 )
 from pingpong.log_utils import sanitize_for_log
 
+DEFAULT_LECTURE_GEMINI_MODEL = "gemini-4-hydrogen"
+
 logger = logging.getLogger(__name__)
 
 _ResponseModelT = TypeVar("_ResponseModelT", bound=BaseModel)

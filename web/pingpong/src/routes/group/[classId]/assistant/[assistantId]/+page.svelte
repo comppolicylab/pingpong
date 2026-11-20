@@ -33,7 +33,12 @@
 	import { browser } from '$app/environment';
 	import * as api from '$lib/api';
 	import { setsEqual } from '$lib/set';
-	import { getAssistantModelModes } from '$lib/assistantModelModes';
+	import {
+		getAssistantModelModes,
+		getEffectiveReasoningEffort,
+		getEffectiveTemperature
+	} from '$lib/assistantModelModes';
+
 	import { happyToast, sadToast } from '$lib/toast';
 	import { errorMessage as formatErrorMessage } from '$lib/errors';
 	import { normalizeNewlines } from '$lib/content.js';
@@ -1450,6 +1455,7 @@
 		(originalOverwriteManifest ||
 			lectureVideoIdChanged ||
 			generationPromptChanged ||
+			lectureGoogleModelChanged ||
 			videoDescriptionDurationChanged ||
 			lastManifestRunFailed ||
 			!data.lectureVideoConfig?.lecture_video_manifest);
@@ -1510,12 +1516,14 @@
 			knowledgeCheckProfileChanged ||
 			liveChatProfileChanged ||
 			slideGenerationPromptChanged ||
+			lectureSlideGenerationModelChanged ||
 			slideNarrationPromptChanged ||
 			regenerateSlideNarrationRequested ||
 			regenerateSlideQuestionsRequested ||
 			regenerateSlideAudioRequested);
 	$: lectureSlideProcessingTriggers = deriveLectureSlideProcessingTriggers({
 		isLectureSlideMode,
+		modelChanged: lectureSlideGenerationModelChanged,
 		isCreating: data.isCreating,
 		deckIdChanged: lectureSlideDeckIdChanged,
 		structureChanged: lectureSlideStructureChanged,
@@ -2339,13 +2347,25 @@
 			selectedModel = '';
 		}
 	}
-	$: if (isLectureMode && data.isCreating && latestModelOptions.length > 0) {
-		const highlighted = latestModelOptions.find((model) => model.highlight);
-		selectedModel = highlighted ? highlighted.value : latestModelOptions[0].value;
-	}
-	$: if (isLectureMode && !data.isCreating && assistant?.model) {
-		selectedModel = assistant.model;
-	}
+	const defaultCheckInstructions = data.lectureLessonEditorConfig?.lecture_check_instructions ?? '';
+	let lectureCheckInstructions =
+		data.assistant?.lecture_check_instructions ?? defaultCheckInstructions;
+	let lectureGenerationModel = data.assistant?.lecture_generation_model ?? '';
+	let lectureGeminiModel =
+		data.assistant?.lecture_gemini_model ?? data.geminiModels?.default_model.id ?? '';
+	$: lectureGoogleModelChanged =
+		!data.isCreating && lectureGeminiModel !== (assistant?.lecture_gemini_model ?? '');
+	$: lectureSlideGenerationModelChanged =
+		!data.isCreating &&
+		(lectureGenerationModel || selectedModel) !==
+			(assistant?.lecture_generation_model || assistant?.model);
+	$: generationModels = data.models.filter(
+		(model) =>
+			model.type === 'chat' &&
+			model.supports_next_gen_assistants &&
+			model.is_available !== false &&
+			!model.hide_in_model_selector
+	);
 	$: selectedModelName = modelNameDict[selectedModel];
 	let selectedModelRecord: api.AssistantModel | undefined;
 	$: selectedModelRecord = data.models.find((model) => model.id === selectedModel);
@@ -2993,7 +3013,7 @@
 		reasoningEffortLevels.length > 0 &&
 		!reasoningEffortLevels.includes(reasoningEffortValue)
 	) {
-		reasoningEffortValue = reasoningEffortLevels[0];
+		reasoningEffortValue = getEffectiveReasoningEffort(reasoningEffortValue, reasoningEffortLevels);
 	}
 	let verbosityValue: number;
 	$: if (
@@ -3049,19 +3069,39 @@
 					normalizeNewlines((newValue as string | undefined) || '') !==
 					((oldValue as string) || '');
 				break;
+			case 'lecture_check_instructions':
+				dirty =
+					isLectureMode &&
+					normalizeNewlines((newValue as string | null) ?? defaultCheckInstructions) !==
+						normalizeNewlines(original?.lecture_check_instructions ?? defaultCheckInstructions);
+				break;
 			case 'instructions':
 				dirty =
 					normalizeNewlines((newValue as string | undefined) || '') !==
 					((oldValue as string) || '');
 				break;
+			case 'lecture_generation_model':
+			case 'lecture_gemini_model':
+				dirty = (newValue || null) !== (oldValue || null);
+				break;
 			case 'model':
 				dirty = newValue !== oldValue;
 				break;
 			case 'temperature':
-				dirty = newValue !== oldValue;
+				dirty =
+					newValue !==
+					getEffectiveTemperature(
+						original?.temperature,
+						supportsTemperatureForCurrentReasoning,
+						interactionMode === 'voice' ? defaultAudioTemperature : defaultChatTemperature
+					);
 				break;
 			case 'reasoning_effort':
-				dirty = newValue !== oldValue;
+				dirty =
+					newValue !==
+					(supportsReasoning
+						? getEffectiveReasoningEffort(original?.reasoning_effort, reasoningEffortLevels)
+						: (oldValue ?? null));
 				break;
 			case 'realtime_eagerness':
 				dirty =
@@ -3139,19 +3179,19 @@
 				dirty =
 					newValue === undefined
 						? false
-						: (preventEdits ? !!assistant?.use_latex : newValue) !== oldValue;
+						: (preventEdits ? !!assistant?.use_latex : newValue) !== !!oldValue;
 				break;
 			case 'use_mermaid':
 				dirty =
 					newValue === undefined
 						? false
-						: (preventEdits ? !!assistant?.use_mermaid : newValue) !== oldValue;
+						: (preventEdits ? !!assistant?.use_mermaid : newValue) !== !!oldValue;
 				break;
 			case 'use_svg':
 				dirty =
 					newValue === undefined
 						? false
-						: (preventEdits ? !!assistant?.use_svg : newValue) !== oldValue;
+						: (preventEdits ? !!assistant?.use_svg : newValue) !== !!oldValue;
 				break;
 			case 'use_image_descriptions':
 				dirty = newValue === undefined ? false : newValue !== !!oldValue;
@@ -3198,6 +3238,9 @@
 					'notes',
 					'interaction_mode',
 					'model',
+					'lecture_check_instructions',
+					'lecture_generation_model',
+					'lecture_gemini_model',
 					'published',
 					'use_latex',
 					'use_mermaid',
@@ -3418,11 +3461,12 @@
 			description: preventEdits ? assistant?.description || '' : normalizeNewlines(description),
 			instructions: preventEdits ? assistant?.instructions || '' : normalizeNewlines(instructions),
 			notes: preventEdits ? assistant?.notes || '' : normalizeNewlines(notes),
-			model: isLectureMode
-				? data.isCreating
-					? selectedModel
-					: assistant?.model || selectedModel
-				: selectedModel,
+			model: selectedModel,
+			lecture_check_instructions: isLectureMode
+				? normalizeNewlines(lectureCheckInstructions)
+				: undefined,
+			lecture_generation_model: isLectureSlideMode ? lectureGenerationModel || null : undefined,
+			lecture_gemini_model: isLectureVideoMode ? lectureGeminiModel.trim() || null : undefined,
 			tools,
 			code_interpreter_file_ids:
 				includeTooling &&
@@ -3438,21 +3482,9 @@
 				fileSearchToolSelect
 					? $selectedFileSearchFiles
 					: [],
-			temperature: isLectureMode
-				? (assistant?.temperature ?? null)
-				: supportsTemperatureForCurrentReasoning
-					? temperatureValue
-					: null,
-			reasoning_effort: isLectureMode
-				? (assistant?.reasoning_effort ?? null)
-				: supportsReasoning
-					? reasoningEffortValue
-					: null,
-			verbosity: isLectureMode
-				? (assistant?.verbosity ?? (data.isCreating && supportsVerbosity ? verbosityValue : null))
-				: supportsVerbosity
-					? verbosityValue
-					: null,
+			temperature: supportsTemperatureForCurrentReasoning ? temperatureValue : null,
+			reasoning_effort: supportsReasoning ? reasoningEffortValue : null,
+			verbosity: supportsVerbosity ? verbosityValue : null,
 			realtime_eagerness:
 				interactionMode === 'voice'
 					? realtimeEagernessValue
@@ -3536,9 +3568,9 @@
 			video_description_duration_ms: isLectureVideoMode ? videoDescriptionDurationMs : undefined,
 			overwrite_manifest: isLectureVideoMode ? overwriteManifest : undefined,
 			published: body.published?.toString() === 'on',
-			use_latex: isLectureMode ? true : body.use_latex?.toString() === 'on',
-			use_mermaid: isLectureMode ? true : body.use_mermaid?.toString() === 'on',
-			use_svg: isLectureMode ? true : body.use_svg?.toString() === 'on',
+			use_latex: isLectureMode ? true : useLatex,
+			use_mermaid: isLectureMode ? true : useMermaid,
+			use_svg: isLectureMode ? true : useSvg,
 			use_image_descriptions: isLectureMode
 				? (assistant?.use_image_descriptions ?? false)
 				: isUsingClassicAssistantVersion && body.use_image_descriptions?.toString() === 'on',
@@ -4532,6 +4564,7 @@
 				lectureVideoVoiceChanged ||
 				knowledgeCheckProfileChanged ||
 				generationPromptChanged ||
+				lectureGoogleModelChanged ||
 				videoDescriptionDurationChanged ||
 				overwriteManifestChanged ||
 				(canRegenerateLectureVideo && regenerateRequested) ||
@@ -4654,6 +4687,7 @@
 				narrationProfileChanged ||
 				knowledgeCheckProfileChanged ||
 				slideGenerationPromptChanged ||
+				lectureSlideGenerationModelChanged ||
 				slideNarrationPromptChanged ||
 				regenerateSlideNarrationRequested ||
 				regenerateSlideQuestionsRequested ||
@@ -5869,194 +5903,194 @@
 				>
 			{/if}
 		</div>
-		{#if !isLectureMode}
-			<div class="mb-4">
-				<div class="flex flex-row flex-wrap items-center gap-2">
-					<Label for="model" class="mb-0">Model</Label>
-					{#if showNewerModelsAvailableBadge}
-						<DropdownBadge
-							extraClasses="flex max-h-fit max-w-fit shrink-0 flex-row items-center gap-x-2 rounded-lg border border-blue-300 bg-gradient-to-b from-blue-50 to-blue-100 px-2 py-0 text-xs text-blue-800 normal-case"
-							><span slot="name">Newer models available</span></DropdownBadge
-						>
-					{/if}
-				</div>
-				<Helper class="pb-1"
-					>Select the model to use for this assistant. You can update your model selection at any
-					time. Auto-updating models move to the newest release in that model family for you and are
-					recommended for most users. Fixed versions stay on one specific release until you change
-					them. See <a
-						href="https://platform.openai.com/docs/models"
-						rel="noopener noreferrer"
-						target="_blank"
-						class="underline">OpenAI's Documentation</a
-					> for detailed descriptions of model capabilities.</Helper
+		<div class="mb-4">
+			<div class="flex flex-row flex-wrap items-center gap-2">
+				<Label for="model" class="mb-0"
+					>{isLectureMode
+						? `Chat Model (${selectedModelRecord?.name || selectedModel})`
+						: 'Model'}</Label
 				>
-				{#if selectedModelUnavailable}
-					<div
-						role="alert"
-						class="mb-2 flex flex-row items-center gap-4 rounded-lg border border-red-400 bg-gradient-to-b from-red-50 to-red-100 p-4 py-2 text-red-800"
+				{#if showNewerModelsAvailableBadge}
+					<DropdownBadge
+						extraClasses="flex max-h-fit max-w-fit shrink-0 flex-row items-center gap-x-2 rounded-lg border border-blue-300 bg-gradient-to-b from-blue-50 to-blue-100 px-2 py-0 text-xs text-blue-800 normal-case"
+						><span slot="name">Newer models available</span></DropdownBadge
 					>
-						<ExclamationCircleOutline class="h-8 w-8 text-red-800" strokeWidth="2" />
-						<div class="flex flex-col">
-							<span class="text-sm font-semibold">Your selected model is no longer available</span>
-							<span class="text-xs">
-								Your AI provider no longer serves <span class="font-semibold"
-									>{selectedModelRecord?.name ?? selectedModel}</span
-								>. This assistant cannot respond using this model.
-								<span class="font-semibold"
-									>Select an available model below and save your changes to restore this assistant.</span
-								>
-							</span>
-						</div>
-					</div>
-				{:else if selectedModelDeprecated}
-					<div
-						class="mb-2 flex flex-row items-center gap-4 rounded-lg border border-amber-400 bg-gradient-to-b from-amber-50 to-amber-100 p-4 py-2 text-amber-800"
-					>
-						<ArchiveOutline class="h-8 w-8 text-amber-800" strokeWidth="1.5" />
-						<div class="flex flex-col">
-							<span class="text-sm font-semibold">Legacy Model</span>
-							<span class="text-xs"
-								>This model is no longer available for new assistants on PingPong. You can continue
-								using it with this assistant, but you won't be able to switch back after saving a
-								new model selection. <span class="font-semibold"
-									>We recommend upgrading to one of the recommended models for the best experience.</span
-								></span
-							>
-						</div>
-					</div>
-				{/if}
-				{#if supportsVision && effectiveVisionSupportOverride === false}
-					<div
-						class="mb-2 flex flex-row items-center gap-4 rounded-lg border border-amber-400 bg-gradient-to-b from-amber-50 to-amber-100 p-4 py-2 text-amber-800"
-					>
-						<div class="relative flex h-8 w-12 items-center justify-center">
-							<BanOutline class="absolute z-10 h-12 w-12 text-amber-600" strokeWidth="1.5" />
-							<FileImageOutline class="h-8 w-8 text-stone-400" strokeWidth="1" />
-						</div>
-						<div class="flex flex-col">
-							<span class="text-sm font-semibold"
-								>Vision capabilities are currently unavailable</span
-							>
-							<span class="text-xs"
-								>Your AI Provider doesn't support Vision capabilities for this model. We are working
-								on adding Vision support. You can still use supported image files with Code
-								Interpreter.</span
-							>
-						</div>
-					</div>
-				{/if}
-				<div class="flex flex-row gap-2">
-					{#key selectedModel}
-						<DropdownContainer
-							footer
-							placeholder={selectedModelName || 'Select a model...'}
-							optionNodes={modelNodes}
-							optionHeaders={modelHeaders}
-							disabled={preventEdits}
-							selectedOptionScrollAlign="keep-visible"
-							topOverflowLabel="More models above"
-							bind:selectedOption={selectedModel}
-							bind:dropdownOpen
-						>
-							<DropdownHeader
-								order={1}
-								name="latest-models"
-								colorClasses="from-orange-dark to-orange"
-								topHeader>Auto-updating models (same model family only)</DropdownHeader
-							>
-							<ModelDropdownOptions
-								modelOptions={latestModelOptions}
-								{selectedModel}
-								{updateSelectedModel}
-								headerClass="latest-models"
-								bind:modelNodes
-								bind:modelHeaders
-							/>
-							{#if versionedModelOptions.length > 0}
-								<DropdownHeader
-									order={2}
-									name="versioned-models"
-									colorClasses="from-blue-dark-40 to-blue-dark-30">Fixed Versions</DropdownHeader
-								>
-								<ModelDropdownOptions
-									modelOptions={versionedModelOptions}
-									{selectedModel}
-									{updateSelectedModel}
-									headerClass="versioned-models"
-									bind:modelNodes
-									bind:modelHeaders
-									smallNameText
-								/>
-							{/if}
-							<div slot="footer">
-								<DropdownFooter
-									colorClasses="from-gray-800 to-gray-600"
-									hoverable
-									hoverColorClasses="hover:from-gray-900 hover:to-gray-700"
-									link="https://platform.openai.com/docs/models"
-									><div class="flex flex-row justify-between">
-										<div class="flex flex-row gap-2">
-											<QuestionCircleSolid /> Unsure which model to choose? Check out OpenAI's documentation
-										</div>
-										<ArrowUpRightFromSquareOutline />
-									</div></DropdownFooter
-								>
-							</div>
-						</DropdownContainer>
-					{/key}
-					{#if allowVisionUpload}
-						<Badge
-							class="flex flex-row items-center gap-x-2 rounded-lg border px-2 py-0.5 text-xs normal-case {finalVisionSupport
-								? 'border-green-400 bg-gradient-to-b from-emerald-100 to-emerald-200 text-green-800'
-								: 'border-gray-100 bg-gray-50 text-gray-600'}"
-							>{#if finalVisionSupport}<ImageOutline size="sm" />{:else}<CloseOutline
-									size="sm"
-								/>{/if}
-							<div class="flex flex-col">
-								<div>{finalVisionSupport ? 'Vision' : 'No Vision'}</div>
-								<div>capabilities</div>
-							</div></Badge
-						>
-					{/if}
-				</div>
-				{#if supportsReasoning}
-					<div class="mt-4 flex items-start justify-between gap-6">
-						<div>
-							<Label for="reasoning-effort">Reasoning effort</Label>
-							<Helper class="pb-1"
-								>Select your desired reasoning effort, which gives the model guidance on how much
-								time it should spend "reasoning" before creating a response to the prompt. {#if reasoningEffortLabels.length === 1}This
-									model supports only <span class="font-mono">{reasoningEffortLabels[0]}</span>
-									reasoning effort.{:else}You can specify one of
-									{#each reasoningEffortLabels as label, idx (label)}
-										<span class="font-mono">{label}</span>{idx < reasoningEffortLabels.length - 1
-											? ', '
-											: ''}
-									{/each} for this setting, where <span class="font-mono">low</span> will favor
-									speed, and <span class="font-mono">high</span> will favor more complete reasoning
-									at the cost of slower responses. The default value is
-									<span class="font-mono">{defaultReasoningLabel}</span>. Set reasoning effort to
-									<span class="font-mono">none</span> for the non-thinking version of this model.{/if}
-								{#if supportsTemperatureWithReasoningNone}Temperature controls become available only
-									when reasoning effort is set to <span class="font-mono">none</span>.{/if}</Helper
-							>
-						</div>
-						<select
-							id="reasoning-effort"
-							name="reasoning-effort"
-							class="block w-40 shrink-0 rounded-lg border border-gray-300 bg-gray-50 p-2.5 text-sm text-gray-900 focus:border-blue-500 focus:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
-							bind:value={reasoningEffortValue}
-							disabled={preventEdits || reasoningEffortLevels.length === 1}
-						>
-							{#each reasoningEffortLevels as level (level)}
-								<option value={level}>{getReasoningEffortLabel(level)}</option>
-							{/each}
-						</select>
-					</div>
 				{/if}
 			</div>
-		{/if}
+			<Helper class="pb-1"
+				>Select the model to use for this assistant. You can update your model selection at any
+				time. Auto-updating models move to the newest release in that model family for you and are
+				recommended for most users. Fixed versions stay on one specific release until you change
+				them. See <a
+					href="https://platform.openai.com/docs/models"
+					rel="noopener noreferrer"
+					target="_blank"
+					class="underline">OpenAI's Documentation</a
+				> for detailed descriptions of model capabilities.</Helper
+			>
+			{#if selectedModelUnavailable}
+				<div
+					role="alert"
+					class="mb-2 flex flex-row items-center gap-4 rounded-lg border border-red-400 bg-gradient-to-b from-red-50 to-red-100 p-4 py-2 text-red-800"
+				>
+					<ExclamationCircleOutline class="h-8 w-8 text-red-800" strokeWidth="2" />
+					<div class="flex flex-col">
+						<span class="text-sm font-semibold">Your selected model is no longer available</span>
+						<span class="text-xs">
+							Your AI provider no longer serves <span class="font-semibold"
+								>{selectedModelRecord?.name ?? selectedModel}</span
+							>. This assistant cannot respond using this model.
+							<span class="font-semibold"
+								>Select an available model below and save your changes to restore this assistant.</span
+							>
+						</span>
+					</div>
+				</div>
+			{:else if selectedModelDeprecated}
+				<div
+					class="mb-2 flex flex-row items-center gap-4 rounded-lg border border-amber-400 bg-gradient-to-b from-amber-50 to-amber-100 p-4 py-2 text-amber-800"
+				>
+					<ArchiveOutline class="h-8 w-8 text-amber-800" strokeWidth="1.5" />
+					<div class="flex flex-col">
+						<span class="text-sm font-semibold">Legacy Model</span>
+						<span class="text-xs"
+							>This model is no longer available for new assistants on PingPong. You can continue
+							using it with this assistant, but you won't be able to switch back after saving a new
+							model selection. <span class="font-semibold"
+								>We recommend upgrading to one of the recommended models for the best experience.</span
+							></span
+						>
+					</div>
+				</div>
+			{/if}
+			{#if supportsVision && effectiveVisionSupportOverride === false}
+				<div
+					class="mb-2 flex flex-row items-center gap-4 rounded-lg border border-amber-400 bg-gradient-to-b from-amber-50 to-amber-100 p-4 py-2 text-amber-800"
+				>
+					<div class="relative flex h-8 w-12 items-center justify-center">
+						<BanOutline class="absolute z-10 h-12 w-12 text-amber-600" strokeWidth="1.5" />
+						<FileImageOutline class="h-8 w-8 text-stone-400" strokeWidth="1" />
+					</div>
+					<div class="flex flex-col">
+						<span class="text-sm font-semibold">Vision capabilities are currently unavailable</span>
+						<span class="text-xs"
+							>Your AI Provider doesn't support Vision capabilities for this model. We are working
+							on adding Vision support. You can still use supported image files with Code
+							Interpreter.</span
+						>
+					</div>
+				</div>
+			{/if}
+			<div class="flex flex-row gap-2">
+				{#key selectedModel}
+					<DropdownContainer
+						footer
+						placeholder={selectedModelName || 'Select a model...'}
+						optionNodes={modelNodes}
+						optionHeaders={modelHeaders}
+						disabled={preventEdits}
+						selectedOptionScrollAlign="keep-visible"
+						topOverflowLabel="More models above"
+						bind:selectedOption={selectedModel}
+						bind:dropdownOpen
+					>
+						<DropdownHeader
+							order={1}
+							name="latest-models"
+							colorClasses="from-orange-dark to-orange"
+							topHeader>Auto-updating models (same model family only)</DropdownHeader
+						>
+						<ModelDropdownOptions
+							modelOptions={latestModelOptions}
+							{selectedModel}
+							{updateSelectedModel}
+							headerClass="latest-models"
+							bind:modelNodes
+							bind:modelHeaders
+						/>
+						{#if versionedModelOptions.length > 0}
+							<DropdownHeader
+								order={2}
+								name="versioned-models"
+								colorClasses="from-blue-dark-40 to-blue-dark-30">Fixed Versions</DropdownHeader
+							>
+							<ModelDropdownOptions
+								modelOptions={versionedModelOptions}
+								{selectedModel}
+								{updateSelectedModel}
+								headerClass="versioned-models"
+								bind:modelNodes
+								bind:modelHeaders
+								smallNameText
+							/>
+						{/if}
+						<div slot="footer">
+							<DropdownFooter
+								colorClasses="from-gray-800 to-gray-600"
+								hoverable
+								hoverColorClasses="hover:from-gray-900 hover:to-gray-700"
+								link="https://platform.openai.com/docs/models"
+								><div class="flex flex-row justify-between">
+									<div class="flex flex-row gap-2">
+										<QuestionCircleSolid /> Unsure which model to choose? Check out OpenAI's documentation
+									</div>
+									<ArrowUpRightFromSquareOutline />
+								</div></DropdownFooter
+							>
+						</div>
+					</DropdownContainer>
+				{/key}
+				{#if allowVisionUpload}
+					<Badge
+						class="flex flex-row items-center gap-x-2 rounded-lg border px-2 py-0.5 text-xs normal-case {finalVisionSupport
+							? 'border-green-400 bg-gradient-to-b from-emerald-100 to-emerald-200 text-green-800'
+							: 'border-gray-100 bg-gray-50 text-gray-600'}"
+						>{#if finalVisionSupport}<ImageOutline size="sm" />{:else}<CloseOutline
+								size="sm"
+							/>{/if}
+						<div class="flex flex-col">
+							<div>{finalVisionSupport ? 'Vision' : 'No Vision'}</div>
+							<div>capabilities</div>
+						</div></Badge
+					>
+				{/if}
+			</div>
+			{#if supportsReasoning}
+				<div class="mt-4 flex items-start justify-between gap-6">
+					<div>
+						<Label for="reasoning-effort">Reasoning effort</Label>
+						<Helper class="pb-1"
+							>Select your desired reasoning effort, which gives the model guidance on how much time
+							it should spend "reasoning" before creating a response to the prompt. {#if reasoningEffortLabels.length === 1}This
+								model supports only <span class="font-mono">{reasoningEffortLabels[0]}</span>
+								reasoning effort.{:else}You can specify one of
+								{#each reasoningEffortLabels as label, idx (label)}
+									<span class="font-mono">{label}</span>{idx < reasoningEffortLabels.length - 1
+										? ', '
+										: ''}
+								{/each} for this setting, where <span class="font-mono">low</span> will favor speed,
+								and <span class="font-mono">high</span> will favor more complete reasoning at the
+								cost of slower responses. The default value is
+								<span class="font-mono">{defaultReasoningLabel}</span>. Set reasoning effort to
+								<span class="font-mono">none</span> for the non-thinking version of this model.{/if}
+							{#if supportsTemperatureWithReasoningNone}Temperature controls become available only
+								when reasoning effort is set to <span class="font-mono">none</span>.{/if}</Helper
+						>
+					</div>
+					<select
+						id="reasoning-effort"
+						name="reasoning-effort"
+						class="block w-40 shrink-0 rounded-lg border border-gray-300 bg-gray-50 p-2.5 text-sm text-gray-900 focus:border-blue-500 focus:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
+						bind:value={reasoningEffortValue}
+						disabled={preventEdits || reasoningEffortLevels.length === 1}
+					>
+						{#each reasoningEffortLevels as level (level)}
+							<option value={level}>{getReasoningEffortLabel(level)}</option>
+						{/each}
+					</select>
+				</div>
+			{/if}
+		</div>
 
 		<div class="col-span-2 mb-4">
 			<Label for="description">Description</Label>
@@ -6071,6 +6105,7 @@
 				disabled={preventEdits}
 			/>
 		</div>
+
 		{#if isLectureMode}
 			{#if isLectureVideoMode}
 				<div class="col-span-2 mb-4">
@@ -6999,6 +7034,65 @@
 						</div></span
 					>
 					<div class="flex flex-col gap-4 px-1">
+						{#if isLectureSlideMode}
+							<div>
+								<Label for="lecture-generation-model">Material Creation Model</Label>
+								<Helper class="pb-1"
+									>Select the model used to create slide narration and questions.</Helper
+								>
+								<select
+									id="lecture-generation-model"
+									bind:value={lectureGenerationModel}
+									disabled={preventEdits}
+									class="block w-full rounded-lg border border-gray-300 bg-gray-50 p-2.5 text-sm text-gray-900 disabled:cursor-not-allowed disabled:opacity-60"
+								>
+									<option value=""
+										>Use Chat Model ({selectedModelRecord?.name || selectedModel})</option
+									>
+									{#if lectureGenerationModel && !generationModels.some((model) => model.id === lectureGenerationModel)}
+										<option value={lectureGenerationModel}
+											>{lectureGenerationModel} (Saved Model)</option
+										>
+									{/if}
+									{#each generationModels as model (model.id)}
+										<option value={model.id}>{modelNameDict[model.id]}</option>
+									{/each}
+								</select>
+							</div>
+						{:else if isLectureVideoMode}
+							{@const effectiveGeminiModelName =
+								data.geminiModels?.models.find((model) => model.id === lectureGeminiModel)?.name ||
+								(lectureGeminiModel === data.geminiModels?.default_model.id
+									? data.geminiModels.default_model.name
+									: null) ||
+								'Saved Model'}
+							<div>
+								<Label for="lecture-gemini-model">Material Creation Model</Label>
+								<Helper class="pb-1"
+									>Select the Google model used to analyze the video and create questions.</Helper
+								>
+								<select
+									id="lecture-gemini-model"
+									bind:value={lectureGeminiModel}
+									disabled={preventEdits}
+									class="block w-full rounded-lg border border-gray-300 bg-gray-50 p-2.5 text-sm text-gray-900 disabled:cursor-not-allowed disabled:opacity-60"
+								>
+									{#if !data.geminiModels?.models.some((model) => model.id === lectureGeminiModel)}
+										<option value={lectureGeminiModel}>{effectiveGeminiModelName}</option>
+									{/if}
+									{#each data.geminiModels?.models || [] as model (model.id)}
+										<option value={model.id}>{model.name}</option>
+									{/each}
+								</select>
+								{#if data.geminiModelsLoadError}
+									<Helper class="mt-1" color="red">{data.geminiModelsLoadError}</Helper>
+								{:else if data.geminiModels?.models.length === 0}
+									<Helper class="mt-1"
+										>No supported Google models are available. Check the group's Gemini credential.</Helper
+									>
+								{/if}
+							</div>
+						{/if}
 						{#if isLectureMode}
 							{@const haveInstructionsChanged =
 								normalizeNewlines(instructions) !==
@@ -7058,6 +7152,36 @@
 									name="instructions"
 									rows={6}
 									bind:value={instructions}
+									disabled={preventEdits}
+								/>
+							</div>
+
+							<div class="col-span-2 mb-1">
+								<div class="flex items-end justify-between gap-3">
+									<div>
+										<Label for="lecture-check-instructions"
+											>Open-Ended Answer Evaluation Instructions</Label
+										>
+										<Helper class="pb-1"
+											>Used to evaluate and guide students through open-ended learning checks.</Helper
+										>
+									</div>
+									<button
+										type="button"
+										class="shrink-0 pb-1 text-xs text-blue-800 hover:underline disabled:cursor-not-allowed disabled:text-gray-400 disabled:no-underline"
+										disabled={preventEdits ||
+											lectureCheckInstructions === defaultCheckInstructions ||
+											!defaultCheckInstructions}
+										onclick={() => {
+											lectureCheckInstructions = defaultCheckInstructions;
+										}}>Switch to latest default</button
+									>
+								</div>
+								<Textarea
+									id="lecture-check-instructions"
+									rows={8}
+									maxlength={20000}
+									bind:value={lectureCheckInstructions}
 									disabled={preventEdits}
 								/>
 							</div>
