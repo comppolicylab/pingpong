@@ -1563,8 +1563,17 @@ async def test_upload_assistant_lecture_slide_additional_context_allows_editor(
         ("user:123", "can_edit", "assistant:1"),
     ]
 )
+@pytest.mark.parametrize(
+    "failed_stage, narration_positions, expected_stage",
+    [
+        (schemas.LectureSlideProcessingStage.NARRATION_TRANSCRIPTION, None,
+         schemas.LectureSlideProcessingStage.NARRATION_AUDIO),
+        (schemas.LectureSlideProcessingStage.NARRATION_TEXT, [2],
+         schemas.LectureSlideProcessingStage.NARRATION_TEXT),
+    ],
+)
 async def test_retry_lecture_slide_endpoint_queues_processing_after_failure(
-    api, db, institution, valid_user_token
+    api, db, institution, valid_user_token, failed_stage, narration_positions, expected_stage
 ):
     async with db.async_session() as session:
         class_ = await session.get(models.Class, 1)
@@ -1616,7 +1625,8 @@ async def test_retry_lecture_slide_endpoint_queues_processing_after_failure(
             lecture_slide_deck_id_snapshot=deck.id,
             class_id=class_.id,
             assistant_id_at_start=assistant.id,
-            stage=schemas.LectureSlideProcessingStage.NARRATION_TRANSCRIPTION,
+            stage=failed_stage,
+            narration_positions=narration_positions,
             attempt_number=1,
             status=schemas.LectureSlideProcessingRunStatus.FAILED,
         )
@@ -1653,7 +1663,8 @@ async def test_retry_lecture_slide_endpoint_queues_processing_after_failure(
     assert len(runs) == 2
     assert runs[0].status == schemas.LectureSlideProcessingRunStatus.FAILED
     assert runs[1].status == schemas.LectureSlideProcessingRunStatus.QUEUED
-    assert runs[1].stage == schemas.LectureSlideProcessingStage.NARRATION_AUDIO
+    assert runs[1].stage == expected_stage
+    assert runs[1].narration_positions == narration_positions
     assert runs[1].attempt_number == 2
 
 

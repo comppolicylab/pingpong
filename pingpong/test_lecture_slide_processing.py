@@ -1643,6 +1643,8 @@ async def test_generate_narration_text_requires_exact_slide_count(
     assert "Emphasize the setup before introducing the result." in payload
     assert "Mention this is a common exam misconception." in payload
     assert "Narration prompt" not in payload
+    assert "FIXED EXISTING NARRATION" not in payload
+    assert "Existing narration is provided" not in str(captured["instructions"])
 
 
 async def test_generate_narration_text_appends_faithful_transcript_addendum(db):
@@ -5419,3 +5421,215 @@ async def test_slide_audio_job_synthesizes_four_pages_at_once(db, monkeypatch):
     async with db.async_session() as session:
         persisted = list(await session.scalars(select(models.LectureSlidePage)))
         assert all(page.narration_id is not None for page in persisted)
+
+
+@pytest.mark.parametrize("content_kind", ["image", "gif"])
+async def test_inserted_visual_narration_preserves_existing_edits(
+    db, monkeypatch, content_kind
+):
+    await _create_class_and_deck(db, slide_count=3)
+    async with db.async_session() as session:
+        deck = await models.LectureSlideDeck.get_by_id(session, 1)
+        deck.status = schemas.LectureSlideDeckStatus.READY
+        narration = models.LectureSlideNarration(
+            tts_text="Manually edited speech.",
+            status=schemas.LectureSlideNarrationStatus.READY,
+        )
+        session.add(narration)
+        await session.flush()
+        narration_id = narration.id
+        session.add_all(
+            [
+                models.LectureSlidePage(
+                    lecture_slide_deck_id=1,
+                    position=0,
+                    source_page_number=0,
+                    title="Keep title",
+                    narration_text="Manually edited text.",
+                    narration_tts_text="Manually edited speech.",
+                    narration_id=narration_id,
+                ),
+                models.LectureSlidePage(
+                    lecture_slide_deck_id=1,
+                    position=1,
+                    source_page_number=1,
+                    narration_text="",  # Deliberate silence must also survive.
+                ),
+                models.LectureSlidePage(
+                    lecture_slide_deck_id=1,
+                    position=2,
+                    source_page_number=2,
+                    title="Next topic",
+                    narration_text="Next, we apply this to the water cycle.",
+                ),
+            ]
+        )
+        media = await models.LectureSlideMediaStoredObject.create(
+            session,
+            class_id=1,
+            uploader_id=deck.uploader_id,
+            key="inserted",
+            original_filename=f"inserted.{content_kind}",
+            content_type=f"image/{content_kind}",
+            content_length=100,
+            content_kind=schemas.LectureSlideContentKind(content_kind),
+            duration_ms=None,
+            width_px=640,
+            height_px=480,
+        )
+        result = await lecture_slide_service.apply_lecture_slide_content_items(
+            session,
+            deck,
+            [
+                schemas.LectureSlideContentItemInput(
+                    content_kind="slide",
+                    source_page_number=0,
+                    narration_text="Manually edited [[text=>speech]].",
+                ),
+                schemas.LectureSlideContentItemInput(
+                    content_kind=content_kind,
+                    media_stored_object_id=media.id,
+                    user_notes="Explain the inserted visual.",
+                ),
+                schemas.LectureSlideContentItemInput(
+                    content_kind="slide",
+                    source_page_number=1,
+                    narration_text="",
+                ),
+                schemas.LectureSlideContentItemInput(
+                    content_kind="slide",
+                    source_page_number=2,
+                    narration_text="Next, we apply this to the water cycle.",
+                ),
+            ],
+            uploader_id=deck.uploader_id,
+        )
+        assert result.narration_generation_positions == frozenset({1})
+        run = await lecture_slide_processing.queue_narration_text_processing_run(
+            session,
+            deck,
+            narration_positions=sorted(result.narration_generation_positions),
+        )
+        run.status = schemas.LectureSlideProcessingRunStatus.RUNNING
+        run.lease_token = "lease"
+        await session.commit()
+        run_id = run.id
+
+    async def media_inputs(items):
+        assert [position for position, _ in items] == [1]
+        return []
+
+    monkeypatch.setattr(
+        lecture_slide_processing,
+        "_lecture_slide_media_input_images",
+        media_inputs,
+    )
+
+    class Responses:
+        async def parse(self, **kwargs):
+            assert "Generate narration for exactly 1 slides" in json.dumps(
+                kwargs["input"]
+            )
+            message = kwargs["input"][0]["content"][-1]["text"]
+            fixed_narration = json.loads(
+                message.split("FIXED EXISTING NARRATION IN SLIDE ORDER:\n", 1)[1]
+            )
+            assert fixed_narration == [
+                {
+                    "slide_position": 0,
+                    "content_kind": "slide",
+                    "title": "Keep title",
+                    "narration_text": "Manually edited text.",
+                },
+                {
+                    "slide_position": 2,
+                    "content_kind": "slide",
+                    "title": None,
+                    "narration_text": "",
+                },
+                {
+                    "slide_position": 3,
+                    "content_kind": "slide",
+                    "title": "Next topic",
+                    "narration_text": "Next, we apply this to the water cycle.",
+                },
+            ]
+            assert "Match its terminology, tone, and level of detail" in kwargs[
+                "instructions"
+            ]
+            assert "Continue naturally from the preceding narration" in kwargs[
+                "instructions"
+            ]
+            assert "lead into the following narration" in kwargs["instructions"]
+            assert "Avoid repeating explanations already given" in kwargs[
+                "instructions"
+            ]
+            with pytest.raises(ValueError):
+                kwargs["text_format"](
+                    slides=[
+                        lecture_slide_processing.GeneratedSlideNarration(
+                            slide_position=0, narration_text="Overwrite existing."
+                        )
+                    ]
+                )
+            return SimpleNamespace(
+                output_parsed=kwargs["text_format"](
+                    slides=[
+                        lecture_slide_processing.GeneratedSlideNarration(
+                            slide_position=1,
+                            title="Inserted",
+                            narration_text="New narration.",
+                        )
+                    ]
+                )
+            )
+
+    generated = await lecture_slide_processing._generate_narration_text(
+        run_id,
+        "lease",
+        1,
+        "file-pdf",
+        "test-model",
+        SimpleNamespace(responses=Responses()),
+    )
+    await lecture_slide_processing._persist_narration_text(
+        run_id, "lease", 1, generated
+    )
+    async with db.async_session() as session:
+        deck = await models.LectureSlideDeck.get_by_id_with_processing_context(
+            session, 1
+        )
+        first, inserted, silent, following = sorted(
+            deck.pages, key=lambda page: page.position
+        )
+        assert first.narration_text == "Manually edited text."
+        assert first.narration_tts_text == "Manually edited speech."
+        assert first.narration_id == narration_id
+        assert first.title == "Keep title"
+        assert inserted.narration_text == "New narration."
+        assert silent.narration_text is None
+        assert following.narration_text == "Next, we apply this to the water cycle."
+
+
+async def test_narration_scope_merges_and_explicit_regeneration_covers_all(db):
+    await _create_class_and_deck(db)
+    async with db.async_session() as session:
+        deck = await models.LectureSlideDeck.get_by_id(session, 1)
+        deck.status = schemas.LectureSlideDeckStatus.READY
+        run = await lecture_slide_processing.queue_narration_text_processing_run(
+            session, deck, narration_positions=[1]
+        )
+        reused = await lecture_slide_processing.queue_narration_text_processing_run(
+            session, deck, narration_positions=[3]
+        )
+        assert reused.id == run.id
+        assert reused.narration_positions == [1, 3]
+        full = await lecture_slide_processing.queue_narration_text_processing_run(
+            session, deck
+        )
+        assert full.id == run.id
+        assert full.narration_positions is None
+        reused = await lecture_slide_processing.queue_narration_text_processing_run(
+            session, deck, narration_positions=[2]
+        )
+        assert reused.narration_positions is None

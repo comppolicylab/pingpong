@@ -69,6 +69,7 @@ class LectureSlidePageUpdateResult:
     narration_changed_positions: frozenset[int] = frozenset()
     structure_changed: bool = False
     requires_narration_generation: bool = False
+    narration_generation_positions: frozenset[int] = frozenset()
 
 
 @dataclass(frozen=True)
@@ -1083,7 +1084,7 @@ async def apply_lecture_slide_content_items(
     narration_changed_positions: set[int] = set()
     old_narration_ids: list[int] = []
     structure_changed = False
-    requires_narration_generation = False
+    narration_generation_positions: set[int] = set()
 
     for position, item in enumerate(requested_items):
         if item.content_kind == schemas.LectureSlideContentKind.SLIDE:
@@ -1113,7 +1114,7 @@ async def apply_lecture_slide_content_items(
                     schemas.LectureSlideContentKind.IMAGE,
                     schemas.LectureSlideContentKind.GIF,
                 }:
-                    requires_narration_generation = True
+                    narration_generation_positions.add(position)
                 page = models.LectureSlidePage(
                     lecture_slide_deck_id=deck.id,
                     position=-(position + 1),
@@ -1193,7 +1194,8 @@ async def apply_lecture_slide_content_items(
         narration_changed=narration_changed,
         narration_changed_positions=frozenset(narration_changed_positions),
         structure_changed=structure_changed,
-        requires_narration_generation=requires_narration_generation,
+        requires_narration_generation=bool(narration_generation_positions),
+        narration_generation_positions=frozenset(narration_generation_positions),
     )
 
 
