@@ -743,6 +743,10 @@ def _lecture_slide_deck_view(
                 id=page.id,
                 position=page.position,
                 content_kind=page.content_kind,
+                video_muted=page.video_muted,
+                media_has_audio=page.media_stored_object.has_audio
+                if page.media_stored_object is not None
+                else None,
                 source_page_number=page.source_page_number,
                 start_offset_ms=(
                     translated_pages[page.position].start_offset_ms
@@ -11837,6 +11841,10 @@ async def get_assistant_lecture_slide_config(
             id=page.id,
             position=page.position,
             content_kind=page.content_kind,
+            video_muted=page.video_muted,
+            media_has_audio=page.media_stored_object.has_audio
+            if page.media_stored_object is not None
+            else None,
             source_page_number=page.source_page_number,
             title=page.title,
             extracted_text=page.extracted_text,

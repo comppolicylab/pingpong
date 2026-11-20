@@ -3372,8 +3372,9 @@ async def test_total_stored_audio_duration_requires_every_duration():
 
 
 @pytest.mark.parametrize("spoken", ["nuh-ray-shun.", "nuh ray shun."])
+@pytest.mark.parametrize("video_muted", [False, True])
 async def test_synthesize_slide_audio_skips_empty_pages_and_stores_ogg_metadata(
-    db, monkeypatch, spoken
+    db, monkeypatch, spoken, video_muted
 ):
     await _create_class_and_deck(db, slide_count=3)
     async with db.async_session() as session:
@@ -3381,6 +3382,10 @@ async def test_synthesize_slide_audio_skips_empty_pages_and_stores_ogg_metadata(
             models.LectureSlidePage(
                 lecture_slide_deck_id=1,
                 position=0,
+                content_kind=schemas.LectureSlideContentKind.VIDEO
+                if video_muted
+                else schemas.LectureSlideContentKind.SLIDE,
+                video_muted=video_muted,
                 narration_text="First narration.",
                 narration_tts_text=f"First {spoken}",
             ),
@@ -5467,7 +5472,7 @@ async def test_slide_audio_job_synthesizes_four_pages_at_once(db, monkeypatch):
         assert all(page.narration_id is not None for page in persisted)
 
 
-@pytest.mark.parametrize("content_kind", ["image", "gif"])
+@pytest.mark.parametrize("content_kind", ["image", "gif", "video"])
 async def test_inserted_visual_narration_preserves_existing_edits(
     db, monkeypatch, content_kind
 ):
@@ -5532,6 +5537,7 @@ async def test_inserted_visual_narration_preserves_existing_edits(
                 ),
                 schemas.LectureSlideContentItemInput(
                     content_kind=content_kind,
+                    video_muted=content_kind == "video",
                     media_stored_object_id=media.id,
                     user_notes="Explain the inserted visual.",
                 ),
@@ -5856,3 +5862,30 @@ async def test_running_narration_scope_is_immutable(db, requested_positions):
             assert replacement.force_manifest_generation
             assert replacement.status == schemas.LectureSlideProcessingRunStatus.QUEUED
         await session.commit()
+
+
+async def test_video_media_inputs_use_frames_like_gifs(config, monkeypatch):
+    class Store:
+        async def stream_video(self, key):
+            yield b"video-bytes"
+
+    monkeypatch.setattr(config, "video_store", SimpleNamespace(store=Store()))
+    monkeypatch.setattr(
+        lecture_slide_processing,
+        "_extract_gif_narration_frames",
+        lambda data, duration: [(0, b"first"), (1000, b"last")],
+    )
+    media = SimpleNamespace(
+        key="clip.mp4",
+        content_type="video/mp4",
+        content_kind=schemas.LectureSlideContentKind.VIDEO,
+        duration_ms=1000,
+    )
+    content = await lecture_slide_processing._lecture_slide_media_input_images(
+        [(2, media)]
+    )
+    assert content[0]["text"] == "VIDEO at slide_position 2 — frame 1 of 2, t=0.00s:"
+    assert content[2]["text"] == "VIDEO at slide_position 2 — frame 2 of 2, t=1.00s:"
+    assert all(
+        item["image_url"].startswith("data:image/png;") for item in content[1::2]
+    )

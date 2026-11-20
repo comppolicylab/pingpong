@@ -42,6 +42,7 @@ export type LectureSlideContentJson = {
 export type LectureSlideContentPageDraft = {
 	position: number;
 	content_kind: LectureSlideContentKind;
+	video_muted?: boolean;
 	title?: string | null;
 	extracted_text?: string | null;
 	image_description?: string | null;
@@ -86,7 +87,8 @@ export const buildLectureSlideContentJson = (
 				image_description: page.image_description || null
 			},
 			user_notes: page.user_notes || '',
-			narration_text: page.content_kind === 'video' ? null : page.narration_text || '',
+			narration_text:
+				page.content_kind === 'video' && !page.video_muted ? null : page.narration_text || '',
 			questions: questions
 				.filter((question) => question.slide_position === page.position)
 				.map((question) => ({
@@ -183,6 +185,7 @@ export const parseLectureSlideContentJson = (
 		}
 		if (
 			existingPage.content_kind === 'video' &&
+			!existingPage.video_muted &&
 			typeof rawSlide.narration_text === 'string' &&
 			rawSlide.narration_text.trim()
 		) {
@@ -311,7 +314,8 @@ export const applyLectureSlideContentJson = <Page extends LectureSlideContentPag
 			? {
 					...page,
 					user_notes: slide.user_notes,
-					narration_text: page.content_kind === 'video' ? '' : slide.narration_text || ''
+					narration_text:
+						page.content_kind === 'video' && !page.video_muted ? '' : slide.narration_text || ''
 				}
 			: page;
 	});

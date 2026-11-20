@@ -7,7 +7,7 @@
 	import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.mjs';
 	import pdfWorkerUrl from 'pdfjs-dist/legacy/build/pdf.worker.mjs?url';
 	import type { PDFDocumentProxy } from 'pdfjs-dist/types/src/pdf';
-	import { QuestionCircleOutline } from 'flowbite-svelte-icons';
+	import { PlaySolid, QuestionCircleOutline } from 'flowbite-svelte-icons';
 	import LectureSlideAddMenu from './LectureSlideAddMenu.svelte';
 
 	type FilmstripPage = {
@@ -221,8 +221,25 @@
 		>
 			<div class="relative aspect-video w-full overflow-hidden bg-gray-50">
 				{#if page.content_kind === 'video' && page.media_url}
-					<video src={page.media_url} class="h-full w-full object-contain" muted preload="metadata"
+					<video
+						src={page.media_url}
+						class="h-full w-full object-contain"
+						muted
+						playsinline
+						preload="auto"
+						onloadedmetadata={(event) => {
+							const video = event.currentTarget;
+							// Seek into the clip so browsers decode a thumbnail frame.
+							if (Number.isFinite(video.duration) && video.duration > 0) {
+								video.currentTime = Math.min(0.1, video.duration / 2);
+							}
+						}}
 					></video>
+					<div class="pointer-events-none absolute inset-0 flex items-center justify-center">
+						<span class="rounded-full bg-black/50 p-1.5 text-white" aria-hidden="true">
+							<PlaySolid class="h-3 w-3" />
+						</span>
+					</div>
 				{:else if page.content_kind !== 'slide' && page.media_url}
 					<img
 						src={page.media_url}

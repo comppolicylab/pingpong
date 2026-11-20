@@ -241,6 +241,7 @@
 		media_url?: string | null;
 		media_content_type?: string | null;
 		media_filename?: string | null;
+		media_has_audio?: boolean | null;
 		media_duration_ms?: number | null;
 		media_width_px?: number | null;
 		media_height_px?: number | null;
@@ -250,6 +251,7 @@
 		id: page.id,
 		position: page.position,
 		content_kind: page.content_kind || 'slide',
+		video_muted: page.video_muted ?? false,
 		source_page_number: page.source_page_number ?? page.position,
 		title: page.title,
 		extracted_text: page.extracted_text,
@@ -258,11 +260,15 @@
 		media_url: page.media_url,
 		media_content_type: page.media_content_type,
 		media_filename: page.media_filename,
+		media_has_audio: page.media_has_audio,
 		media_duration_ms: page.media_duration_ms,
 		media_width_px: page.media_width_px,
 		media_height_px: page.media_height_px,
 		user_notes: page.user_notes || '',
-		narration_text: (page.content_kind || 'slide') === 'video' ? '' : page.narration_text || ''
+		narration_text:
+			(page.content_kind || 'slide') === 'video' && !page.video_muted
+				? ''
+				: page.narration_text || ''
 	});
 
 	const lectureSlidePagesToDrafts = (
@@ -284,10 +290,12 @@
 		page: LectureSlideContentDraft
 	): api.LectureSlideContentItemInput => ({
 		content_kind: page.content_kind,
+		video_muted: page.video_muted ?? false,
 		source_page_number: page.content_kind === 'slide' ? page.source_page_number : undefined,
 		media_stored_object_id: page.content_kind === 'slide' ? undefined : page.media_stored_object_id,
 		user_notes: page.user_notes,
-		narration_text: page.content_kind === 'video' ? undefined : page.narration_text
+		narration_text:
+			page.content_kind === 'video' && !page.video_muted ? undefined : page.narration_text
 	});
 
 	const lectureSlideDraftToPageNotes = (
@@ -295,7 +303,8 @@
 	): api.LectureSlidePageNotes => ({
 		position: page.position,
 		user_notes: page.user_notes,
-		narration_text: page.content_kind === 'video' ? undefined : page.narration_text
+		narration_text:
+			page.content_kind === 'video' && !page.video_muted ? undefined : page.narration_text
 	});
 
 	const lectureSlideQuestionTypeDetails: {
@@ -1662,16 +1671,21 @@
 		(data.lectureSlideConfig?.pages || []).map((page) => ({
 			position: page.position,
 			content_kind: page.content_kind || 'slide',
+			video_muted: page.video_muted ?? false,
 			source_page_number: page.source_page_number ?? page.position,
 			media_stored_object_id: page.media_stored_object_id ?? null,
 			user_notes: page.user_notes || '',
-			narration_text: (page.content_kind || 'slide') === 'video' ? '' : page.narration_text || ''
+			narration_text:
+				(page.content_kind || 'slide') === 'video' && !page.video_muted
+					? ''
+					: page.narration_text || ''
 		}))
 	);
 	$: currentLectureSlideStructureNormalized = JSON.stringify(
 		(data.lectureSlideConfig?.pages || []).map((page) => ({
 			position: page.position,
 			content_kind: page.content_kind || 'slide',
+			video_muted: page.video_muted ?? false,
 			source_page_number:
 				(page.content_kind || 'slide') === 'slide'
 					? (page.source_page_number ?? page.position)
@@ -1683,6 +1697,7 @@
 		lectureSlidePageDrafts.map((page) => ({
 			position: page.position,
 			content_kind: page.content_kind,
+			video_muted: page.video_muted ?? false,
 			source_page_number:
 				page.content_kind === 'slide' ? (page.source_page_number ?? page.position) : null,
 			media_stored_object_id: page.media_stored_object_id ?? null
@@ -1709,13 +1724,17 @@
 	$: currentLectureSlideNarrationNormalized = JSON.stringify(
 		(data.lectureSlideConfig?.pages || []).map((page) => ({
 			position: page.position,
-			narration_text: (page.content_kind || 'slide') === 'video' ? '' : page.narration_text || ''
+			narration_text:
+				(page.content_kind || 'slide') === 'video' && !page.video_muted
+					? ''
+					: page.narration_text || ''
 		}))
 	);
 	$: lectureSlideNarrationNormalized = JSON.stringify(
 		lectureSlidePageDrafts.map((page) => ({
 			position: page.position,
-			narration_text: page.content_kind === 'video' ? '' : page.narration_text || ''
+			narration_text:
+				page.content_kind === 'video' && !page.video_muted ? '' : page.narration_text || ''
 		}))
 	);
 	$: lectureSlideNarrationChanged =
@@ -1727,10 +1746,12 @@
 			lectureSlidePageDrafts.map((page) => ({
 				position: page.position,
 				content_kind: page.content_kind,
+				video_muted: page.video_muted ?? false,
 				source_page_number: page.source_page_number ?? null,
 				media_stored_object_id: page.media_stored_object_id ?? null,
 				user_notes: page.user_notes || '',
-				narration_text: page.content_kind === 'video' ? '' : page.narration_text || ''
+				narration_text:
+					page.content_kind === 'video' && !page.video_muted ? '' : page.narration_text || ''
 			}))
 		) !== currentLectureSlidePagesNormalized;
 	$: currentLectureSlideQuestionsNormalized = JSON.stringify(
@@ -3881,6 +3902,8 @@
 			id: -1_000_000 - media.id,
 			position: insertIndex,
 			content_kind: media.content_kind,
+			video_muted: media.content_kind === 'video' && !media.has_audio,
+			media_has_audio: media.has_audio,
 			media_stored_object_id: media.id,
 			media_url: previewUrl,
 			media_content_type: media.content_type,
@@ -4122,6 +4145,12 @@
 		}
 		lectureSlideAdditionalContextFiles = lectureSlideAdditionalContextFiles.filter(
 			(file) => file.id !== contextFileId
+		);
+	};
+
+	const setLectureSlideVideoMuted = (position: number, videoMuted: boolean) => {
+		lectureSlidePageDrafts = lectureSlidePageDrafts.map((page) =>
+			page.position === position ? { ...page, video_muted: videoMuted, narration_text: '' } : page
 		);
 	};
 
@@ -4651,7 +4680,7 @@
 				lectureSlideContentJson = stringifyLectureSlideContentJson();
 			}
 			for (const page of lectureSlidePageDrafts) {
-				if (page.content_kind === 'video') continue;
+				if (page.content_kind === 'video' && !page.video_muted) continue;
 				const pronunciationError = lecturePronunciationError(page.narration_text || '');
 				if (pronunciationError) {
 					sadToast(`Slide ${page.position + 1} narration: ${pronunciationError}`);
@@ -5090,6 +5119,7 @@
 								<!-- svelte-ignore a11y_media_has_caption -->
 								<video
 									src={selectedLectureSlidePage.media_url}
+									muted={selectedLectureSlidePage.video_muted ?? false}
 									controls
 									class="h-full w-full object-contain"
 								></video>
@@ -5568,6 +5598,19 @@
 						</div>
 					{:else if selectedLectureSlidePage}
 						<div class="min-h-0 flex-1 space-y-5 overflow-y-auto px-5 py-5">
+							{#if selectedLectureSlidePage.content_kind === 'video'}
+								<Checkbox
+									checked={selectedLectureSlidePage.video_muted ?? false}
+									disabled={preventEdits || selectedLectureSlidePage.media_has_audio === false}
+									onchange={(event) =>
+										setLectureSlideVideoMuted(
+											selectedLectureSlidePage.position,
+											(event.target as HTMLInputElement).checked
+										)}
+								>
+									Mute original audio and generate narration
+								</Checkbox>
+							{/if}
 							<div class="space-y-1.5">
 								<Label
 									for="slide_author_notes"
@@ -5597,7 +5640,7 @@
 								>
 									Narration
 								</Label>
-								{#if selectedLectureSlidePage.content_kind === 'video'}
+								{#if selectedLectureSlidePage.content_kind === 'video' && !selectedLectureSlidePage.video_muted}
 									<div
 										class="rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm text-gray-600"
 									>
@@ -5611,7 +5654,7 @@
 										Narration will become editable after it has been generated.
 									</div>
 								{/if}
-								{#if selectedLectureSlidePage.content_kind !== 'video'}
+								{#if selectedLectureSlidePage.content_kind !== 'video' || selectedLectureSlidePage.video_muted}
 									<Textarea
 										id="slide_narration_text"
 										rows={3}

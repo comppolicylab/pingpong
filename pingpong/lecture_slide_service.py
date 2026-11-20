@@ -110,6 +110,7 @@ def lecture_slide_media_summary_from_model(
         duration_ms=media.duration_ms,
         width_px=media.width_px,
         height_px=media.height_px,
+        has_audio=media.has_audio,
     )
 
 
@@ -237,11 +238,6 @@ async def create_lecture_slide_media_upload(
                 raise HTTPException(
                     status_code=400, detail="Could not determine video duration."
                 )
-            if not probe.has_audio:
-                raise HTTPException(
-                    status_code=400,
-                    detail="Inserted video clips must include an audio track.",
-                )
         media_file.seek(0)
         await config.video_store.store.put(store_key, media_file, content_type)
         # If the database transaction later fails, retain the blob for eventual
@@ -258,6 +254,7 @@ async def create_lecture_slide_media_upload(
         duration_ms=probe.duration_ms,
         width_px=probe.width_px,
         height_px=probe.height_px,
+        has_audio=probe.has_audio,
     )
 
 
@@ -924,7 +921,10 @@ async def pending_lecture_slide_narration_page_identities(
     return {
         lecture_slide_page_identity(page)
         for page in deck.pages
-        if page.content_kind != schemas.LectureSlideContentKind.VIDEO
+        if (
+            page.content_kind != schemas.LectureSlideContentKind.VIDEO
+            or page.video_muted
+        )
         and (
             run.narration_positions is None or page.position in run.narration_positions
         )
@@ -965,7 +965,9 @@ async def apply_lecture_slide_page_notes(
         page.position: page
         for page in (
             await session.scalars(
-                select(models.LectureSlidePage).where(
+                select(models.LectureSlidePage)
+                .options(selectinload(models.LectureSlidePage.media_stored_object))
+                .where(
                     models.LectureSlidePage.lecture_slide_deck_id == deck.id,
                     models.LectureSlidePage.position.in_(notes_by_position),
                 )
@@ -983,6 +985,7 @@ async def apply_lecture_slide_page_notes(
         if (
             page is not None
             and page.content_kind == schemas.LectureSlideContentKind.VIDEO
+            and not page.video_muted
         ):
             narration_text = page.narration_text
             narration_tts_text = page.narration_tts_text
@@ -992,6 +995,18 @@ async def apply_lecture_slide_page_notes(
             )
             narration_text = pronunciation.display or None
             narration_tts_text = pronunciation.speech_override
+        if (
+            page is not None
+            and page.content_kind == schemas.LectureSlideContentKind.VIDEO
+            and page.media_stored_object is not None
+            and not page.media_stored_object.has_audio
+            and (page.narration_text or "").strip()
+            and not narration_text
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail="Videos without an audio track require narration.",
+            )
         if page is None:
             if user_notes is None and narration_text is None:
                 continue
@@ -1014,7 +1029,10 @@ async def apply_lecture_slide_page_notes(
             page.user_notes = user_notes
             session.add(page)
             notes_changed = True
-            if page.content_kind != schemas.LectureSlideContentKind.VIDEO:
+            if (
+                page.content_kind != schemas.LectureSlideContentKind.VIDEO
+                or page.video_muted
+            ):
                 notes_changed_positions.add(note.position)
         if (
             page.narration_text != narration_text
@@ -1191,8 +1209,36 @@ async def apply_lecture_slide_content_items(
                 session.add(page)
             page.media_stored_object = media
 
+        if (
+            item.content_kind == schemas.LectureSlideContentKind.VIDEO
+            and not page.media_stored_object.has_audio
+            and not item.video_muted
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail="Videos without an audio track require narration. Enable generated narration for this clip.",
+            )
+
+        mute_changed = bool(page.video_muted) != item.video_muted
+        if mute_changed:
+            if page.narration_id is not None:
+                old_narration_ids.append(page.narration_id)
+            page.video_muted = item.video_muted
+            page.narration_id = None
+            page.narration_text = None
+            page.narration_tts_text = None
+            page.start_offset_ms = None
+            page.end_offset_ms = None
+            narration_changed = True
+            narration_changed_positions.add(position)
+            if item.video_muted:
+                narration_generation_positions.add(position)
+
         user_notes = (item.user_notes or "").strip() or None
-        if item.content_kind == schemas.LectureSlideContentKind.VIDEO:
+        if (
+            item.content_kind == schemas.LectureSlideContentKind.VIDEO
+            and not item.video_muted
+        ):
             narration_text = page.narration_text
             narration_tts_text = page.narration_tts_text
         else:
@@ -1201,6 +1247,12 @@ async def apply_lecture_slide_content_items(
             )
             narration_text = pronunciation.display or None
             narration_tts_text = pronunciation.speech_override
+        if (
+            item.content_kind == schemas.LectureSlideContentKind.VIDEO
+            and not page.media_stored_object.has_audio
+            and narration_text is None
+        ):
+            narration_generation_positions.add(position)
         if narration_text is not None:
             # A supplied script takes precedence over automatic narration for
             # newly inserted images and GIFs.
@@ -1208,9 +1260,9 @@ async def apply_lecture_slide_content_items(
         if page.user_notes != user_notes:
             page.user_notes = user_notes
             notes_changed = True
-            if (
-                existing_page is not None
-                and page.content_kind != schemas.LectureSlideContentKind.VIDEO
+            if existing_page is not None and (
+                page.content_kind != schemas.LectureSlideContentKind.VIDEO
+                or page.video_muted
             ):
                 notes_changed_positions.add(position)
         if (
@@ -2213,6 +2265,7 @@ async def clone_lecture_slide_deck_snapshot(
                 lecture_slide_deck_id=cloned_deck.id,
                 position=page.position,
                 content_kind=page.content_kind,
+                video_muted=page.video_muted,
                 source_page_number=page.source_page_number,
                 image_stored_object_id=page.image_stored_object_id,
                 media_stored_object_id=page.media_stored_object_id,

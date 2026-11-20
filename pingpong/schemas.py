@@ -840,6 +840,7 @@ class LectureSlidePageView(BaseModel):
     id: int
     position: int
     content_kind: LectureSlideContentKind = LectureSlideContentKind.SLIDE
+    video_muted: bool = False
     source_page_number: int | None = Field(None, ge=0)
     start_offset_ms: int | None = Field(None, ge=0)
     end_offset_ms: int | None = Field(None, ge=0)
@@ -849,6 +850,7 @@ class LectureSlidePageView(BaseModel):
     media_url: str | None = None
     media_content_type: str | None = None
     media_filename: str | None = None
+    media_has_audio: bool | None = None
     media_duration_ms: int | None = Field(None, ge=0)
     media_width_px: int | None = Field(None, ge=1)
     media_height_px: int | None = Field(None, ge=1)
@@ -1436,6 +1438,7 @@ class LectureSlidePageNotes(BaseModel):
 
 class LectureSlideContentItemInput(BaseModel):
     content_kind: LectureSlideContentKind
+    video_muted: bool = False
     source_page_number: int | None = Field(None, ge=0)
     media_stored_object_id: int | None = None
     user_notes: str | None = Field(None, max_length=20000)
@@ -1462,11 +1465,14 @@ class LectureSlideContentItemInput(BaseModel):
             )
         if (
             self.content_kind == LectureSlideContentKind.VIDEO
+            and not self.video_muted
             and (self.narration_text or "").strip()
         ):
             raise ValueError(
                 "Inserted videos use their original audio and cannot have generated narration."
             )
+        if self.video_muted and self.content_kind != LectureSlideContentKind.VIDEO:
+            raise ValueError("Only inserted videos can mute original audio.")
         return self
 
 
@@ -1476,6 +1482,7 @@ class LectureSlideMediaUpload(BaseModel):
     filename: str
     content_type: str
     size: int
+    has_audio: bool = True
     duration_ms: int | None = Field(None, ge=0)
     width_px: int | None = Field(None, ge=1)
     height_px: int | None = Field(None, ge=1)
