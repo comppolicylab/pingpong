@@ -1,6 +1,8 @@
 import asyncio
 import json
 import logging
+import shutil
+import subprocess
 from datetime import timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -79,16 +81,28 @@ async def test_gif_narration_frame_timestamps_scale_with_duration():
     assert unknown == [0, 967, 1_933, 2_900]
 
 
-async def test_gif_media_inputs_include_ordered_frame_labels(config, monkeypatch):
+@pytest.mark.parametrize(
+    "kind, content_type",
+    [
+        (schemas.LectureSlideContentKind.GIF, "image/gif"),
+        (schemas.LectureSlideContentKind.VIDEO, "video/mp4"),
+        (schemas.LectureSlideContentKind.VIDEO, "video/webm"),
+    ],
+)
+async def test_animated_media_inputs_include_ordered_frame_labels(
+    config, monkeypatch, kind, content_type
+):
+    media_key = f"animated.{content_type.split('/')[1]}"
+
     class Store:
         async def stream_video(self, key: str):
-            assert key == "animated.gif"
-            yield b"gif-bytes"
+            assert key == media_key
+            yield b"media-bytes"
 
     monkeypatch.setattr(config, "video_store", SimpleNamespace(store=Store()))
 
-    def extract_frames(gif_bytes: bytes, duration_ms: int | None):
-        assert gif_bytes == b"gif-bytes"
+    def extract_frames(media_bytes: bytes, duration_ms: int | None):
+        assert media_bytes == b"media-bytes"
         assert duration_ms == 5_000
         return [(0, b"first"), (2_500, b"middle"), (4_999, b"last")]
 
@@ -96,9 +110,9 @@ async def test_gif_media_inputs_include_ordered_frame_labels(config, monkeypatch
         lecture_slide_processing, "_extract_gif_narration_frames", extract_frames
     )
     media = SimpleNamespace(
-        key="animated.gif",
-        content_type="image/gif",
-        content_kind=schemas.LectureSlideContentKind.GIF,
+        key=media_key,
+        content_type=content_type,
+        content_kind=kind,
         duration_ms=5_000,
     )
 
@@ -107,9 +121,9 @@ async def test_gif_media_inputs_include_ordered_frame_labels(config, monkeypatch
     )
 
     assert [item["text"] for item in content[::2]] == [
-        "GIF at slide_position 7 — frame 1 of 3, t=0.00s:",
-        "GIF at slide_position 7 — frame 2 of 3, t=2.50s:",
-        "GIF at slide_position 7 — frame 3 of 3, t=5.00s:",
+        f"{kind.value.upper()} at slide_position 7 — frame 1 of 3, t=0.00s:",
+        f"{kind.value.upper()} at slide_position 7 — frame 2 of 3, t=2.50s:",
+        f"{kind.value.upper()} at slide_position 7 — frame 3 of 3, t=5.00s:",
     ]
     assert [item["image_url"] for item in content[1::2]] == [
         "data:image/png;base64,Zmlyc3Q=",
@@ -438,7 +452,10 @@ async def test_translation_queue_deduplicates_and_preserves_retry_history(db):
         assert translated_page.narration_stored_object_id == audio.id
 
 
-async def test_translation_uses_one_structured_call_for_eligible_pages(db, monkeypatch):
+@pytest.mark.parametrize("video_muted", [False, True])
+async def test_translation_uses_one_structured_call_for_eligible_pages(
+    db, monkeypatch, video_muted
+):
     async with db.async_session() as session:
         class_ = models.Class(id=1, name="Slide Class", api_key="sk-test")
         deck = _deck(status=schemas.LectureSlideDeckStatus.READY, slide_count=3)
@@ -454,7 +471,10 @@ async def test_translation_uses_one_structured_call_for_eligible_pages(db, monke
                 lecture_slide_deck=deck,
                 position=1,
                 content_kind=schemas.LectureSlideContentKind.VIDEO,
-                narration_text="Inserted video transcript.",
+                video_muted=video_muted,
+                narration_text="Explain the video."
+                if video_muted
+                else "Inserted video transcript.",
             ),
             models.LectureSlidePage(
                 lecture_slide_deck=deck,
@@ -498,7 +518,17 @@ async def test_translation_uses_one_structured_call_for_eligible_pages(db, monke
                 lecture_slide_processing.TranslatedSlideNarration(
                     slide_position=0,
                     narration_text="Explica la primera diapositiva.",
-                )
+                ),
+                *(
+                    [
+                        lecture_slide_processing.TranslatedSlideNarration(
+                            slide_position=1,
+                            narration_text="Explica el video.",
+                        )
+                    ]
+                    if video_muted
+                    else []
+                ),
             ]
         )
 
@@ -527,7 +557,10 @@ async def test_translation_uses_one_structured_call_for_eligible_pages(db, monke
     assert len(captured_calls) == 1
     payload = captured_calls[0]["input_messages"][0]["content"][0]["text"]
     assert '"slide_position": 0' in payload
-    assert '"slide_position": 1' not in payload
+    assert ('"slide_position": 1' in payload) is video_muted
+    assert [slide.slide_position for slide in result.slides] == (
+        [0, 1] if video_muted else [0]
+    )
     assert '"slide_position": 2' not in payload
     assert captured_calls[0]["model"] == "gpt-4.1-mini"
     assert (
@@ -3372,8 +3405,9 @@ async def test_total_stored_audio_duration_requires_every_duration():
 
 
 @pytest.mark.parametrize("spoken", ["nuh-ray-shun.", "nuh ray shun."])
+@pytest.mark.parametrize("video_muted", [False, True])
 async def test_synthesize_slide_audio_skips_empty_pages_and_stores_ogg_metadata(
-    db, monkeypatch, spoken
+    db, monkeypatch, spoken, video_muted
 ):
     await _create_class_and_deck(db, slide_count=3)
     async with db.async_session() as session:
@@ -3381,6 +3415,10 @@ async def test_synthesize_slide_audio_skips_empty_pages_and_stores_ogg_metadata(
             models.LectureSlidePage(
                 lecture_slide_deck_id=1,
                 position=0,
+                content_kind=schemas.LectureSlideContentKind.VIDEO
+                if video_muted
+                else schemas.LectureSlideContentKind.SLIDE,
+                video_muted=video_muted,
                 narration_text="First narration.",
                 narration_tts_text=f"First {spoken}",
             ),
@@ -5467,7 +5505,7 @@ async def test_slide_audio_job_synthesizes_four_pages_at_once(db, monkeypatch):
         assert all(page.narration_id is not None for page in persisted)
 
 
-@pytest.mark.parametrize("content_kind", ["image", "gif"])
+@pytest.mark.parametrize("content_kind", ["image", "gif", "video"])
 async def test_inserted_visual_narration_preserves_existing_edits(
     db, monkeypatch, content_kind
 ):
@@ -5532,6 +5570,7 @@ async def test_inserted_visual_narration_preserves_existing_edits(
                 ),
                 schemas.LectureSlideContentItemInput(
                     content_kind=content_kind,
+                    video_muted=content_kind == "video",
                     media_stored_object_id=media.id,
                     user_notes="Explain the inserted visual.",
                 ),
@@ -5856,3 +5895,49 @@ async def test_running_narration_scope_is_immutable(db, requested_positions):
             assert replacement.force_manifest_generation
             assert replacement.status == schemas.LectureSlideProcessingRunStatus.QUEUED
         await session.commit()
+
+
+@pytest.mark.parametrize(
+    "suffix, codec_args",
+    [
+        (".gif", []),
+        (".mp4", ["-c:v", "libx264", "-pix_fmt", "yuv420p"]),
+        (".webm", ["-c:v", "libvpx-vp9"]),
+    ],
+)
+async def test_extract_narration_frames_from_real_animated_media(
+    tmp_path, suffix, codec_args
+):
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg or not shutil.which("ffprobe"):
+        pytest.skip("ffmpeg and ffprobe are required for frame extraction")
+    media_path = tmp_path / f"clip{suffix}"
+    subprocess.run(
+        [
+            ffmpeg,
+            "-v",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc2=size=64x48:rate=10",
+            "-t",
+            "1",
+            "-an",
+            *codec_args,
+            str(media_path),
+        ],
+        check=True,
+        capture_output=True,
+        timeout=30,
+    )
+    # An unknown duration exercises probing, including video container detection.
+    frames = lecture_slide_processing._extract_gif_narration_frames(
+        media_path.read_bytes(), None
+    )
+    assert len(frames) >= 2
+    timestamps = [timestamp for timestamp, _ in frames]
+    assert timestamps == sorted(set(timestamps))
+    assert timestamps[0] == 0
+    assert all(0 <= timestamp < 1000 for timestamp in timestamps)
+    assert all(frame.startswith(b"\x89PNG\r\n\x1a\n") for _, frame in frames)

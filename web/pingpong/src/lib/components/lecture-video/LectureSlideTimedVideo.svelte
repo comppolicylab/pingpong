@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { getLectureSlideVideoTimeSeconds } from '$lib/utils/lecture-video';
 	let {
 		src,
 		onready = () => {},
@@ -20,6 +21,7 @@
 	} = $props();
 
 	let video: HTMLVideoElement | null = $state(null);
+	let videoDuration = $state(Infinity);
 
 	let ready = false;
 
@@ -33,15 +35,22 @@
 
 	$effect(() => {
 		if (!video) return;
-		const localTimeSeconds = Math.max(
-			0,
-			Math.min(offsetMs - startOffsetMs, endOffsetMs - startOffsetMs) / 1000
+		const localTimeSeconds = getLectureSlideVideoTimeSeconds(
+			offsetMs,
+			startOffsetMs,
+			endOffsetMs,
+			videoDuration
 		);
 		if (Math.abs(video.currentTime - localTimeSeconds) > 0.3) {
 			video.currentTime = localTimeSeconds;
 		}
 		video.playbackRate = timelineMedia?.playbackRate ?? 1;
-		if (paused || offsetMs < startOffsetMs || offsetMs >= endOffsetMs) {
+		if (
+			localTimeSeconds >= videoDuration ||
+			paused ||
+			offsetMs < startOffsetMs ||
+			offsetMs >= endOffsetMs
+		) {
 			video.pause();
 		} else {
 			void video.play().catch(() => {});
@@ -50,6 +59,9 @@
 </script>
 
 <video
+	onloadedmetadata={() => {
+		videoDuration = video && Number.isFinite(video.duration) ? video.duration : Infinity;
+	}}
 	onloadeddata={checkReady}
 	onseeked={checkReady}
 	{onerror}

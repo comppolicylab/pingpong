@@ -2079,6 +2079,7 @@ export type LectureSlidePage = {
 	media_url?: string | null;
 	media_content_type?: string | null;
 	media_filename?: string | null;
+	media_has_audio?: boolean | null;
 	media_duration_ms?: number | null;
 	media_width_px?: number | null;
 	media_height_px?: number | null;
@@ -2086,6 +2087,7 @@ export type LectureSlidePage = {
 	narration_duration_ms?: number | null;
 	user_notes?: string | null;
 	narration_text?: string | null;
+	video_muted?: boolean;
 };
 
 export type LectureSlideContentKind = 'slide' | 'image' | 'gif' | 'video';
@@ -2096,6 +2098,7 @@ export type LectureSlideContentItemInput = {
 	media_stored_object_id?: number | null;
 	user_notes?: string | null;
 	narration_text?: string | null;
+	video_muted?: boolean;
 };
 
 export type LectureSlideMediaUpload = {
@@ -2104,6 +2107,7 @@ export type LectureSlideMediaUpload = {
 	filename: string;
 	content_type: string;
 	size: number;
+	has_audio: boolean;
 	duration_ms?: number | null;
 	width_px?: number | null;
 	height_px?: number | null;

@@ -187,8 +187,8 @@ DEFAULT_LECTURE_SLIDE_INSTRUCTIONS = DEFAULT_LECTURE_INSTRUCTIONS.safe_substitut
 DEFAULT_NARRATION_PROMPT = """You are the instructor giving a lecture from an ordered slide lesson that may include PDF slides, inserted images, GIFs, and video clips.
 
 Critical rules:
-- Use the visible content at each timeline position as the source of truth. PDF pages come from the deck; inserted images and GIFs are supplied separately.
-- When multiple labeled frames are provided for a GIF, treat them as chronological snapshots from one animated slide and write one narration item for that slide position.
+- Use the visible content at each timeline position as the source of truth. PDF pages come from the deck; inserted images, GIFs, and muted video frames are supplied separately.
+- When multiple labeled frames are provided for a GIF or muted video, treat them as chronological snapshots from one timeline item and write one narration item for that slide position.
 - Write narration as if you are speaking live to students while each slide is visible.
 - Teach the material on the slide; do not merely describe the slide's layout.
 - Stay grounded in what appears on the current slide and the necessary connective context from earlier slides.
@@ -1848,7 +1848,10 @@ async def _generate_translation_text(
                 "narration_text": page.narration_text or "",
             }
             for page in sorted(deck.pages, key=lambda item: item.position)
-            if page.content_kind != schemas.LectureSlideContentKind.VIDEO
+            if (
+                page.content_kind != schemas.LectureSlideContentKind.VIDEO
+                or page.video_muted
+            )
             and text_needs_audio(page.narration_text or "")
         ]
         class_id = deck.class_id
@@ -1973,8 +1976,8 @@ async def _persist_translation_page_rows(
             translated = translated_by_position.get(page.position)
             if (
                 page.content_kind == schemas.LectureSlideContentKind.VIDEO
-                or translated is None
-            ):
+                and not page.video_muted
+            ) or translated is None:
                 narration_text = page.narration_text
                 narration_tts_text = None
             else:
@@ -1983,7 +1986,10 @@ async def _persist_translation_page_rows(
             stored_object_id = None
             word_timings: list[dict[str, Any]] | None = None
             if (
-                page.content_kind == schemas.LectureSlideContentKind.VIDEO
+                (
+                    page.content_kind == schemas.LectureSlideContentKind.VIDEO
+                    and not page.video_muted
+                )
                 and page.narration is not None
                 and page.narration.stored_object is not None
             ):
@@ -2016,7 +2022,10 @@ async def _persist_translation_page_rows(
         run.completed_parts = sum(
             1
             for page in deck.pages
-            if page.content_kind == schemas.LectureSlideContentKind.VIDEO
+            if (
+                page.content_kind == schemas.LectureSlideContentKind.VIDEO
+                and not page.video_muted
+            )
             or not text_needs_audio(
                 (
                     translated_by_position[page.position].display
@@ -3380,7 +3389,10 @@ async def _generate_narration_text(
         narratable_pages = [
             page
             for page in sorted(deck.pages, key=lambda item: item.position)
-            if page.content_kind != schemas.LectureSlideContentKind.VIDEO
+            if (
+                page.content_kind != schemas.LectureSlideContentKind.VIDEO
+                or page.video_muted
+            )
             and (positions is None or page.position in positions)
         ]
         narratable_positions = [page.position for page in narratable_pages]
@@ -3405,6 +3417,7 @@ async def _generate_narration_text(
             {
                 "slide_position": page.position,
                 "content_kind": page.content_kind.value,
+                "video_muted": page.video_muted,
                 "pdf_page_number": (
                     page.source_page_number + 1
                     if page.source_page_number is not None
@@ -3553,8 +3566,10 @@ def _build_narration_generation_user_message(
     message = (
         f"Generate narration for exactly {len(narratable_positions)} slides, using "
         "exactly the following zero-based slide_position values: "
-        f"{narratable_positions}. Inserted videos use their original audio, "
-        "so do not return narration items for video positions. The ordered content "
+        f"{narratable_positions}. Only muted videos receive generated narration. "
+        "Use their chronological frames and author notes to explain the visible content. "
+        "Write one narration item for each requested video, just as for a GIF. "
+        "The video can hold its final frame while narration finishes. The ordered content "
         "map is:\n\n"
         f"{json.dumps(content_map, indent=2)}"
     )
@@ -3582,21 +3597,22 @@ async def _lecture_slide_media_input_images(
             chunks.append(chunk)
         media_bytes = b"".join(chunks)
         content_type = media.content_type
-        if media.content_kind == schemas.LectureSlideContentKind.GIF:
-            gif_frames = await asyncio.to_thread(
+        if media.content_kind in {
+            schemas.LectureSlideContentKind.GIF,
+            schemas.LectureSlideContentKind.VIDEO,
+        }:
+            frames = await asyncio.to_thread(
                 _extract_gif_narration_frames, media_bytes, media.duration_ms
             )
-            for frame_index, (timestamp_ms, frame_bytes) in enumerate(
-                gif_frames, start=1
-            ):
+            for frame_index, (timestamp_ms, frame_bytes) in enumerate(frames, start=1):
                 encoded = base64.b64encode(frame_bytes).decode("ascii")
                 content.extend(
                     [
                         {
                             "type": "input_text",
                             "text": (
-                                f"GIF at slide_position {position} — frame "
-                                f"{frame_index} of {len(gif_frames)}, "
+                                f"{media.content_kind.value.upper()} at slide_position {position} — frame "
+                                f"{frame_index} of {len(frames)}, "
                                 f"t={timestamp_ms / 1000:.2f}s:"
                             ),
                         },
@@ -3724,9 +3740,12 @@ def _extract_gif_narration_frames(
     gif_bytes: bytes,
     duration_ms: int | None,
 ) -> list[tuple[int, bytes]]:
+    """Sample distinct frames from a GIF or video; ffmpeg detects the container."""
     ffmpeg_path = shutil.which("ffmpeg")
     if ffmpeg_path is None:
-        raise RuntimeError("ffmpeg is required for lecture slide GIF processing.")
+        raise RuntimeError(
+            "ffmpeg is required for lecture slide animated media processing."
+        )
     with tempfile.TemporaryDirectory(prefix="pingpong_ls_gif_") as temp_dir:
         input_path = Path(temp_dir) / "input.gif"
         input_path.write_bytes(gif_bytes)
@@ -3768,7 +3787,7 @@ def _extract_gif_narration_frames(
             kept_signatures.append(signature)
         if not kept_frames:
             raise RuntimeError(
-                "ffmpeg could not extract narration frames from the inserted GIF."
+                "ffmpeg could not extract narration frames from the inserted GIF or video."
             )
         return kept_frames
 
@@ -3793,7 +3812,10 @@ async def _persist_narration_text(
         ):
             return
         for page in deck.pages:
-            if page.content_kind == schemas.LectureSlideContentKind.VIDEO:
+            if (
+                page.content_kind == schemas.LectureSlideContentKind.VIDEO
+                and not page.video_muted
+            ):
                 continue
             if (
                 run.narration_positions is not None
@@ -3839,26 +3861,30 @@ async def _synthesize_slide_audio(
                 page.narration_text or "",
                 page.narration_tts_text,
                 page.media_stored_object,
+                bool(page.video_muted),
             )
             for page in sorted(deck.pages, key=lambda item: item.position)
             if page.narration_id is None
             and (
-                page.content_kind == schemas.LectureSlideContentKind.VIDEO
+                (
+                    page.content_kind == schemas.LectureSlideContentKind.VIDEO
+                    and not page.video_muted
+                )
                 or text_needs_audio(page.narration_text or "")
             )
         ]
     if not pages:
         return []
     needs_tts = any(
-        content_kind != schemas.LectureSlideContentKind.VIDEO
-        for _, _, content_kind, _, _, _ in pages
+        (content_kind != schemas.LectureSlideContentKind.VIDEO or video_muted)
+        for _, _, content_kind, _, _, _, video_muted in pages
     )
     if needs_tts and not voice_id:
         raise RuntimeError("Lecture slide deck voice_id is required for narration.")
     api_key = await _get_elevenlabs_api_key(class_id) if needs_tts else None
     needs_video_transcription = any(
-        content_kind == schemas.LectureSlideContentKind.VIDEO
-        for _, _, content_kind, _, _, _ in pages
+        (content_kind == schemas.LectureSlideContentKind.VIDEO and not video_muted)
+        for _, _, content_kind, _, _, _, video_muted in pages
     )
     openai_client = None
     if needs_video_transcription:
@@ -3878,8 +3904,9 @@ async def _synthesize_slide_audio(
             narration_text,
             narration_tts_text,
             _,
+            video_muted,
         ) in pages
-        if content_kind != schemas.LectureSlideContentKind.VIDEO
+        if (content_kind != schemas.LectureSlideContentKind.VIDEO or video_muted)
     ]
     if assistant is not None:
         prepared_speech_texts = await _await_with_run_lease_heartbeat(
@@ -3923,6 +3950,7 @@ async def _synthesize_slide_audio(
             str,
             str | None,
             models.LectureSlideMediaStoredObject | None,
+            bool,
         ],
     ) -> SlideAudioArtifact | None:
         (
@@ -3932,8 +3960,9 @@ async def _synthesize_slide_audio(
             narration_text,
             narration_tts_text,
             media,
+            video_muted,
         ) = item
-        if content_kind == schemas.LectureSlideContentKind.VIDEO:
+        if content_kind == schemas.LectureSlideContentKind.VIDEO and not video_muted:
             if media is None:
                 raise RuntimeError(
                     f"Inserted video at position {page_position} is missing."
@@ -4015,7 +4044,10 @@ async def _synthesize_slide_audio(
                 session.add(narration)
                 await session.flush()
                 page.narration_id = narration.id
-                if content_kind == schemas.LectureSlideContentKind.VIDEO:
+                if (
+                    content_kind == schemas.LectureSlideContentKind.VIDEO
+                    and not video_muted
+                ):
                     page.narration_text = narration_text
                     page.narration_tts_text = None
                 session.add(page)
@@ -4850,6 +4882,7 @@ async def _generate_slide_manifest(
             {
                 "slide_position": page.position,
                 "content_kind": page.content_kind.value,
+                "video_muted": page.video_muted,
                 "pdf_page_number": (
                     page.source_page_number + 1
                     if page.source_page_number is not None
@@ -4872,7 +4905,10 @@ async def _generate_slide_manifest(
             (page.position, page.media_stored_object)
             for page in ordered_pages
             if page.media_stored_object is not None
-            and page.content_kind != schemas.LectureSlideContentKind.VIDEO
+            and (
+                page.content_kind != schemas.LectureSlideContentKind.VIDEO
+                or page.video_muted
+            )
         ]
     media_content = await _lecture_slide_media_input_images(visual_media)
     total_duration_ms = _slide_manifest_total_duration_ms(

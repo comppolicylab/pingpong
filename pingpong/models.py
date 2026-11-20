@@ -31,6 +31,7 @@ from sqlalchemy import (
     desc,
     distinct,
     false,
+    true,
     literal,
     not_,
     or_,
@@ -3229,6 +3230,7 @@ class LectureSlideMediaStoredObject(Base):
     content_kind: Mapped[schemas.LectureSlideContentKind] = mapped_column(
         SQLEnum(schemas.LectureSlideContentKind), nullable=False
     )
+    has_audio = Column(Boolean, nullable=False, default=True, server_default=true())
     duration_ms = Column(Integer, nullable=True)
     width_px = Column(Integer, nullable=True)
     height_px = Column(Integer, nullable=True)
@@ -3251,6 +3253,7 @@ class LectureSlideMediaStoredObject(Base):
         duration_ms: int | None,
         width_px: int | None,
         height_px: int | None,
+        has_audio: bool = True,
     ) -> "LectureSlideMediaStoredObject":
         media = cls(
             class_id=class_id,
@@ -3263,6 +3266,7 @@ class LectureSlideMediaStoredObject(Base):
             duration_ms=duration_ms,
             width_px=width_px,
             height_px=height_px,
+            has_audio=has_audio,
         )
         session.add(media)
         await session.flush()
@@ -4266,6 +4270,7 @@ class LectureSlidePage(Base):
         nullable=False,
         server_default=schemas.LectureSlideContentKind.SLIDE.name,
     )
+    video_muted = Column(Boolean, nullable=False, default=False, server_default=false())
     source_page_number = Column(Integer, nullable=True)
     image_stored_object_id = Column(
         Integer,

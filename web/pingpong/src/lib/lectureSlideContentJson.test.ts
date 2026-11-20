@@ -155,3 +155,41 @@ describe('lecture slide content JSON', () => {
 		expect(parsed.error).toContain('Question intro on slide 1');
 	});
 });
+
+describe('muted video narration JSON', () => {
+	it('round trips edited narration for muted videos', () => {
+		const videoPages: LectureSlideContentPageDraft[] = [
+			{
+				position: 0,
+				content_kind: 'video',
+				video_muted: true,
+				narration_text: 'Explain the clip.',
+				user_notes: 'Focus on motion.'
+			}
+		];
+		const document = buildLectureSlideContentJson(videoPages, []);
+		document.slides[0].narration_text = 'Edited narration.';
+		const parsed = parseLectureSlideContentJson(JSON.stringify(document), videoPages);
+		expect(parsed.error).toBeNull();
+		const applied = applyLectureSlideContentJson(parsed.content!, videoPages, [], () => 'id');
+		expect(applied.pages[0].video_muted).toBe(true);
+		expect(applied.pages[0].narration_text).toBe('Edited narration.');
+	});
+
+	it('keeps original video transcripts out of editable narration', () => {
+		const videoPages: LectureSlideContentPageDraft[] = [
+			{
+				position: 0,
+				content_kind: 'video',
+				video_muted: false,
+				narration_text: 'Original audio transcript.'
+			}
+		];
+		const document = buildLectureSlideContentJson(videoPages, []);
+		expect(document.slides[0].narration_text).toBeNull();
+		document.slides[0].narration_text = 'Unmuted voice-over';
+		expect(parseLectureSlideContentJson(JSON.stringify(document), videoPages).error).toContain(
+			'cannot have generated narration'
+		);
+	});
+});
