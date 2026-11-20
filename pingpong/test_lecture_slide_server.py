@@ -1563,8 +1563,29 @@ async def test_upload_assistant_lecture_slide_additional_context_allows_editor(
         ("user:123", "can_edit", "assistant:1"),
     ]
 )
+@pytest.mark.parametrize(
+    "failed_stage, narration_positions, expected_stage",
+    [
+        (
+            schemas.LectureSlideProcessingStage.NARRATION_TRANSCRIPTION,
+            None,
+            schemas.LectureSlideProcessingStage.NARRATION_AUDIO,
+        ),
+        (
+            schemas.LectureSlideProcessingStage.NARRATION_TEXT,
+            [2],
+            schemas.LectureSlideProcessingStage.NARRATION_TEXT,
+        ),
+    ],
+)
 async def test_retry_lecture_slide_endpoint_queues_processing_after_failure(
-    api, db, institution, valid_user_token
+    api,
+    db,
+    institution,
+    valid_user_token,
+    failed_stage,
+    narration_positions,
+    expected_stage,
 ):
     async with db.async_session() as session:
         class_ = await session.get(models.Class, 1)
@@ -1616,7 +1637,8 @@ async def test_retry_lecture_slide_endpoint_queues_processing_after_failure(
             lecture_slide_deck_id_snapshot=deck.id,
             class_id=class_.id,
             assistant_id_at_start=assistant.id,
-            stage=schemas.LectureSlideProcessingStage.NARRATION_TRANSCRIPTION,
+            stage=failed_stage,
+            narration_positions=narration_positions,
             attempt_number=1,
             status=schemas.LectureSlideProcessingRunStatus.FAILED,
         )
@@ -1653,7 +1675,8 @@ async def test_retry_lecture_slide_endpoint_queues_processing_after_failure(
     assert len(runs) == 2
     assert runs[0].status == schemas.LectureSlideProcessingRunStatus.FAILED
     assert runs[1].status == schemas.LectureSlideProcessingRunStatus.QUEUED
-    assert runs[1].stage == schemas.LectureSlideProcessingStage.NARRATION_AUDIO
+    assert runs[1].stage == expected_stage
+    assert runs[1].narration_positions == narration_positions
     assert runs[1].attempt_number == 2
 
 
@@ -2815,3 +2838,193 @@ async def test_delete_unused_lecture_slide_deck_deletes_page_narration_audio(
     assert remaining_narration_count == 0
     assert remaining_stored_object_count == 0
     assert not (narration_dir / "deleted-deck-slide.ogg").exists()
+
+
+@pytest.mark.asyncio
+@with_user(123)
+@with_institution(11, "Test Institution")
+@with_authz(
+    grants=[
+        ("user:123", "admin", "class:1"),
+        ("user:123", "can_edit", "assistant:1"),
+    ]
+)
+@pytest.mark.parametrize("scenario", ["pending", "pending_script", "revised_notes"])
+async def test_update_slides_carries_pending_work_and_note_edits_after_reorder(
+    api,
+    db,
+    institution,
+    valid_user_token,
+    monkeypatch,
+    scenario,
+):
+    from .test_lecture_video_server import patch_lecture_video_model_list
+
+    patch_lecture_video_model_list(monkeypatch)
+    server = importlib.import_module("pingpong.server")
+
+    async def validate_voice(*args, **kwargs):
+        pass
+
+    monkeypatch.setattr(
+        server, "validate_lecture_video_voice_id_or_raise", validate_voice
+    )
+    pending = scenario.startswith("pending")
+    async with db.async_session() as session:
+        session.add(
+            models.Class(
+                id=1,
+                name="Test Class",
+                institution_id=institution.id,
+                api_key="test-key",
+            )
+        )
+        await session.flush()
+        source = await models.LectureSlideSourceStoredObject.create(
+            session,
+            key="source.pdf",
+            original_filename="source.pdf",
+            content_type="application/pdf",
+            content_length=128,
+        )
+        deck = await models.LectureSlideDeck.create(
+            session,
+            class_id=1,
+            source_stored_object_id=source.id,
+            uploader_id=123,
+            display_name="source.pdf",
+            slide_count=3,
+            source_page_count=2,
+            voice_id="voice-test-id",
+            status=(
+                schemas.LectureSlideDeckStatus.PROCESSING
+                if pending
+                else schemas.LectureSlideDeckStatus.READY
+            ),
+        )
+        media_ids = []
+        for index in range(2):
+            media = await models.LectureSlideMediaStoredObject.create(
+                session,
+                class_id=1,
+                uploader_id=123,
+                key=f"image-{index}",
+                original_filename=f"image-{index}.png",
+                content_type="image/png",
+                content_length=100,
+                content_kind=schemas.LectureSlideContentKind.IMAGE,
+                duration_ms=None,
+                width_px=640,
+                height_px=480,
+            )
+            media_ids.append(media.id)
+        session.add_all(
+            [
+                models.LectureSlidePage(
+                    lecture_slide_deck_id=deck.id,
+                    position=0,
+                    source_page_number=0,
+                    user_notes="Original notes",
+                    narration_text="Keep this script.",
+                ),
+                models.LectureSlidePage(
+                    lecture_slide_deck_id=deck.id,
+                    position=1,
+                    content_kind=schemas.LectureSlideContentKind.IMAGE,
+                    media_stored_object_id=media_ids[0],
+                    narration_text=None if pending else "Existing image script.",
+                ),
+                models.LectureSlidePage(
+                    lecture_slide_deck_id=deck.id,
+                    position=2,
+                    source_page_number=1,
+                ),
+                models.Assistant(
+                    id=1,
+                    class_id=1,
+                    creator_id=123,
+                    name="Slides",
+                    instructions="Teach the lecture.",
+                    model="gpt-4o-mini",
+                    version=3,
+                    tools="[]",
+                    interaction_mode=schemas.InteractionMode.LECTURE_SLIDES,
+                    lecture_slide_deck_id=deck.id,
+                ),
+            ]
+        )
+        if pending:
+            await models.LectureSlideProcessingRun.create(
+                session,
+                lecture_slide_deck_id=deck.id,
+                lecture_slide_deck_id_snapshot=deck.id,
+                class_id=1,
+                assistant_id_at_start=1,
+                stage=schemas.LectureSlideProcessingStage.NARRATION_TEXT,
+                attempt_number=1,
+                narration_positions=[1],
+            )
+        await session.commit()
+        deck_id = deck.id
+
+    items = [
+        {"content_kind": "slide", "source_page_number": 1},
+        {"content_kind": "image", "media_stored_object_id": media_ids[1]},
+        {
+            "content_kind": "slide",
+            "source_page_number": 0,
+            "user_notes": (
+                "Revised notes" if scenario == "revised_notes" else "Original notes"
+            ),
+            "narration_text": "Keep this script.",
+        },
+        {
+            "content_kind": "image",
+            "media_stored_object_id": media_ids[0],
+            "narration_text": (
+                "Supplied while pending."
+                if scenario == "pending_script"
+                else None
+                if pending
+                else "Existing image script."
+            ),
+        },
+    ]
+    response = api.put(
+        "/api/v1/class/1/assistant/1",
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+        json={
+            "lecture_slide_deck_id": deck_id,
+            "voice_id": "voice-test-id",
+            "lecture_slide_content_items": items,
+            "lecture_slide_page_notes": [
+                {
+                    "position": position,
+                    "user_notes": item.get("user_notes"),
+                    "narration_text": item.get("narration_text"),
+                }
+                for position, item in enumerate(items)
+            ],
+        },
+    )
+    assert response.status_code == 200, response.text
+    async with db.async_session() as session:
+        assistant = await session.get(models.Assistant, 1)
+        assert assistant.lecture_slide_deck_id != deck_id
+        run = await models.LectureSlideProcessingRun.get_non_terminal_by_snapshot(
+            session,
+            assistant.lecture_slide_deck_id,
+        )
+        expected = {"pending": [1, 3], "pending_script": [1], "revised_notes": [1, 2]}
+        assert run.stage == schemas.LectureSlideProcessingStage.NARRATION_TEXT
+        assert run.narration_positions == expected[scenario]
+        assert run.force_manifest_generation
+        deck = await models.LectureSlideDeck.get_by_id_with_processing_context(
+            session,
+            assistant.lecture_slide_deck_id,
+        )
+        pages = sorted(deck.pages, key=lambda page: page.position)
+        assert pages[0].narration_text is None  # Deliberately silent original slide.
+        assert pages[2].narration_text == "Keep this script."
+        if scenario == "pending_script":
+            assert pages[3].narration_text == "Supplied while pending."

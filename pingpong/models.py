@@ -4096,6 +4096,8 @@ class LectureSlideProcessingRun(Base):
     force_manifest_generation: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default="false"
     )
+    # None regenerates all pages; a list scopes generation within this snapshot.
+    narration_positions: Mapped[list[int] | None] = mapped_column(JSON, nullable=True)
     status: Mapped[schemas.LectureSlideProcessingRunStatus] = mapped_column(
         SQLEnum(schemas.LectureSlideProcessingRunStatus),
         nullable=False,
@@ -4163,6 +4165,7 @@ class LectureSlideProcessingRun(Base):
             schemas.LectureSlideProcessingRunStatus.QUEUED
         ),
         force_manifest_generation: bool = False,
+        narration_positions: list[int] | None = None,
     ) -> "LectureSlideProcessingRun":
         run = LectureSlideProcessingRun(
             lecture_slide_deck_id=lecture_slide_deck_id,
@@ -4173,6 +4176,7 @@ class LectureSlideProcessingRun(Base):
             attempt_number=attempt_number,
             status=status,
             force_manifest_generation=force_manifest_generation,
+            narration_positions=narration_positions,
         )
         session.add(run)
         await session.flush()
@@ -4220,6 +4224,7 @@ class LectureSlideProcessingRun(Base):
                 ),
             )
             .order_by(LectureSlideProcessingRun.created.asc())
+            .with_for_update()
         )
         return (await session.scalars(stmt)).one_or_none()
 

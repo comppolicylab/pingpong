@@ -65,10 +65,12 @@ LECTURE_SLIDE_MEDIA_PROBE_RULES = {
 @dataclass(frozen=True)
 class LectureSlidePageUpdateResult:
     notes_changed: bool = False
+    notes_changed_positions: frozenset[int] = frozenset()
     narration_changed: bool = False
     narration_changed_positions: frozenset[int] = frozenset()
     structure_changed: bool = False
     requires_narration_generation: bool = False
+    narration_generation_positions: frozenset[int] = frozenset()
 
 
 @dataclass(frozen=True)
@@ -895,12 +897,66 @@ def ensure_lecture_slide_deck_uploaded_by_user(
         )
 
 
+def lecture_slide_page_identity(
+    page: models.LectureSlidePage,
+) -> tuple[schemas.LectureSlideContentKind, int]:
+    if page.content_kind == schemas.LectureSlideContentKind.SLIDE:
+        return page.content_kind, (
+            page.source_page_number
+            if page.source_page_number is not None
+            else page.position
+        )
+    return page.content_kind, page.media_stored_object_id
+
+
+async def pending_lecture_slide_narration_page_identities(
+    session: AsyncSession,
+    deck: models.LectureSlideDeck,
+) -> set[tuple[schemas.LectureSlideContentKind, int]]:
+    run = await models.LectureSlideProcessingRun.get_non_terminal_by_snapshot(
+        session, deck.id
+    )
+    if run is None or run.stage not in {
+        schemas.LectureSlideProcessingStage.SLIDE_ASSET_EXTRACTION,
+        schemas.LectureSlideProcessingStage.NARRATION_TEXT,
+    }:
+        return set()
+    return {
+        lecture_slide_page_identity(page)
+        for page in deck.pages
+        if page.content_kind != schemas.LectureSlideContentKind.VIDEO
+        and (
+            run.narration_positions is None or page.position in run.narration_positions
+        )
+    }
+
+
+async def lecture_slide_narration_positions_for_identities(
+    session: AsyncSession,
+    deck_id: int,
+    identities: set[tuple[schemas.LectureSlideContentKind, int]],
+) -> set[int]:
+    if not identities:
+        return set()
+    pages = await session.scalars(
+        select(models.LectureSlidePage).where(
+            models.LectureSlidePage.lecture_slide_deck_id == deck_id
+        )
+    )
+    return {
+        page.position
+        for page in pages
+        if lecture_slide_page_identity(page) in identities
+    }
+
+
 async def apply_lecture_slide_page_notes(
     session: AsyncSession,
     deck: models.LectureSlideDeck,
     notes: Iterable[schemas.LectureSlidePageNotes],
 ) -> LectureSlidePageUpdateResult:
     notes_changed = False
+    notes_changed_positions: set[int] = set()
     narration_changed = False
     narration_changed_positions: set[int] = set()
     old_narration_ids: list[int] = []
@@ -948,6 +1004,8 @@ async def apply_lecture_slide_page_notes(
             )
             session.add(page)
             notes_changed = notes_changed or user_notes is not None
+            if user_notes is not None:
+                notes_changed_positions.add(note.position)
             narration_changed = narration_changed or narration_text is not None
             if narration_text is not None:
                 narration_changed_positions.add(note.position)
@@ -956,6 +1014,8 @@ async def apply_lecture_slide_page_notes(
             page.user_notes = user_notes
             session.add(page)
             notes_changed = True
+            if page.content_kind != schemas.LectureSlideContentKind.VIDEO:
+                notes_changed_positions.add(note.position)
         if (
             page.narration_text != narration_text
             or page.narration_tts_text != narration_tts_text
@@ -978,6 +1038,7 @@ async def apply_lecture_slide_page_notes(
     await _delete_lecture_slide_audio_keys_quietly(audio_keys)
     return LectureSlidePageUpdateResult(
         notes_changed=notes_changed,
+        notes_changed_positions=frozenset(notes_changed_positions),
         narration_changed=narration_changed,
         narration_changed_positions=frozenset(narration_changed_positions),
     )
@@ -1079,13 +1140,19 @@ async def apply_lecture_slide_content_items(
     }
     desired_pages: list[models.LectureSlidePage] = []
     notes_changed = False
+    notes_changed_positions: set[int] = set()
     narration_changed = False
     narration_changed_positions: set[int] = set()
     old_narration_ids: list[int] = []
     structure_changed = False
-    requires_narration_generation = False
+    narration_generation_positions: set[int] = set()
 
     for position, item in enumerate(requested_items):
+        existing_page = (
+            slide_pages.get(item.source_page_number)
+            if item.content_kind == schemas.LectureSlideContentKind.SLIDE
+            else media_pages.get(item.media_stored_object_id)
+        )
         if item.content_kind == schemas.LectureSlideContentKind.SLIDE:
             assert item.source_page_number is not None
             page = slide_pages.get(item.source_page_number)
@@ -1098,6 +1165,7 @@ async def apply_lecture_slide_content_items(
                     source_page_number=item.source_page_number,
                 )
                 session.add(page)
+            page.source_page_number = item.source_page_number
         else:
             assert item.media_stored_object_id is not None
             media = media_by_id[item.media_stored_object_id]
@@ -1113,7 +1181,7 @@ async def apply_lecture_slide_content_items(
                     schemas.LectureSlideContentKind.IMAGE,
                     schemas.LectureSlideContentKind.GIF,
                 }:
-                    requires_narration_generation = True
+                    narration_generation_positions.add(position)
                 page = models.LectureSlidePage(
                     lecture_slide_deck_id=deck.id,
                     position=-(position + 1),
@@ -1133,9 +1201,18 @@ async def apply_lecture_slide_content_items(
             )
             narration_text = pronunciation.display or None
             narration_tts_text = pronunciation.speech_override
+        if narration_text is not None:
+            # A supplied script takes precedence over automatic narration for
+            # newly inserted images and GIFs.
+            narration_generation_positions.discard(position)
         if page.user_notes != user_notes:
             page.user_notes = user_notes
             notes_changed = True
+            if (
+                existing_page is not None
+                and page.content_kind != schemas.LectureSlideContentKind.VIDEO
+            ):
+                notes_changed_positions.add(position)
         if (
             page.narration_text != narration_text
             or page.narration_tts_text != narration_tts_text
@@ -1190,10 +1267,12 @@ async def apply_lecture_slide_content_items(
     await _delete_lecture_slide_audio_keys_quietly(audio_keys)
     return LectureSlidePageUpdateResult(
         notes_changed=notes_changed,
+        notes_changed_positions=frozenset(notes_changed_positions),
         narration_changed=narration_changed,
         narration_changed_positions=frozenset(narration_changed_positions),
         structure_changed=structure_changed,
-        requires_narration_generation=requires_narration_generation,
+        requires_narration_generation=bool(narration_generation_positions),
+        narration_generation_positions=frozenset(narration_generation_positions),
     )
 
 

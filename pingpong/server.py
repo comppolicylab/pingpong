@@ -12303,8 +12303,8 @@ async def retry_assistant_lecture_slide_processing(
             detail="Lecture slide retry is only available after lecture slide processing fails.",
         )
 
-    latest_failed_stage = await request.state["db"].scalar(
-        select(models.LectureSlideProcessingRun.stage)
+    latest_failed_run = await request.state["db"].scalar(
+        select(models.LectureSlideProcessingRun)
         .where(
             models.LectureSlideProcessingRun.lecture_slide_deck_id_snapshot == deck.id,
             models.LectureSlideProcessingRun.status
@@ -12316,13 +12316,13 @@ async def retry_assistant_lecture_slide_processing(
         )
         .limit(1)
     )
-    if latest_failed_stage is None:
+    if latest_failed_run is None:
         raise HTTPException(
             status_code=409,
             detail="Lecture slide retry is only available after lecture slide processing fails.",
         )
 
-    retry_stage = schemas.LectureSlideProcessingStage(latest_failed_stage)
+    retry_stage = schemas.LectureSlideProcessingStage(latest_failed_run.stage)
     if retry_stage == schemas.LectureSlideProcessingStage.NARRATION_TRANSCRIPTION:
         retry_stage = schemas.LectureSlideProcessingStage.NARRATION_AUDIO
 
@@ -12331,6 +12331,8 @@ async def retry_assistant_lecture_slide_processing(
         deck,
         requested_by_assistant_id=assistant.id,
         stage=retry_stage,
+        narration_positions=latest_failed_run.narration_positions,
+        force_manifest_generation=latest_failed_run.force_manifest_generation,
     )
     if retry_run is None:
         raise HTTPException(
@@ -15638,8 +15640,12 @@ async def update_assistant(
                 or regenerate_questions_requested
                 or regenerate_audio_requested
             )
+            pending_narration_identities = set()
             if should_clone_current:
                 assert current_lecture_slide_deck is not None
+                pending_narration_identities = await lecture_slide_service.pending_lecture_slide_narration_page_identities(
+                    request.state["db"], current_lecture_slide_deck
+                )
                 await lecture_slide_processing.cancel_processing_runs(
                     request.state["db"],
                     current_lecture_slide_deck.id,
@@ -15666,10 +15672,11 @@ async def update_assistant(
                 target_lecture_slide_deck.narration_prompt = (
                     lecture_slide_narration_prompt
                 )
-            notes_changed = False
+            notes_changed_positions: set[int] = set()
+            narration_changed_positions: set[int] = set()
             narration_text_changed = False
             content_items_changed = False
-            content_requires_narration = False
+            narration_generation_positions: frozenset[int] = frozenset()
             question_audio_changed = False
             question_generation_requested_by_draft = False
             additional_context_files_changed = False
@@ -15683,10 +15690,15 @@ async def update_assistant(
                     )
                 )
                 content_items_changed = content_update_result.structure_changed
-                content_requires_narration = (
-                    content_update_result.requires_narration_generation
+                narration_generation_positions = (
+                    content_update_result.narration_generation_positions
                 )
-                notes_changed = notes_changed or content_update_result.notes_changed
+                notes_changed_positions.update(
+                    content_update_result.notes_changed_positions
+                )
+                narration_changed_positions.update(
+                    content_update_result.narration_changed_positions
+                )
                 narration_text_changed = (
                     narration_text_changed or content_update_result.narration_changed
                 )
@@ -15698,7 +15710,12 @@ async def update_assistant(
                         req.lecture_slide_page_notes or [],
                     )
                 )
-                notes_changed = notes_changed or page_update_result.notes_changed
+                notes_changed_positions.update(
+                    page_update_result.notes_changed_positions
+                )
+                narration_changed_positions.update(
+                    page_update_result.narration_changed_positions
+                )
                 narration_text_changed = (
                     narration_text_changed or page_update_result.narration_changed
                 )
@@ -15723,18 +15740,32 @@ async def update_assistant(
                     question_update_result.requires_question_generation
                 )
 
+            pending_narration_positions = await lecture_slide_service.lecture_slide_narration_positions_for_identities(
+                request.state["db"],
+                target_lecture_slide_deck.id,
+                pending_narration_identities,
+            )
+            # Explicit script edits supersede pending work and changed notes on
+            # that page, while unrelated note edits still request narration.
+            narration_generation_positions = narration_generation_positions | (
+                (notes_changed_positions | pending_narration_positions)
+                - narration_changed_positions
+            )
+            content_requires_narration = bool(narration_generation_positions)
+
             needs_full_processing = target_lecture_slide_deck.status in {
                 schemas.LectureSlideDeckStatus.UPLOADED,
                 schemas.LectureSlideDeckStatus.FAILED,
             } or not await lecture_slide_service.lecture_slide_deck_has_pages(
                 request.state["db"], target_lecture_slide_deck.id
             )
-            needs_narration_text = (
+            needs_full_narration_text = (
                 regenerate_narration_requested
-                or content_requires_narration
                 or narration_prompt_changed
                 or additional_context_files_changed
-                or (notes_changed and not narration_text_changed)
+            )
+            needs_narration_text = (
+                needs_full_narration_text or content_requires_narration
             )
             needs_questions = (
                 regenerate_questions_requested
@@ -15811,6 +15842,11 @@ async def update_assistant(
                         request.state["db"],
                         target_lecture_slide_deck,
                         requested_by_assistant_id=asst.id,
+                        narration_positions=(
+                            None
+                            if needs_full_narration_text
+                            else sorted(narration_generation_positions)
+                        ),
                         force_manifest_generation=needs_questions,
                     )
                 )
