@@ -1617,7 +1617,12 @@
 		!lectureSlideContentJsonEditing &&
 		!lectureSlideContentJsonDirty
 	) {
-		lectureSlideContentJson = stringifyLectureSlideContentJson();
+		// Keep draft dependencies visible to Svelte's legacy reactivity analysis.
+		lectureSlideContentJson = JSON.stringify(
+			buildLectureSlideContentJson(lectureSlidePageDrafts, lectureSlideQuestionDrafts),
+			null,
+			2
+		);
 		hasSetLectureSlideContentJson = true;
 	}
 	$: if (
