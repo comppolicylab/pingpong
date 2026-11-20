@@ -41,7 +41,7 @@ jobs:
       - name: Set up Python3.x
         uses: actions/setup-python@v7
         with:
-          python-version: 3.11.6
+          python-version: 3.11
         id: py
 
       - name: Install PDF rendering tools
