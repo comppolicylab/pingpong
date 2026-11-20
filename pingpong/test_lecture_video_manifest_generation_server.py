@@ -371,10 +371,12 @@ async def test_should_regenerate_manifest_when_video_description_duration_change
 
 
 @with_institution(11, "Test Institution")
+@pytest.mark.parametrize("gemini_model", ["gemini-3.6-flash", "gemini-custom"])
 async def test_load_manifest_generation_context_defaults_null_video_description_duration(
     db,
     institution,
     monkeypatch,
+    gemini_model,
 ):
     async with db.async_session() as session:
         class_ = models.Class(
@@ -430,6 +432,11 @@ async def test_load_manifest_generation_context_defaults_null_video_description_
         AsyncMock(return_value="gemini-client"),
     )
 
+    monkeypatch.setattr(
+        models.Assistant,
+        "get_by_lecture_video_id",
+        AsyncMock(return_value=SimpleNamespace(lecture_gemini_model=gemini_model)),
+    )
     context = await lecture_video_processing._load_manifest_generation_run_context(
         run_id,
         "lease-token",
@@ -437,6 +444,7 @@ async def test_load_manifest_generation_context_defaults_null_video_description_
 
     assert context is not None
     assert context.video_description_duration_ms == 30_000
+    assert context.gemini_model == gemini_model
 
 
 @with_institution(11, "Test Institution")
@@ -777,6 +785,7 @@ async def test_process_claimed_manifest_run_persists_generated_manifest(
             lecture_video=lecture_video,
             instructions="You are a lecture assistant.",
             model="gpt-4o-mini",
+            lecture_gemini_model="gemini-3.6-flash",
             tools="[]",
             use_latex=False,
             use_image_descriptions=False,
@@ -927,6 +936,7 @@ async def test_upload_and_generate_manifest_propagates_generation_failure(
             transcript=transcript,
             temp_dir="/tmp",
             video_description_duration_ms=30_000,
+            gemini_model="gemini-custom",
         )
 
     assert [call[0] for call in calls] == [
@@ -934,6 +944,7 @@ async def test_upload_and_generate_manifest_propagates_generation_failure(
         "generate",
     ]
     assert calls[1][1]["video_description_duration_ms"] == 30_000
+    assert calls[1][1]["model"] == "gemini-custom"
 
 
 @with_institution(11, "Test Institution")
@@ -1272,6 +1283,7 @@ async def test_process_claimed_manifest_run_reuses_transcript_data(
             lecture_video=lecture_video,
             instructions="You are a lecture assistant.",
             model="gpt-4o-mini",
+            lecture_gemini_model="gemini-3.6-flash",
             tools="[]",
             use_latex=False,
             use_image_descriptions=False,

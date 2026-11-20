@@ -2982,6 +2982,7 @@ export type LectureVideoAssistantEditorPolicy = {
 };
 
 export type LectureLessonEditorConfig = {
+	lecture_check_instructions: string;
 	lecture_lesson_available: boolean;
 	instructions: string;
 	generation_prompt: string;
@@ -2994,6 +2995,15 @@ export type LectureLessonEditorConfig = {
 /**
  * List of language models.
  */
+export type LectureGenerationModels = {
+	models: { id: string; name: string }[];
+	default_model: { id: string; name: string };
+};
+
+export const getGeminiModels = async (f: Fetcher, classId: number) => {
+	return await GET<never, LectureGenerationModels>(f, `class/${classId}/gemini/models`);
+};
+
 export type AssistantModels = {
 	cache_mode?: 'redis' | 'direct';
 	models: AssistantModel[];
@@ -3166,6 +3176,9 @@ export type Assistant = {
 	instructions: string;
 	interaction_mode: InteractionMode;
 	model: string;
+	lecture_check_instructions?: string | null;
+	lecture_generation_model?: string | null;
+	lecture_gemini_model?: string | null;
 	temperature: number | null;
 	reasoning_effort: number | null;
 	verbosity: number | null;
@@ -3336,6 +3349,9 @@ export type CreateAssistantRequest = {
 	video_description_duration_ms?: number | null;
 	overwrite_manifest?: boolean;
 	create_classic_assistant?: boolean;
+	lecture_check_instructions?: string | null;
+	lecture_generation_model?: string | null;
+	lecture_gemini_model?: string | null;
 	temperature: number | null;
 	reasoning_effort: number | null;
 	verbosity: number | null;
@@ -3419,6 +3435,9 @@ export type UpdateAssistantRequest = {
 	regenerate_audio_requested?: boolean;
 	overwrite_manifest?: boolean;
 	create_classic_assistant?: boolean;
+	lecture_check_instructions?: string | null;
+	lecture_generation_model?: string | null;
+	lecture_gemini_model?: string | null;
 	temperature?: number | null;
 	reasoning_effort?: number | null;
 	verbosity?: number | null;

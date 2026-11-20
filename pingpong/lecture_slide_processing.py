@@ -1108,7 +1108,33 @@ async def queue_lecture_slide_processing_run(
 
     async def reuse_existing_run(
         run: models.LectureSlideProcessingRun,
-    ) -> models.LectureSlideProcessingRun:
+    ) -> models.LectureSlideProcessingRun | None:
+        nonlocal narration_positions, force_manifest_generation
+        expands_scope = (
+            stage == schemas.LectureSlideProcessingStage.NARRATION_TEXT
+            and run.narration_positions is not None
+            and (
+                narration_positions is None
+                or not set(narration_positions).issubset(run.narration_positions)
+            )
+        )
+        if run.stage_precedes_current(stage) or (
+            run.status == schemas.LectureSlideProcessingRunStatus.RUNNING
+            and expands_scope
+        ):
+            # The response schema of a running generation is already fixed.
+            # Replace the run instead of changing its scope under the worker.
+            if expands_scope and narration_positions is not None:
+                narration_positions = sorted(
+                    set(run.narration_positions) | set(narration_positions)
+                )
+            force_manifest_generation = (
+                force_manifest_generation or run.force_manifest_generation
+            )
+            run.mark_cancelled_for_rewind()
+            session.add(run)
+            await session.flush()
+            return None
         if stage == schemas.LectureSlideProcessingStage.NARRATION_TEXT:
             if narration_positions is None or run.narration_positions is None:
                 run.narration_positions = None
@@ -1129,12 +1155,9 @@ async def queue_lecture_slide_processing_run(
         deck.id,
     )
     if existing_run is not None:
-        if existing_run.stage_precedes_current(stage):
-            existing_run.mark_cancelled_for_rewind()
-            session.add(existing_run)
-            await session.flush()
-        else:
-            return await reuse_existing_run(existing_run)
+        reused_run = await reuse_existing_run(existing_run)
+        if reused_run is not None:
+            return reused_run
 
     deck.status = schemas.LectureSlideDeckStatus.PROCESSING
     deck.error_message = None
@@ -1172,12 +1195,9 @@ async def queue_lecture_slide_processing_run(
             )
         )
         if existing_run is not None:
-            if existing_run.stage_precedes_current(stage):
-                existing_run.mark_cancelled_for_rewind()
-                session.add(existing_run)
-                await session.flush()
-            else:
-                return await reuse_existing_run(existing_run)
+            reused_run = await reuse_existing_run(existing_run)
+            if reused_run is not None:
+                return reused_run
         attempt_number = (
             await models.LectureSlideProcessingRun.get_latest_attempt_number(
                 session,
@@ -1196,11 +1216,13 @@ async def queue_narration_text_processing_run(
     *,
     requested_by_assistant_id: int | None = None,
     narration_positions: list[int] | None = None,
+    force_manifest_generation: bool = False,
 ) -> models.LectureSlideProcessingRun | None:
     return await queue_lecture_slide_processing_run(
         session,
         deck,
         requested_by_assistant_id=requested_by_assistant_id,
+        force_manifest_generation=force_manifest_generation,
         stage=schemas.LectureSlideProcessingStage.NARRATION_TEXT,
         narration_positions=narration_positions,
     )
@@ -3082,15 +3104,21 @@ async def _get_responses_model_for_run(
     run = await models.LectureSlideProcessingRun.get_by_id(session, run_id)
     if run is not None and run.assistant_id_at_start is not None:
         model = await session.scalar(
-            select(models.Assistant.model).where(
-                models.Assistant.id == run.assistant_id_at_start
-            )
+            select(
+                func.coalesce(
+                    models.Assistant.lecture_generation_model, models.Assistant.model
+                )
+            ).where(models.Assistant.id == run.assistant_id_at_start)
         )
         if model:
             return str(model)
 
     model = await session.scalar(
-        select(models.Assistant.model)
+        select(
+            func.coalesce(
+                models.Assistant.lecture_generation_model, models.Assistant.model
+            )
+        )
         .where(models.Assistant.lecture_slide_deck_id == deck_id)
         .order_by(models.Assistant.id.asc())
         .limit(1)

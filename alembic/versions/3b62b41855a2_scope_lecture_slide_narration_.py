@@ -1,7 +1,7 @@
 """scope lecture slide narration generation to inserted pages
 
 Revision ID: 3b62b41855a2
-Revises: e8a21f4d6c90
+Revises: a7c942e31b08
 Create Date: 2026-11-20 02:14:03.772707
 
 """
@@ -13,7 +13,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = "3b62b41855a2"
-down_revision: Union[str, None] = "e8a21f4d6c90"
+down_revision: Union[str, None] = "a7c942e31b08"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

@@ -4224,6 +4224,7 @@ class LectureSlideProcessingRun(Base):
                 ),
             )
             .order_by(LectureSlideProcessingRun.created.asc())
+            .with_for_update()
         )
         return (await session.scalars(stmt)).one_or_none()
 
@@ -6148,6 +6149,9 @@ class Assistant(Base):
     locked = Column(Boolean, server_default="false")
     tools = Column(String)
     model = Column(String)
+    lecture_check_instructions = Column(Text, nullable=True)
+    lecture_generation_model = Column(String, nullable=True)
+    lecture_gemini_model = Column(String, nullable=True)
     temperature = Column(Float, nullable=True)
     reasoning_effort = Column(Integer, nullable=True)
     verbosity = Column(Integer, nullable=True)
