@@ -1134,6 +1134,10 @@ async def apply_lecture_slide_content_items(
             )
             narration_text = pronunciation.display or None
             narration_tts_text = pronunciation.speech_override
+        if narration_text is not None:
+            # A supplied script takes precedence over automatic narration for
+            # newly inserted images and GIFs.
+            narration_generation_positions.discard(position)
         if page.user_notes != user_notes:
             page.user_notes = user_notes
             notes_changed = True

@@ -5633,3 +5633,141 @@ async def test_narration_scope_merges_and_explicit_regeneration_covers_all(db):
             session, deck, narration_positions=[2]
         )
         assert reused.narration_positions is None
+
+
+@pytest.mark.parametrize("content_kind", ["image", "gif"])
+@pytest.mark.parametrize("include_unscripted", [False, True])
+@pytest.mark.parametrize(
+    "script, display, speech_override",
+    [
+        ("My own narration.", "My own narration.", None),
+        (
+            "These pipes [[lead=>leed]] away.",
+            "These pipes lead away.",
+            "These pipes leed away.",
+        ),
+        (" \n ", None, None),
+    ],
+)
+async def test_inserted_visual_supplied_script_takes_precedence(
+    db,
+    content_kind,
+    include_unscripted,
+    script,
+    display,
+    speech_override,
+    monkeypatch,
+):
+    await _create_class_and_deck(db)
+    async with db.async_session() as session:
+        deck = await models.LectureSlideDeck.get_by_id(session, 1)
+        deck.status = schemas.LectureSlideDeckStatus.READY
+        items = []
+        for position in range(2 if include_unscripted else 1):
+            media = await models.LectureSlideMediaStoredObject.create(
+                session,
+                class_id=1,
+                uploader_id=deck.uploader_id,
+                key=f"inserted-{position}",
+                original_filename=f"inserted-{position}.{content_kind}",
+                content_type=f"image/{content_kind}",
+                content_length=100,
+                content_kind=schemas.LectureSlideContentKind(content_kind),
+                duration_ms=None,
+                width_px=640,
+                height_px=480,
+            )
+            items.append(
+                schemas.LectureSlideContentItemInput(
+                    content_kind=content_kind,
+                    media_stored_object_id=media.id,
+                    narration_text=script if position == 0 else None,
+                    user_notes="Keep the supplied script when present.",
+                )
+            )
+        result = await lecture_slide_service.apply_lecture_slide_content_items(
+            session,
+            deck,
+            items,
+            uploader_id=deck.uploader_id,
+        )
+        expected_positions = ([] if display is not None else [0]) + (
+            [1] if include_unscripted else []
+        )
+        assert result.narration_generation_positions == frozenset(expected_positions)
+        assert result.requires_narration_generation == bool(expected_positions)
+        if expected_positions:
+            run = await lecture_slide_processing.queue_narration_text_processing_run(
+                session,
+                deck,
+                narration_positions=expected_positions,
+            )
+        else:
+            assert result.narration_changed
+            run = await lecture_slide_processing.queue_audio_processing_run(
+                session,
+                deck,
+            )
+            assert run.stage == schemas.LectureSlideProcessingStage.NARRATION_AUDIO
+        run.status = schemas.LectureSlideProcessingRunStatus.RUNNING
+        run.lease_token = "lease"
+        await session.commit()
+        run_id = run.id
+
+    if expected_positions:
+
+        async def media_inputs(items):
+            assert [position for position, _ in items] == expected_positions
+            return []
+
+        monkeypatch.setattr(
+            lecture_slide_processing,
+            "_lecture_slide_media_input_images",
+            media_inputs,
+        )
+
+        class Responses:
+            async def parse(self, **kwargs):
+                message = kwargs["input"][0]["content"][-1]["text"]
+                fixed = json.loads(
+                    message.split("FIXED EXISTING NARRATION IN SLIDE ORDER:\n", 1)[1]
+                )
+                assert [item["narration_text"] for item in fixed] == (
+                    [display] if display is not None else []
+                )
+                return SimpleNamespace(
+                    output_parsed=kwargs["text_format"](
+                        slides=[
+                            lecture_slide_processing.GeneratedSlideNarration(
+                                slide_position=position,
+                                narration_text="Generated narration.",
+                            )
+                            for position in expected_positions
+                        ]
+                    )
+                )
+
+        generated = await lecture_slide_processing._generate_narration_text(
+            run_id,
+            "lease",
+            1,
+            "file-pdf",
+            "test-model",
+            SimpleNamespace(responses=Responses()),
+        )
+        await lecture_slide_processing._persist_narration_text(
+            run_id,
+            "lease",
+            1,
+            generated,
+        )
+
+    async with db.async_session() as session:
+        deck = await models.LectureSlideDeck.get_by_id_with_processing_context(
+            session, 1
+        )
+        pages = sorted(deck.pages, key=lambda page: page.position)
+        assert pages[0].narration_text == (display or "Generated narration.")
+        assert pages[0].narration_tts_text == speech_override
+        if include_unscripted:
+            assert pages[1].narration_text == "Generated narration."
