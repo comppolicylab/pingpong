@@ -4,7 +4,7 @@ ARG PINGPONG_LANDING_IMAGE=pingpong-study-landing:prod
 FROM ${PINGPONG_LANDING_IMAGE} AS study_landing
 
 ########## Build pingpong ##########
-FROM node:22.23.4-alpine3.24 AS build_pingpong
+FROM node:22.23.5-alpine3.24 AS build_pingpong
 
 RUN npm install -g pnpm@10
 
