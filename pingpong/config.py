@@ -18,6 +18,7 @@ from pingpong.video_store import LocalVideoStore, S3VideoStore
 from pingpong.log_filters import IgnoreHealthEndpoint
 from .authz import OpenFgaAuthzDriver
 from .login_exchange.settings import LoginExchangeSettings
+from .open_access.settings import OpenAccessSettings
 from .model_cache_settings import ModelCacheSettings
 from .email import AzureEmailSender, GmailEmailSender, MockEmailSender, SmtpEmailSender
 from .lti import AWSLTIKeyStore, LocalLTIKeyStore, LTIKeyManager
@@ -676,6 +677,7 @@ class Config(BaseSettings):
     email: EmailSettings
     lms: LMSSettings = Field(LMSSettings())
     lti: LTISettings | None = Field(None)
+    open_access: OpenAccessSettings | None = Field(None)
     sentry: SentrySettings = Field(SentrySettings())
     metrics: MetricsSettings = Field(MetricsSettings())
     init: InitSettings = Field(InitSettings())

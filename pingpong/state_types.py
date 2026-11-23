@@ -15,6 +15,7 @@ import pingpong.schemas as schemas
 
 if TYPE_CHECKING:
     import pingpong.models as models
+    from pingpong.open_access.access import OpenAccessContext
 
 
 OpenAIClientType: TypeAlias = openai.AsyncClient | openai.AsyncAzureOpenAI
@@ -39,6 +40,7 @@ class BaseConnectionState(TypedDict):
     anonymous_session_id: int | None
     anonymous_link_id: int | None
     response_safety_identifier: str | None
+    open_access: OpenAccessContext | None
     permissions: dict[str, bool]
 
 

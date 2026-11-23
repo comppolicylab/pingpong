@@ -991,6 +991,9 @@
               },
               {
                 "type": "anonymous_link"
+              },
+              {
+                "type": "anonymous_user"
               }
             ]
           },

@@ -466,6 +466,11 @@ class ModerationCheckStatus(StrEnum):
     CANCELLED = "cancelled"
 
 
+class ExternalPrincipalTier(StrEnum):
+    ANONYMOUS = "anonymous"
+    REGISTERED = "registered"
+
+
 class InteractionMode(StrEnum):
     CHAT = "chat"
     VOICE = "voice"

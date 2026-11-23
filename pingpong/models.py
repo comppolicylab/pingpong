@@ -3853,6 +3853,18 @@ class LectureSlideTranslation(Base):
         return self.total_duration_ms == expected_start_ms
 
     @classmethod
+    async def list_by_deck(
+        cls, session: AsyncSession, deck_id: int
+    ) -> list["LectureSlideTranslation"]:
+        result = await session.scalars(
+            select(cls)
+            .where(cls.lecture_slide_deck_id == int(deck_id))
+            .options(selectinload(cls.pages), selectinload(cls.runs))
+            .order_by(cls.language_name)
+        )
+        return list(result)
+
+    @classmethod
     async def get_by_deck_and_language(
         cls,
         session: AsyncSession,
@@ -8219,6 +8231,47 @@ class VoiceModeRecording(Base):
             yield row.VoiceModeRecording
 
 
+class ExternalPrincipal(Base):
+    __tablename__ = "external_principals"
+    __table_args__ = (
+        UniqueConstraint(
+            "client_id", "subject", name="uq_external_principals_client_subject"
+        ),
+    )
+
+    id = Column(Integer, primary_key=True)
+    client_id = Column(String, nullable=False)
+    subject = Column(String, nullable=False)
+    tier = Column(SQLEnum(schemas.ExternalPrincipalTier), nullable=False)
+    created = Column(DateTime(timezone=True), server_default=func.now())
+    updated = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    @classmethod
+    async def get_or_create(
+        cls,
+        session: AsyncSession,
+        client_id: str,
+        subject: str,
+        tier: schemas.ExternalPrincipalTier,
+    ) -> "ExternalPrincipal":
+        stmt = (
+            _get_upsert_stmt(session)(ExternalPrincipal)
+            .values(client_id=client_id, subject=subject, tier=tier)
+            .on_conflict_do_nothing(index_elements=["client_id", "subject"])
+        )
+        await session.execute(stmt)
+        return await session.scalar(
+            select(ExternalPrincipal).where(
+                ExternalPrincipal.client_id == client_id,
+                ExternalPrincipal.subject == subject,
+            )
+        )
+
+
 class AnonymousSession(Base):
     __tablename__ = "anonymous_sessions"
 
@@ -8233,6 +8286,12 @@ class AnonymousSession(Base):
     thread = relationship("Thread", back_populates="anonymous_sessions", uselist=False)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="cascade"), nullable=True)
     user = relationship("User", back_populates="anonymous_sessions", uselist=False)
+    external_principal_id = Column(
+        Integer,
+        ForeignKey("external_principals.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
     files = relationship(
         "File",
         back_populates="anonymous_session",
@@ -9636,6 +9695,14 @@ class RunModerationCheck(Base):
 
 class Thread(Base):
     __tablename__ = "threads"
+    __table_args__ = (
+        Index(
+            "threads_external_principal_assistant_idx",
+            "external_principal_id",
+            "assistant_id",
+            unique=True,
+        ),
+    )
 
     id = Column(Integer, primary_key=True)
     name = Column(String, nullable=True)
@@ -9784,6 +9851,9 @@ class Thread(Base):
     anonymous_sessions = relationship(
         "AnonymousSession",
         back_populates="thread",
+    )
+    external_principal_id = Column(
+        Integer, ForeignKey("external_principals.id"), nullable=True
     )
     conversation_id = Column(String, nullable=True)
     last_activity = Column(
