@@ -110,7 +110,7 @@ def encode_signed_claims(
     )
 
 
-def decode_signed_claims(token: str) -> dict:
+def decode_signed_claims(token: str, *, verify_exp: bool = True) -> dict:
     exc: PyJWTError | TimeException | None = None
 
     for secret in config.auth.secret_keys:
@@ -119,6 +119,7 @@ def decode_signed_claims(token: str) -> dict:
                 token,
                 secret.key,
                 algorithms=[secret.algorithm],
+                options={"verify_exp": verify_exp, "require": ["exp"]},
             )
         except (TimeException, PyJWTError) as e:
             exc = e

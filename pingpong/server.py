@@ -135,7 +135,9 @@ from pingpong.say_transform import (
     combine_manual_tts_pronunciation_text,
     transform_say_text,
 )
-from pingpong.session import populate_request
+from pingpong.open_access import store as open_access_store
+from pingpong.open_access.router import router as open_access_router
+from pingpong.session import OpenAccessAuthError, populate_request
 from pingpong.stats import (
     get_runs_with_multiple_assistant_messages_stats,
     get_statistics,
@@ -155,6 +157,7 @@ from . import (
     lecture_slide_processing,
     lecture_slide_runtime,
     lecture_slide_service,
+    lecture_threads,
     lecture_video_chat,
     lecture_video_manifest_generation,
     lecture_video_processing,
@@ -1097,7 +1100,18 @@ FileClient = Annotated[OpenAIClientType, bound_openai_client_dependency(get_boun
 @v1.middleware("http")
 async def parse_session_token(request: StateRequest, call_next):
     """Parse the session token from the cookie and add it to the request state."""
-    request = await populate_request(request)
+    try:
+        request = await populate_request(request)
+    except OpenAccessAuthError:
+        return JSONResponse(
+            status_code=401,
+            content={
+                "detail": {
+                    "message": "Your session has expired.",
+                    "error_code": "open_access_token_invalid",
+                }
+            },
+        )
     return await call_next(request)
 
 
@@ -8948,104 +8962,9 @@ async def create_lecture_thread(
         )
         anonymous_user = anonymous_session.user
 
-    is_slide_lesson = (
-        assistant.interaction_mode == schemas.InteractionMode.LECTURE_SLIDES
+    target = await lecture_threads.resolve_lecture_thread_target(
+        request.state["db"], assistant, req.language_code
     )
-    if is_slide_lesson:
-        if not assistant.lecture_slide_deck:
-            raise HTTPException(
-                status_code=400,
-                detail="This assistant does not have lecture slides attached. Unable to create Lecture Lesson",
-            )
-        if assistant.lecture_slide_deck.status != schemas.LectureSlideDeckStatus.READY:
-            if (
-                assistant.lecture_slide_deck.status
-                == schemas.LectureSlideDeckStatus.FAILED
-            ):
-                raise HTTPException(
-                    status_code=409,
-                    detail=(
-                        "This assistant's lecture slide processing failed. "
-                        "Edit the assistant and retry."
-                    ),
-                )
-            raise HTTPException(
-                status_code=409,
-                detail="This assistant's lecture slides are not ready yet.",
-            )
-    elif not assistant.lecture_video:
-        raise HTTPException(
-            status_code=400,
-            detail="This assistant does not have a lecture video attached. Unable to create Lecture Lesson",
-        )
-    elif assistant.lecture_video.status != schemas.LectureVideoStatus.READY:
-        if assistant.lecture_video.status == schemas.LectureVideoStatus.FAILED:
-            raise HTTPException(
-                status_code=409,
-                detail=(
-                    "This assistant's lecture video narration processing failed. "
-                    "Edit the assistant and retry."
-                ),
-            )
-        raise HTTPException(
-            status_code=409,
-            detail="This assistant's lecture video is not ready yet.",
-        )
-
-    lecture_video_id = None if is_slide_lesson else assistant.lecture_video_id
-    lecture_slide_deck_id = assistant.lecture_slide_deck_id if is_slide_lesson else None
-    lecture_slide_translation_id = None
-    lecture_language_code = None
-    lecture_language_name = None
-    requested_language_code = req.language_code.strip().lower()
-    if is_slide_lesson:
-        if requested_language_code == "original":
-            lecture_language_code = "original"
-            lecture_language_name = "Original"
-        else:
-            if lecture_slide_deck_id is None or assistant.lecture_slide_deck is None:
-                raise HTTPException(
-                    status_code=409,
-                    detail="This assistant's lecture slides are unavailable.",
-                )
-            translation = await models.LectureSlideTranslation.get_by_deck_and_language(
-                request.state["db"],
-                lecture_slide_deck_id,
-                requested_language_code,
-            )
-            if (
-                translation is None
-                or await lecture_slide_processing.translation_needs_feedback(
-                    request.state["db"], translation
-                )
-                or translation.status != schemas.LectureSlideTranslationStatus.READY
-                or translation.continuous_narration_stored_object_id is None
-                or translation.caption_stored_object_id is None
-                or not translation.has_complete_timeline_for_deck(
-                    assistant.lecture_slide_deck
-                )
-            ):
-                raise HTTPException(
-                    status_code=409,
-                    detail=(
-                        "This lecture slide translation is not ready. "
-                        "Prepare it from the lesson landing page first."
-                    ),
-                )
-            lecture_slide_translation_id = translation.id
-            lecture_language_code = translation.language_code
-            lecture_language_name = translation.language_name
-    elif requested_language_code != "original":
-        raise HTTPException(
-            status_code=400,
-            detail="Language selection is only available for lecture slides.",
-        )
-
-    if assistant.version != 3:
-        raise HTTPException(
-            status_code=400,
-            detail="Lecture presentation can only be created using v3 assistants.",
-        )
 
     class_, parties = await asyncio.gather(
         models.Class.get_by_id(request.state["db"], int(class_id)),
@@ -9060,66 +8979,24 @@ async def create_lecture_thread(
     all_parties = parties or []
     if anonymous_user:
         all_parties.append(anonymous_user)
-    new_thread = {
-        "name": "Lecture Lesson",
-        "input_moderation_enabled": bool(assistant.input_moderation_enabled),
-        "class_id": int(class_id),
-        "private": True if all_parties else False,
-        "interaction_mode": (
-            schemas.InteractionMode.LECTURE_SLIDES
-            if is_slide_lesson
-            else schemas.InteractionMode.LECTURE_VIDEO
-        ),
-        "users": all_parties,
-        "thread_id": None,
-        "anonymous_sessions": [anonymous_session] if anonymous_session else [],
-        "conversation_id": req.conversation_id,
-        "assistant_id": req.assistant_id,
-        "vector_store_id": None,
-        "code_interpreter_file_ids": [],
-        "image_file_ids": [],
-        "tools_available": json.dumps(
-            [{"type": "web_search"}]
-            if assistant.tools and {"type": "web_search"} in json.loads(assistant.tools)
-            else []
-        ),
-        "version": assistant.version,
-        "last_activity": func.now(),
-        "instructions": assistant.instructions,
-        "timezone": req.timezone,
-        "lecture_video_id": lecture_video_id,
-        "lecture_slide_deck_id": lecture_slide_deck_id,
-        "lecture_slide_translation_id": lecture_slide_translation_id,
-        "lecture_language_code": lecture_language_code,
-        "lecture_language_name": lecture_language_name,
-        "display_user_info": assistant.should_record_user_information
-        and not class_.private,
-        "prevent_user_thread_deletion": (
-            assistant.prevent_user_thread_deletion
-            and assistant.should_record_user_information
-            and not class_.private
-        ),
-    }
 
     result: None | models.Thread = None
     try:
-        result = await models.Thread.create(request.state["db"], new_thread)
-        request.state["db"].add(result)
-        await request.state["db"].flush()
         try:
-            if is_slide_lesson:
-                await lecture_slide_runtime.initialize_thread_state(
-                    request.state["db"], result.id
-                )
-            else:
-                await lecture_video_runtime.initialize_thread_state(
-                    request.state["db"], result.id
-                )
+            result = await lecture_threads.create_lecture_thread(
+                request.state["db"],
+                assistant=assistant,
+                class_=class_,
+                target=target,
+                users=all_parties,
+                anonymous_session=anonymous_session,
+                timezone=req.timezone,
+                conversation_id=req.conversation_id,
+            )
         except interactive_lesson_runtime.InteractiveLessonRuntimeError as err:
-            if is_slide_lesson:
+            if target.is_slide_lesson:
                 _raise_lecture_slide_runtime_http_error(err)
             _raise_lecture_video_runtime_http_error(err)
-        await request.state["db"].refresh(result)
 
         grants = [
             (f"class:{class_id}", "parent", f"thread:{result.id}"),
@@ -17629,6 +17506,7 @@ async def lifespan(app: FastAPI):
                     yield
                 finally:
                     await close_model_catalog_cache()
+                    await open_access_store.close_redis_clients()
 
 
 app = FastAPI(
@@ -17656,6 +17534,8 @@ async def handle_exception(request: StateRequest, exc: Exception):
 
 
 app.mount("/api/v1", v1)
+
+v1.include_router(open_access_router, prefix="/oa")
 
 try:
     if config.lti:
