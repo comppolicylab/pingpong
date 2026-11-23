@@ -66,6 +66,10 @@ def player_route_thread(method: str, path: str) -> tuple[int, int] | None:
     return None
 
 
+def is_player_route(method: str, path: str) -> bool:
+    return player_route_thread(method, path) is not None
+
+
 async def authenticate(
     db: AsyncSession,
     *,

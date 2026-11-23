@@ -8,6 +8,7 @@ import uuid_utils as uuid
 from pingpong import models, schemas
 from pingpong.auth import TimeException, decode_session_token
 from pingpong.open_access import access as open_access
+from pingpong.open_access import errors as open_access_errors
 from pingpong.open_access import request as open_access_request
 from pingpong.state_types import AppState, StateRequest, StateWebSocket
 from pingpong.users import UserNotFoundException
@@ -221,6 +222,10 @@ async def populate_request(
         if oa_token is not None:
             await populate_open_access(req, oa_token)
             return req
+        if open_access_request.has_marker(req) and open_access.is_player_route(
+            req.method, req.url.path
+        ):
+            raise open_access_errors.token_invalid()
     try:
         request = await populate_anonymous_tokens(request)
         request = populate_authorization_token(request)

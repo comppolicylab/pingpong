@@ -275,7 +275,7 @@ async def test_new_launch_displaces_previous_session(api, oa, lessons):
 @pytest.mark.asyncio
 @with_user(123)
 @with_institution(11, "OA Institution")
-async def test_expired_access_token_rejected_with_valid_login(
+async def test_expired_or_missing_token_rejected_with_valid_login(
     api, oa, lessons, now, valid_user_token
 ):
     body = exchange(api, launch(api, launch_grant()).json()["code"]).json()
@@ -287,15 +287,12 @@ async def test_expired_access_token_rejected_with_valid_login(
         session_id=body["session_id"],
         nowfn=offset(now, seconds=-3600),
     )
-    response = api.get(
-        f"/api/v1/class/{body['class_id']}/thread/{body['thread_id']}",
-        headers={
-            **player_headers(expired),
-            "Authorization": f"Bearer {valid_user_token}",
-        },
-    )
-    assert response.status_code == 401
-    assert response.json()["detail"]["error_code"] == "open_access_token_invalid"
+    thread_url = f"/api/v1/class/{body['class_id']}/thread/{body['thread_id']}"
+    login = {"Authorization": f"Bearer {valid_user_token}"}
+    for headers in ({**player_headers(expired), **login}, {**MARKER, **login}):
+        response = api.get(thread_url, headers=headers)
+        assert response.status_code == 401
+        assert response.json()["detail"]["error_code"] == "open_access_token_invalid"
 
 
 @pytest.mark.asyncio
