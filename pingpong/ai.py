@@ -4734,6 +4734,7 @@ async def run_response(
                 ConnectionAbortedError,
                 asyncio.CancelledError,
                 ClientDisconnect,
+                GeneratorExit,
             ) as stream_cancel_error:
                 is_canceled = True
                 await _tts_cleanup()
@@ -4872,7 +4873,11 @@ async def run_response(
                     if handler:
                         yield handler.flush()
                     yield b'{"type":"done"}\n'
-        except (asyncio.CancelledError, ClientDisconnect) as stream_cancel_error:
+        except (
+            asyncio.CancelledError,
+            ClientDisconnect,
+            GeneratorExit,
+        ) as stream_cancel_error:
             logger.warning(
                 "Response stream setup cancelled "
                 "(run_id=%s, thread_id=%s, class_id=%s, cause=%s)",

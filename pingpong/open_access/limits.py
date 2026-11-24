@@ -56,6 +56,15 @@ end
 return 1
 """
 
+QUOTA_CODES = frozenset(
+    {
+        "open_access_token_limit",
+        "open_access_thread_turn_limit",
+        "open_access_turn_limit",
+        "open_access_capacity",
+    }
+)
+
 MESSAGES = {
     "open_access_token_limit": "You have reached today's usage limit.",
     "open_access_thread_turn_limit": "You have reached today's limit for this lesson.",
