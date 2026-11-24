@@ -410,10 +410,11 @@ def _build_context_text(
     state: models.LectureSlideThreadState,
     *,
     playback_position_ms: int,
+    furthest_offset_ms: int,
     answered_knowledge_checks: str | None,
 ) -> str:
     current_question = _get_current_question(thread, state)
-    furthest_offset_ms = max(state.furthest_offset_ms, playback_position_ms, 0)
+    furthest_offset_ms = max(furthest_offset_ms, playback_position_ms, 0)
     current_knowledge_check = None
     if (
         state.state == schemas.InteractiveLessonSessionState.AWAITING_ANSWER
@@ -557,11 +558,12 @@ def _build_context_text_v5(
     context: schemas.LectureSlideContextV5,
     *,
     playback_position_ms: int,
+    furthest_offset_ms: int,
     answered_knowledge_checks: str | None,
 ) -> str:
     deck = thread.lecture_slide_deck
     current_question = _get_current_question(thread, state)
-    furthest_offset_ms = max(state.furthest_offset_ms, playback_position_ms, 0)
+    furthest_offset_ms = max(furthest_offset_ms, playback_position_ms, 0)
     summary_checkpoint = _select_summary_checkpoint_v5(
         context.summary_checkpoints,
         furthest_offset_ms,
@@ -712,6 +714,12 @@ async def prepare_lecture_chat_turn(
         slide_state,
         lecture_video_playback_position_ms,
     )
+    source_position_ms = lecture_slide_runtime.to_source_offset(
+        slide_thread, playback_position_ms
+    )
+    source_furthest_ms = lecture_slide_runtime.to_source_offset(
+        slide_thread, slide_state.furthest_offset_ms
+    )
     previous_context_created = await _get_latest_lecture_context_created(
         request.state["db"], slide_thread.id
     )
@@ -746,14 +754,16 @@ async def prepare_lecture_chat_turn(
             slide_thread,
             slide_state,
             context_v5,
-            playback_position_ms=playback_position_ms,
+            playback_position_ms=source_position_ms,
+            furthest_offset_ms=source_furthest_ms,
             answered_knowledge_checks=answered_knowledge_checks,
         )
     else:
         context_text = _build_context_text(
             slide_thread,
             slide_state,
-            playback_position_ms=playback_position_ms,
+            playback_position_ms=source_position_ms,
+            furthest_offset_ms=source_furthest_ms,
             answered_knowledge_checks=answered_knowledge_checks,
         )
     if context_text.strip():
@@ -778,10 +788,10 @@ async def prepare_lecture_chat_turn(
     request.state["db"].add(slide_state)
 
     user_message_metadata: dict[str, Any] = {
-        schemas.MESSAGE_METADATA_LECTURE_PLAYBACK_POSITION_MS_V1: playback_position_ms,
+        schemas.MESSAGE_METADATA_LECTURE_PLAYBACK_POSITION_MS_V1: source_position_ms,
     }
     current_slide = (
-        _slide_at_offset(deck, playback_position_ms) if deck is not None else None
+        _slide_at_offset(deck, source_position_ms) if deck is not None else None
     )
     if current_slide is not None:
         user_message_metadata[schemas.MESSAGE_METADATA_LECTURE_SLIDE_NUMBER_V1] = (

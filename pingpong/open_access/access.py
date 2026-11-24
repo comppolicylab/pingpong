@@ -26,6 +26,7 @@ PLAYER_ROUTES: tuple[tuple[str, re.Pattern[str]], ...] = tuple(
         ("GET", _THREAD + r"/assistant-avatar"),
         ("GET", _SLIDES + r"/audio"),
         ("GET", _SLIDES + r"/captions\.vtt"),
+        ("GET", _SLIDES + r"/languages"),
         ("GET", _SLIDES + r"/[^/]+/narration"),
         ("GET", _SLIDES + r"/[^/]+/image"),
         ("GET", _SLIDES + r"/narration/[^/]+"),

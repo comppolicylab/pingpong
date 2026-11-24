@@ -1314,6 +1314,33 @@ async def _handle_ended(
         )
 
 
+async def _handle_language_changed(
+    session: AsyncSession,
+    state: LessonState,
+    actor_user_id: int | None,
+    request: schemas.InteractiveLessonLanguageChangedRequest,
+    *,
+    adapter: InteractiveLessonAdapter,
+    event_type: schemas.InteractiveLessonInteractionEventType,
+    current_time: datetime,
+) -> None:
+    change_language = getattr(adapter, "change_language", None)
+    if change_language is None:
+        raise InteractiveLessonValidationError(
+            "Language switching is not available for this lesson."
+        )
+    await change_language(session, state, request.language_code)
+    await _append_interaction(
+        session,
+        state,
+        adapter=adapter,
+        actor_user_id=actor_user_id,
+        event_type=event_type,
+        offset_ms=state.last_known_offset_ms,
+        idempotency_key=request.idempotency_key,
+    )
+
+
 _INTERACTION_HANDLERS: dict[
     type[schemas.InteractiveLessonInteractionRequestBase], InteractionHandler
 ] = {
@@ -1323,6 +1350,7 @@ _INTERACTION_HANDLERS: dict[
     schemas.InteractiveLessonPausedRequest: _handle_paused,
     schemas.InteractiveLessonSeekedRequest: _handle_seeked,
     schemas.InteractiveLessonEndedRequest: _handle_ended,
+    schemas.InteractiveLessonLanguageChangedRequest: _handle_language_changed,
 }
 
 

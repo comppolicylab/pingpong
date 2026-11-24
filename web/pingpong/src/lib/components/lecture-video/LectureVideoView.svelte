@@ -70,7 +70,8 @@
 	type LessonQuestionPrompt = LectureVideoQuestionPrompt | InteractiveLessonQuestionPrompt;
 	type LessonQuestionMarker = LectureVideoQuestionMarker | InteractiveLessonQuestionMarker;
 	type LessonContinuation = LectureVideoContinuation | InteractiveLessonContinuation;
-	type LessonInteractionPayload = api.LectureVideoInteractionRequest;
+	type LessonInteractionPayload =
+		api.LectureVideoInteractionRequest | api.InteractiveLessonLanguageChangedRequest;
 	type AudioSegment = {
 		src: string;
 		startOffsetMs: number;
@@ -136,6 +137,7 @@
 		narrationplaybackstarted: void;
 		lessonupdated: void;
 		checkclick: number;
+		languagechange: void;
 	}>();
 
 	// --- Session state ---
@@ -248,6 +250,9 @@
 	let autoContinueInFlight = $state(false);
 	let autoContinueFailed = $state(false);
 	let expiredControlRecoveryInFlight = $state(false);
+	let lessonLanguages: api.LectureSlideLanguage[] = $state([]);
+	let lessonLanguageCode: string | null = $state(null);
+	let languageChangeInFlight = $state(false);
 	let controllerAcquireInFlight = $state(false);
 	let acquireControllerSessionInFlight: Promise<LessonSession | null> | null = null;
 	let controllerAcquireGeneration = 0;
@@ -536,6 +541,7 @@
 
 	onMount(() => {
 		void initSession();
+		if (lessonMode === 'lecture_slides') void loadLessonLanguages();
 		window.addEventListener('beforeunload', handleBeforeUnload);
 		const handleActivePageRecovery = (event: Event) => {
 			if (document.visibilityState === 'hidden') return;
@@ -878,6 +884,7 @@
 		switch (payload.type) {
 			case 'question_presented':
 			case 'answer_submitted':
+			case 'language_changed':
 				return payload;
 			case 'video_paused':
 				return { ...payload, type: 'lesson_paused' };
@@ -943,7 +950,12 @@
 						)
 					)
 				: api.expandResponse(
-						await api.postLectureVideoInteraction(fetch, classId, threadId, payload)
+						await api.postLectureVideoInteraction(
+							fetch,
+							classId,
+							threadId,
+							payload as api.LectureVideoInteractionRequest
+						)
 					)
 	});
 
@@ -1348,6 +1360,64 @@
 				clearControllerLease();
 			}
 			sessionCleanupInFlight = false;
+		}
+	}
+
+	async function loadLessonLanguages() {
+		const expanded = api.expandResponse(
+			await api.getLectureSlideThreadLanguages(fetch, classId, threadId)
+		);
+		if (expanded.error) return;
+		lessonLanguages = expanded.data.languages;
+		lessonLanguageCode = expanded.data.current_language_code;
+	}
+
+	async function changeLanguage(languageCode: string) {
+		const sessionId = controllerSessionId;
+		if (!sessionId || languageChangeInFlight || languageCode === lessonLanguageCode) return;
+		languageChangeInFlight = true;
+		cancelPendingNarration();
+		if (videoElement && !videoElement.paused) {
+			suppressPauseInteraction = true;
+			videoElement.pause();
+		}
+		const failureMessage =
+			'We could not change the lesson language. Refresh the lesson to continue.';
+		try {
+			if (playbackInteractionAllowed && !playbackLocked && !isVideoAtEnd()) {
+				const paused = await postLessonInteraction({
+					type: 'video_paused',
+					controller_session_id: sessionId,
+					expected_state_version: stateVersion,
+					idempotency_key: crypto.randomUUID(),
+					offset_ms: Math.round(currentTimeMs)
+				});
+				if (failClosedOnConflict(paused)) return;
+				if (paused.error) {
+					failClosedControl(paused.error.detail || failureMessage);
+					return;
+				}
+			}
+			const expanded = await postLessonInteraction({
+				type: 'language_changed',
+				controller_session_id: sessionId,
+				expected_state_version: stateVersion,
+				idempotency_key: crypto.randomUUID(),
+				language_code: languageCode
+			});
+			if (failClosedOnConflict(expanded)) return;
+			if (expanded.error) {
+				failClosedControl(expanded.error.detail || failureMessage, {
+					action: actionForErrorResponse(expanded.$status, expanded.error.detail)
+				});
+				return;
+			}
+			await cleanupLectureVideoSession({ postPause: false, releaseControl: true });
+			dispatch('languagechange');
+		} catch (error) {
+			failClosedControl(error instanceof Error ? error.message : failureMessage);
+		} finally {
+			languageChangeInFlight = false;
 		}
 	}
 
@@ -2710,6 +2780,11 @@
 									onpause={handlePause}
 									onquestionclick={handleQuestionClick}
 									onmanualplayrequest={handleManualPlaybackRequest}
+									languages={lessonLanguages}
+									languageCode={lessonLanguageCode}
+									onlanguagechange={canParticipate && !languageChangeInFlight
+										? changeLanguage
+										: undefined}
 								/>
 							</div>
 						{/if}

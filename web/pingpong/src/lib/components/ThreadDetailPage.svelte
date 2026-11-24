@@ -179,7 +179,11 @@
 	$: threadLectureSlideCaptionsAvailable =
 		expandedThreadData.data?.lecture_slide_captions_available === true;
 	$: lectureSlideCaptionsSrc = threadLectureSlideCaptionsAvailable
-		? api.getLectureSlideCaptionsUrl(classId, threadId)
+		? api.getLectureSlideCaptionsUrl(
+				classId,
+				threadId,
+				expandedThreadData.data?.thread?.lecture_language_code ?? 'original'
+			)
 		: null;
 	$: lectureSlideNarrationSrc = lectureSlideDeck?.continuous_narration_url
 		? api.withMediaAuthQuery(lectureSlideDeck.continuous_narration_url)
@@ -2150,6 +2154,7 @@
 				on:playbackresumed={handleLecturePlaybackResumed}
 				on:narrationplaybackstarted={handleLectureNarrationPlaybackStarted}
 				on:lessonupdated={handleLectureSlideLessonUpdated}
+				on:languagechange={() => (data.reloadLesson ?? invalidateAll)()}
 				on:checkclick={scrollToLessonCheck}
 			>
 				{#snippet statusAction()}

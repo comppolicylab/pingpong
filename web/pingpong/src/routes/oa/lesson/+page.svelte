@@ -40,7 +40,8 @@
 			uploadInfo: api.uploadInfoFrom(),
 			isSupervisor: false,
 			supervisors: [],
-			maxMessageLength: config.message_max_characters
+			maxMessageLength: config.message_max_characters,
+			reloadLesson: () => loadLesson(session, config)
 		};
 	};
 

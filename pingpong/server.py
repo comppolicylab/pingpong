@@ -691,7 +691,7 @@ def _lecture_slide_deck_view(
                 "get_thread_lecture_slide_continuous_narration",
                 class_id=str(thread.class_id),
                 thread_id=str(thread.id),
-            )
+            ).include_query_params(lang=thread.lecture_language_code or "original")
         )
 
     captions_url = None
@@ -6413,6 +6413,33 @@ async def get_thread_lecture_slide_page_narration(
             status_code=500,
             detail="An internal error occurred while retrieving the lecture slide narration.",
         ) from e
+
+
+@v1.get(
+    "/class/{class_id}/thread/{thread_id}/lecture-slides/languages",
+    dependencies=[Depends(Authz("can_view", "thread:{thread_id}"))],
+    response_model=schemas.LectureSlideThreadLanguagesResponse,
+)
+async def get_thread_lecture_slide_languages(
+    class_id: str,
+    thread_id: str,
+    request: StateRequest,
+):
+    db = request.state["db"]
+    thread = await _get_lecture_slide_thread_with_deck_or_404(db, class_id, thread_id)
+    deck = cast(models.LectureSlideDeck, thread.lecture_slide_deck)
+    languages = [schemas.LectureSlideLanguage(code="original", name="Original")]
+    for translation in await models.LectureSlideTranslation.list_by_deck(db, deck.id):
+        if await lecture_threads.translation_is_playable(db, deck, translation):
+            languages.append(
+                schemas.LectureSlideLanguage(
+                    code=translation.language_code, name=translation.language_name
+                )
+            )
+    return schemas.LectureSlideThreadLanguagesResponse(
+        languages=languages,
+        current_language_code=thread.lecture_language_code or "original",
+    )
 
 
 @v1.get(

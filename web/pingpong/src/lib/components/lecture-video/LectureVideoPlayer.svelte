@@ -9,6 +9,7 @@
 		CogOutline,
 		CompressOutline,
 		ExpandOutline,
+		LanguageOutline,
 		MinusOutline,
 		PauseSolid,
 		PlaySolid,
@@ -159,7 +160,10 @@
 		durationMsOverride = null,
 		visualQuestionBoundaryMs = null,
 		visual = undefined,
-		fullscreenTarget = null
+		fullscreenTarget = null,
+		languages = [],
+		languageCode = null,
+		onlanguagechange
 	}: {
 		src: string;
 		captionsSrc?: string | null;
@@ -198,6 +202,9 @@
 		onerror?: (e: Event) => void;
 		onquestionclick?: (markerId: number) => void;
 		onmanualplayrequest?: () => void;
+		languages?: { code: string; name: string }[];
+		languageCode?: string | null;
+		onlanguagechange?: (languageCode: string) => void;
 		mediaKind?: 'video' | 'audio';
 		audioSegments?: AudioPlaylistSegment[];
 		durationMsOverride?: number | null;
@@ -514,6 +521,9 @@
 		questionPendingControls && maxSeekOffsetMs == null && !allowFullSeek
 	);
 	let captionsAvailable = $derived(Boolean(captionsSrc));
+	let languageSwitchAvailable = $derived(
+		languages.length > 1 && languageCode != null && !!onlanguagechange && !questionControlsLocked
+	);
 	let captionsShown = $derived(captionsAvailable && captionsEnabled);
 	let customCaptionsVisible = $derived(
 		startedPlaybackOnce && captionsShown && subtitleText == null
@@ -2398,6 +2408,25 @@
 							<div
 								class="relative ml-auto flex shrink-0 items-center gap-1 rounded-full bg-black/30 p-1"
 							>
+								{#if languageSwitchAvailable}
+									<div
+										class="relative flex h-8 w-8 items-center justify-center rounded-full text-white transition-colors duration-200 hover:bg-white/10"
+									>
+										<LanguageOutline class="size-5 text-white" />
+										<select
+											class="absolute inset-0 cursor-pointer appearance-none opacity-0"
+											value={languageCode}
+											onclick={(event: MouseEvent) => event.stopPropagation()}
+											onkeydown={(event) => event.stopPropagation()}
+											onchange={(event) => onlanguagechange?.(event.currentTarget.value)}
+											aria-label="Lesson language"
+										>
+											{#each languages as language (language.code)}
+												<option value={language.code}>{language.name}</option>
+											{/each}
+										</select>
+									</div>
+								{/if}
 								{#if captionsAvailable}
 									<button
 										class="flex h-8 w-8 items-center justify-center rounded-full text-white transition-colors duration-200 hover:bg-white/10 {captionsEnabled
