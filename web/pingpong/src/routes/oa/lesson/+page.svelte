@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onDestroy, onMount } from 'svelte';
+	import { onDestroy, onMount, tick } from 'svelte';
 	import { replaceState } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { page } from '$app/stores';
@@ -30,7 +30,7 @@
 			canDeleteThread: false,
 			threadDeletionDisabledByModerators: false,
 			canPublishThread: false,
-			canViewAssistant: false,
+			canViewAssistant: true,
 			threadRecording: null,
 			threadDisplayUserInfo: false,
 			threadLectureVideoMismatch: false,
@@ -46,6 +46,7 @@
 	onMount(async () => {
 		const launchCode = takeLaunchCode(window.location.hash);
 		if (launchCode) {
+			await tick();
 			replaceState(resolve('/oa/lesson'), $page.state);
 		}
 		stop = await startOpenAccessPlayer(fetch, launchCode, {
@@ -59,12 +60,14 @@
 	onDestroy(() => stop?.());
 </script>
 
-<div class="h-dvh w-full">
-	{#if lessonData && !failed}
-		<ThreadDetailPage data={lessonData} />
-	{:else if failed}
-		<div class="flex h-full items-center justify-center p-6 text-center text-gray-600">
-			This lesson is not available right now.
-		</div>
-	{/if}
+<div class="oa-player h-dvh w-full p-4">
+	<div class="h-full overflow-y-auto rounded-4xl bg-white">
+		{#if lessonData && !failed}
+			<ThreadDetailPage data={lessonData} />
+		{:else if failed}
+			<div class="flex h-full items-center justify-center p-6 text-center text-gray-600">
+				This lesson is not available right now.
+			</div>
+		{/if}
+	</div>
 </div>

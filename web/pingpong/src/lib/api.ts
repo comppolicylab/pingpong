@@ -259,7 +259,7 @@ const _fetch = async (
 ) => {
 	const full = fullPath(path);
 	if (isOpenAccessPage()) {
-		const openAccessToken = getOpenAccessToken();
+		const openAccessToken = path.startsWith('oa/') ? null : getOpenAccessToken();
 		const response = await f(full, {
 			method,
 			headers: {
