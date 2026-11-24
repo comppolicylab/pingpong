@@ -28,8 +28,10 @@
 		TrashBinOutline,
 		CheckCircleOutline,
 		ExclamationCircleOutline,
-		InfoCircleOutline
+		InfoCircleOutline,
+		LanguageOutline
 	} from 'flowbite-svelte-icons';
+	import LectureSlideTranslationsModal from '$lib/components/LectureSlideTranslationsModal.svelte';
 	import ConfirmationModal from '$lib/components/ConfirmationModal.svelte';
 	import { happyToast, sadToast } from '$lib/toast';
 	import { copy } from 'svelte-copy';
@@ -45,6 +47,9 @@
 	import { SvelteSet } from 'svelte/reactivity';
 
 	export let data;
+
+	let translationsAssistant: Assistant | null = null;
+	let translationsModalOpen = false;
 
 	$: hasApiKey = !!data?.hasAPIKey;
 	let creators: api.AssistantCreators = {};
@@ -294,6 +299,7 @@
 					{assistant}
 					creator={creators[assistant.creator_id]}
 					editable={data.editableAssistants.has(assistant.id)}
+					canTranslate={data.grants.isSupervisor}
 					currentClassId={data.class.id}
 					lectureMediaRefreshing={lectureMediaRefreshingIds.has(assistant.id)}
 					onRefreshLectureMedia={() => void refreshLectureMediaAssistant(assistant.id)}
@@ -313,6 +319,7 @@
 					{assistant}
 					creator={creators[assistant.creator_id]}
 					editable={data.editableAssistants.has(assistant.id)}
+					canTranslate={data.grants.isSupervisor}
 					shareable={data.grants.canShareAssistants && !!assistant.published}
 					currentClassId={data.class.id}
 					lectureMediaRefreshing={lectureMediaRefreshingIds.has(assistant.id)}
@@ -373,6 +380,19 @@
 									>
 										<LinkOutline class="h-5 w-5" />
 									</button>
+									{#if (data.grants.isSupervisor || data.editableAssistants.has(assistant.id)) && assistant.interaction_mode === 'lecture_slides' && assistant.lecture_slide_deck}
+										<button
+											class="hover:text-blue-dark-100 text-blue-dark-40"
+											aria-label="Translations"
+											onclick={(event) => {
+												event.preventDefault();
+												translationsAssistant = assistant;
+												translationsModalOpen = true;
+											}}
+										>
+											<LanguageOutline class="h-5 w-5" />
+										</button>
+									{/if}
 									{#if data.editableAssistants.has(assistant.id)}
 										{#if assistant.notes}
 											<button
@@ -531,6 +551,15 @@
 				</TableBody>
 			</Table>
 		{/if}
+	{/if}
+	{#if translationsAssistant?.lecture_slide_deck}
+		<LectureSlideTranslationsModal
+			bind:open={translationsModalOpen}
+			classId={data.class.id}
+			assistantId={translationsAssistant.id}
+			assistantName={translationsAssistant.name}
+			deckReady={translationsAssistant.lecture_slide_deck.status === 'ready'}
+		/>
 	{/if}
 	<Heading tag="h2" class="text-dark-blue-40 mt-12 mb-4 font-serif text-3xl font-medium"
 		>Group Moderators</Heading

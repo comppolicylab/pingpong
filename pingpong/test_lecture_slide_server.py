@@ -517,6 +517,16 @@ async def test_lecture_slide_editor_can_prepare_translation(
     assert prepared.status_code == 200
     assert prepared.json()["status"] == "queued"
 
+    listed = api.get(
+        "/api/v1/class/1/assistant/1/lecture-slides/translations",
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert listed.status_code == 200
+    assert [
+        (item["language_code"], item["status"])
+        for item in listed.json()["translations"]
+    ] == [("es", "queued")]
+
 
 @pytest.mark.parametrize(
     ("content_type", "format_names", "video_codec"),

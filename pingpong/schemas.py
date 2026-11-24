@@ -1640,6 +1640,10 @@ class LectureSlideTranslationStatusResponse(BaseModel):
     error_message: str | None = None
 
 
+class LectureSlideTranslationStatusesResponse(BaseModel):
+    translations: list[LectureSlideTranslationStatusResponse]
+
+
 class LectureGenerationModel(BaseModel):
     id: str
     name: str

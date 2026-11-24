@@ -76,6 +76,7 @@ ROUTE_EVENTS = {
     "share_assistant": "share_link.create",
     "update_assistant_share_name": "share_link.update",
     "unshare_assistant": "share_link.revoke",
+    "prepare_lecture_slide_translation": "assistant.translation.prepare",
     # Threads
     "delete_thread": "thread.delete",
     "publish_thread": "thread.publish",

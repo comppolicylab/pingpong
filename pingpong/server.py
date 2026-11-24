@@ -12143,6 +12143,43 @@ async def get_lecture_slide_translation_status(
     )
 
 
+@v1.get(
+    "/class/{class_id}/assistant/{assistant_id}/lecture-slides/translations",
+    dependencies=[
+        Depends(
+            Authz("can_edit", "assistant:{assistant_id}")
+            | Authz("supervisor", "class:{class_id}")
+        )
+    ],
+    response_model=schemas.LectureSlideTranslationStatusesResponse,
+)
+async def list_lecture_slide_translations(
+    class_id: str,
+    assistant_id: str,
+    request: StateRequest,
+):
+    assistant = await lecture_slide_service.get_lecture_slide_assistant_for_class(
+        request.state["db"], int(assistant_id), int(class_id)
+    )
+    if assistant.lecture_slide_deck_id is None:
+        raise HTTPException(404, "Lecture slide deck not found.")
+    translations = await models.LectureSlideTranslation.list_by_deck(
+        request.state["db"], assistant.lecture_slide_deck_id
+    )
+    return schemas.LectureSlideTranslationStatusesResponse(
+        translations=[
+            lecture_slide_processing.lecture_slide_translation_status_response(
+                translation,
+                language_code=translation.language_code,
+                needs_reprocessing=await lecture_slide_processing.translation_needs_feedback(
+                    request.state["db"], translation
+                ),
+            )
+            for translation in translations
+        ]
+    )
+
+
 @v1.post(
     "/class/{class_id}/assistant/{assistant_id}/lecture-slides/translations",
     dependencies=[

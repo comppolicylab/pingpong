@@ -4272,6 +4272,15 @@ export const getLectureSlideTranslationStatus = async (
 	return await GET<never, LectureSlideTranslationStatusResponse>(f, url);
 };
 
+export const listLectureSlideTranslations = async (
+	f: Fetcher,
+	classId: number,
+	assistantId: number
+) => {
+	const url = `class/${classId}/assistant/${assistantId}/lecture-slides/translations`;
+	return await GET<never, { translations: LectureSlideTranslationStatusResponse[] }>(f, url);
+};
+
 export const prepareLectureSlideTranslation = async (
 	f: Fetcher,
 	classId: number,
