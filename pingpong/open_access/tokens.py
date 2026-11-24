@@ -37,6 +37,16 @@ class CatalogueGrant(BaseModel):
     typ: Literal["catalogue"]
 
 
+class ProgressGrant(BaseModel):
+    typ: Literal["progress"]
+    sub: Subject
+
+
+class ThumbnailGrant(BaseModel):
+    typ: Literal["thumbnail"]
+    assistant_id: int
+
+
 class AccessClaims(BaseModel):
     purpose: Literal["open_access"]
     client: str

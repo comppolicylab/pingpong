@@ -21,7 +21,9 @@ from .threads import delete_thread
 from .tokens import (
     CatalogueGrant,
     LaunchGrant,
+    ProgressGrant,
     RenewGrant,
+    ThumbnailGrant,
     encode_access_token,
     verify_grant,
 )
@@ -56,6 +58,10 @@ class CatalogueLesson(BaseModel):
     name: str | None
     free: bool
     languages: list[schemas.LectureSlideLanguage]
+
+
+class ProgressResponse(BaseModel):
+    started: list[int]
 
 
 class CatalogueResponse(BaseModel):
@@ -350,3 +356,66 @@ async def catalogue(req: GrantRequest, request: StateRequest):
             )
         )
     return CatalogueResponse(lessons=lessons)
+
+
+@router.post("/progress", response_model=ProgressResponse)
+async def progress(req: GrantRequest, request: StateRequest):
+    settings = require_request(request)
+    grant = verify_grant(settings, req.grant, ProgressGrant)
+    assistant_ids = await request.state["db"].scalars(
+        select(models.Thread.assistant_id)
+        .join(
+            models.ExternalPrincipal,
+            models.ExternalPrincipal.id == models.Thread.external_principal_id,
+        )
+        .where(
+            models.ExternalPrincipal.client_id == settings.client_id,
+            models.ExternalPrincipal.subject == grant.sub,
+        )
+    )
+    return ProgressResponse(
+        started=[assistant_id for assistant_id in assistant_ids if assistant_id]
+    )
+
+
+@router.post("/thumbnail")
+async def thumbnail(req: GrantRequest, request: StateRequest) -> Response:
+    settings = require_request(request)
+    grant = verify_grant(settings, req.grant, ThumbnailGrant)
+    db = request.state["db"]
+    lesson = (
+        await get_lesson(db, grant.assistant_id)
+        if grant.assistant_id in settings.assistant_ids
+        else None
+    )
+    image = (
+        await db.scalar(
+            select(models.LectureSlideImageStoredObject)
+            .join(
+                models.LectureSlidePage,
+                models.LectureSlidePage.image_stored_object_id
+                == models.LectureSlideImageStoredObject.id,
+            )
+            .where(
+                models.LectureSlidePage.lecture_slide_deck_id
+                == lesson[0].lecture_slide_deck_id
+            )
+            .order_by(models.LectureSlidePage.position)
+            .limit(1)
+        )
+        if lesson is not None and config.video_store
+        else None
+    )
+    if image is None or not config.video_store:
+        raise OpenAccessError(
+            404, "open_access_thumbnail_unavailable", "No thumbnail for this lesson."
+        )
+    content = b"".join(
+        [
+            chunk
+            async for chunk in config.video_store.store.stream_video_range(
+                key=image.key
+            )
+        ]
+    )
+    return Response(content, media_type=image.content_type)
