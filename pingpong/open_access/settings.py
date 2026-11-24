@@ -29,6 +29,10 @@ class OpenAccessLimits(BaseModel):
     daily_tts_characters: int | None = Field(None, ge=0)
 
 
+class OpenAccessPricing(BaseModel):
+    tts_per_thousand_characters: dict[str, float] = {}
+
+
 class OpenAccessSettings(RedisSettings):
     client_id: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_-]+$")
     public_key: str = Field(min_length=1)
@@ -42,6 +46,7 @@ class OpenAccessSettings(RedisSettings):
     launch_code_ttl_seconds: int = Field(60, ge=1, le=300)
     access_token_ttl_seconds: int = Field(600, ge=60, le=3600)
     limits: OpenAccessLimits = OpenAccessLimits()
+    pricing: OpenAccessPricing = OpenAccessPricing()
 
     @field_validator("origin")
     @classmethod

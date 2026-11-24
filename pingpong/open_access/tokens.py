@@ -70,6 +70,10 @@ class PauseGrant(BaseModel):
     anonymous_only: bool = False
 
 
+class SignupGrant(BaseModel):
+    typ: Literal["signup"]
+
+
 class AccessClaims(BaseModel):
     purpose: Literal["open_access"]
     client: str

@@ -31,6 +31,7 @@ from .tokens import (
     ProgressGrant,
     RenewGrant,
     ResetGrant,
+    SignupGrant,
     ThumbnailGrant,
     TransferGrant,
     encode_access_token,
@@ -260,6 +261,7 @@ async def launch(req: GrantRequest, request: StateRequest):
     audit(
         "oa.session.start",
         principal_id=principal.id,
+        subject=grant.sub,
         tier=principal.tier,
         assistant_id=grant.assistant_id,
         thread_id=thread.id,
@@ -480,6 +482,14 @@ async def pause(req: GrantRequest, request: StateRequest) -> None:
     settings = require_request(request)
     grant = verify_grant(settings, req.grant, PauseGrant)
     await limits.set_paused(settings, grant.paused, anonymous_only=grant.anonymous_only)
+
+
+@router.post("/signup", status_code=204)
+async def signup(req: GrantRequest, request: StateRequest) -> None:
+    settings = require_request(request)
+    verify_grant(settings, req.grant, SignupGrant)
+    request.state["db"].add(models.OpenAccessSignup())
+    audit("oa.signup.confirmed")
 
 
 @router.post("/progress", response_model=ProgressResponse)

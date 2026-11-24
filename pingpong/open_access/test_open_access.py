@@ -16,7 +16,7 @@ from pingpong import lesson_checks, models, schemas
 from pingpong.errors import OPEN_ACCESS_TAG, scrub_open_access_event
 from pingpong.now import offset, utcnow
 from pingpong.test_lecture_slide_runtime import _slide_transcript_data
-from pingpong.testutil import with_institution, with_user
+from pingpong.testutil import with_authz, with_institution, with_user
 
 from . import limits, retention, router, store
 from .settings import OpenAccessSettings, TierLimits
@@ -594,6 +594,12 @@ async def test_player_sends_message_without_user(
     )
     assert sent.status_code == 200, sent.text
     assert calls[0]["store"] is False
+    async with db.async_session() as session:
+        entry = await session.scalar(select(models.OpenAccessUsage))
+    assert (entry.tier, entry.assistant_id) == (
+        schemas.ExternalPrincipalTier.ANONYMOUS,
+        1,
+    )
 
     messages = api.get(f"{url}/messages", headers=headers)
     assert messages.status_code == 200, messages.text
@@ -727,3 +733,72 @@ def test_sentry_scrubs_open_access_requests():
     assert scrubbed["request"] == {"headers": {"User-Agent": "test"}}
     assert scrubbed["exception"]["values"][0]["stacktrace"]["frames"] == [{}]
     assert "breadcrumbs" not in scrubbed
+
+
+@pytest.mark.asyncio
+@with_user(123)
+@with_authz(grants=[("user:123", "admin", "root:0")])
+@with_institution(11, "OA Institution")
+async def test_admin_usage_summary(api, db, oa, lessons, now, valid_user_token):
+    async with db.async_session() as session:
+        visitor = models.ExternalPrincipal(
+            client_id="oa-test",
+            subject="visitor",
+            tier=schemas.ExternalPrincipalTier.ANONYMOUS,
+        )
+        learner = models.ExternalPrincipal(
+            client_id="oa-test",
+            subject="learner",
+            tier=schemas.ExternalPrincipalTier.REGISTERED,
+        )
+        session.add_all([visitor, learner])
+        await session.flush()
+        session.add_all(
+            [
+                models.OpenAccessUsage(
+                    created=now(),
+                    principal_id=visitor.id,
+                    tier=schemas.ExternalPrincipalTier.ANONYMOUS,
+                    assistant_id=1,
+                    model="gpt-4.1-mini",
+                    service_tier="priority",
+                    metered=True,
+                    input_tokens=1_000_000,
+                    cached_input_tokens=0,
+                    output_tokens=500_000,
+                    tts_characters=0,
+                ),
+                models.OpenAccessUsage(
+                    created=now(),
+                    principal_id=learner.id,
+                    tier=schemas.ExternalPrincipalTier.REGISTERED,
+                    assistant_id=2,
+                    model="unpriced",
+                    metered=False,
+                    input_tokens=10,
+                    cached_input_tokens=0,
+                    output_tokens=0,
+                    tts_characters=0,
+                ),
+                models.OpenAccessSignup(created=now()),
+            ]
+        )
+        await session.commit()
+    day = now().date().isoformat()
+    response = api.get(
+        "/api/v1/admin/open-access/usage",
+        params={"start": day, "end": day, "granularity": "month"},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["periods"] == [now().date().replace(day=1).isoformat()]
+    assert [
+        (row["tier"], row["runs"], row["openai_cost"] > 0) for row in body["rows"]
+    ] == [
+        ("anonymous", 1, True),
+        ("registered", 1, False),
+    ]
+    assert body["signups"][0]["signups"] == 1
+    assert [user["subject"] for user in body["top_users"]] == ["visitor", "learner"]
+    assert [lesson["name"] for lesson in body["lessons"]] == ["Lesson 1", "Lesson 2"]

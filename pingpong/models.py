@@ -8278,6 +8278,37 @@ class ExternalPrincipal(Base):
         )
 
 
+class OpenAccessUsage(Base):
+    __tablename__ = "open_access_usage"
+
+    id = Column(Integer, primary_key=True)
+    created = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+    principal_id = Column(
+        Integer,
+        ForeignKey("external_principals.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    tier = Column(SQLEnum(schemas.ExternalPrincipalTier), nullable=False)
+    assistant_id = Column(Integer, nullable=True)
+    model = Column(String, nullable=True)
+    service_tier = Column(String, nullable=True)
+    status = Column(String, nullable=True)
+    metered = Column(Boolean, nullable=False, default=True)
+    input_tokens = Column(Integer, nullable=False, default=0)
+    cached_input_tokens = Column(Integer, nullable=False, default=0)
+    output_tokens = Column(Integer, nullable=False, default=0)
+    tts_model = Column(String, nullable=True)
+    tts_characters = Column(Integer, nullable=False, default=0)
+
+
+class OpenAccessSignup(Base):
+    __tablename__ = "open_access_signups"
+
+    id = Column(Integer, primary_key=True)
+    created = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+
 class AnonymousSession(Base):
     __tablename__ = "anonymous_sessions"
 

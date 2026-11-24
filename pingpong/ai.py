@@ -3818,6 +3818,8 @@ class BufferedResponseStreamHandler:
         cleanup_kwargs: dict[str, Any] = {}
         if (usage := getattr(data.response, "usage", None)) is not None:
             cleanup_kwargs["response_usage"] = _openai_model_to_json(usage)
+            if service_tier := getattr(data.response, "service_tier", None):
+                cleanup_kwargs["response_usage"]["service_tier"] = service_tier
         if data.response.moderation is not None:
             cleanup_kwargs["response_moderation"] = _openai_model_to_json(
                 data.response.moderation
