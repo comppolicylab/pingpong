@@ -377,13 +377,18 @@ async def transfer(req: GrantRequest, request: StateRequest):
     grant = verify_grant(settings, req.grant, TransferGrant)
     db = request.state["db"]
     source = await db.scalar(
-        select(models.ExternalPrincipal).where(
+        select(models.ExternalPrincipal)
+        .where(
             models.ExternalPrincipal.client_id == settings.client_id,
             models.ExternalPrincipal.subject == grant.sub,
             models.ExternalPrincipal.tier == schemas.ExternalPrincipalTier.ANONYMOUS,
         )
+        .with_for_update()
     )
     if source is None:
+        return TransferResponse(thread_moved=False)
+    if not await limits.claim_transfer(settings, source.id, grant.to):
+        audit("oa.transfer.claimed", source_principal_id=source.id)
         return TransferResponse(thread_moved=False)
     target = await models.ExternalPrincipal.get_or_create(
         db, settings.client_id, grant.to, schemas.ExternalPrincipalTier.REGISTERED
