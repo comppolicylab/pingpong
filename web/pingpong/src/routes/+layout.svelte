@@ -42,7 +42,9 @@
 </script>
 
 <SvelteToast />
-{#if simpleView}
+{#if data.isOpenAccess}
+	<slot />
+{:else if simpleView}
 	<Main {data} {simpleView}>
 		<slot />
 	</Main>

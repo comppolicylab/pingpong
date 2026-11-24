@@ -825,7 +825,7 @@ export class ThreadManager {
 	 * Send a new message to this thread.
 	 */
 	async postMessage(
-		fromUserId: number,
+		fromUserId: number | null,
 		message: string,
 		callback: ({ success, errorMessage, message_sent }: CallbackParams) => void,
 		code_interpreter_file_ids?: string[],

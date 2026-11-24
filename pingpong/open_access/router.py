@@ -1,5 +1,5 @@
 import uuid_utils as uuid
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Request, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -14,7 +14,7 @@ from . import store
 from ..config import config
 from .access import ensure_lesson_access
 from .errors import OpenAccessError, session_displaced
-from .request import has_marker
+from .request import ACCESS_TOKEN_COOKIE, access_token_cookie_path, has_marker
 from .settings import OpenAccessSettings
 from .threads import delete_thread
 from .tokens import (
@@ -59,6 +59,10 @@ class CatalogueLesson(BaseModel):
 
 class CatalogueResponse(BaseModel):
     lessons: list[CatalogueLesson]
+
+
+class PlayerConfigResponse(BaseModel):
+    origin: str
 
 
 def lesson_unavailable() -> OpenAccessError:
@@ -238,8 +242,13 @@ async def renew(req: GrantRequest, request: StateRequest):
     return await issue_launch_code(settings, principal, thread, grant.sid)
 
 
+@router.get("/config", response_model=PlayerConfigResponse)
+async def player_config(request: Request):
+    return PlayerConfigResponse(origin=require_request(request).origin)
+
+
 @router.post("/exchange", response_model=AccessTokenResponse)
-async def exchange(req: ExchangeRequest, request: StateRequest):
+async def exchange(req: ExchangeRequest, request: StateRequest, response: Response):
     settings = require_request(request)
     launch_code = await store.consume_code(settings, req.code)
     principal = (
@@ -258,15 +267,25 @@ async def exchange(req: ExchangeRequest, request: StateRequest):
         settings, principal.id, launch_code.session_id
     ):
         raise session_displaced()
+    access_token = encode_access_token(
+        settings,
+        principal_id=principal.id,
+        thread_id=launch_code.thread_id,
+        class_id=launch_code.class_id,
+        session_id=launch_code.session_id,
+        nowfn=get_now_fn(request),
+    )
+    response.set_cookie(
+        ACCESS_TOKEN_COOKIE,
+        access_token,
+        max_age=settings.access_token_ttl_seconds,
+        path=access_token_cookie_path(launch_code.class_id, launch_code.thread_id),
+        secure=True,
+        httponly=True,
+        samesite="strict",
+    )
     return AccessTokenResponse(
-        access_token=encode_access_token(
-            settings,
-            principal_id=principal.id,
-            thread_id=launch_code.thread_id,
-            class_id=launch_code.class_id,
-            session_id=launch_code.session_id,
-            nowfn=get_now_fn(request),
-        ),
+        access_token=access_token,
         expires_in=settings.access_token_ttl_seconds,
         class_id=launch_code.class_id,
         thread_id=launch_code.thread_id,

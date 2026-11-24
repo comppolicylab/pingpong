@@ -3,7 +3,7 @@ from starlette.requests import HTTPConnection
 MARKER_HEADER = "X-PingPong-OA"
 MARKER_QUERY_PARAM = "pp_oa"
 ACCESS_TOKEN_HEADER = "X-PingPong-OA-Token"
-ACCESS_TOKEN_QUERY_PARAM = "oa_token"
+ACCESS_TOKEN_COOKIE = "pp_oa_token"
 
 
 def has_marker(connection: HTTPConnection) -> bool:
@@ -13,7 +13,13 @@ def has_marker(connection: HTTPConnection) -> bool:
     )
 
 
-def access_token(connection: HTTPConnection, *, allow_query: bool) -> str | None:
+def access_token(connection: HTTPConnection, *, allow_cookie: bool) -> str | None:
     return connection.headers.get(ACCESS_TOKEN_HEADER) or (
-        connection.query_params.get(ACCESS_TOKEN_QUERY_PARAM) if allow_query else None
+        connection.cookies.get(ACCESS_TOKEN_COOKIE)
+        if allow_cookie and has_marker(connection)
+        else None
     )
+
+
+def access_token_cookie_path(class_id: int, thread_id: int) -> str:
+    return f"/api/v1/class/{class_id}/thread/{thread_id}/"

@@ -50,6 +50,7 @@ ENV NGINX_LISTEN=$host:$port
 ENV NGINX_LISTEN_SSL=$host:$ssl_port
 ENV NGINX_SSL_CERT=/etc/ssl/certs/pingpong-self-signed.crt
 ENV NGINX_SSL_CERT_KEY=/etc/ssl/private/pingpong-self-signed.key
+ENV OA_FRAME_ANCESTORS="'none'"
 
 # Use the nginx template stored at repo web/ level
 COPY default.conf.template /etc/nginx/templates/
