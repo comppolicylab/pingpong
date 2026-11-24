@@ -2,6 +2,7 @@ import { browser } from '$app/environment';
 import { TextLineStream, JSONStream } from '$lib/streams';
 import { getAnonymousSessionToken, getAnonymousShareToken } from '$lib/stores/anonymous';
 import {
+	OPEN_ACCESS_CHAT_CLOSED_CODES,
 	OPEN_ACCESS_MARKER_HEADER,
 	OPEN_ACCESS_TOKEN_HEADER,
 	getOpenAccessToken,
@@ -757,6 +758,7 @@ export const me = async (f: Fetcher) => {
 
 export type OpenAccessPlayerConfig = {
 	origin: string;
+	message_max_characters: number;
 };
 
 export type OpenAccessToken = {
@@ -5034,13 +5036,15 @@ const streamThreadChunks = (res: Response) => {
 					...(error.value as ErrorResponse),
 					$status: res.status
 				}).error;
+				const closed =
+					error_?.error_code === 'conversation_closed' ||
+					OPEN_ACCESS_CHAT_CLOSED_CODES.has(error_?.error_code ?? '');
 				yield {
 					type: 'presend_error',
-					detail:
-						error_?.error_code === 'conversation_closed'
-							? error_.detail
-							: `We were unable to send your message: ${error_?.detail}`,
-					read_only: error_?.error_code === 'conversation_closed'
+					detail: closed
+						? error_?.detail
+						: `We were unable to send your message: ${error_?.detail}`,
+					read_only: closed
 				} as ThreadPreSendErrorChunk;
 			}
 		};

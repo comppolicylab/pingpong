@@ -2280,6 +2280,7 @@
 								lectureSlideChatContinuePromptVisible &&
 								!(effectiveLectureSlideSession?.state === 'completed' && lectureSlideAtEnd)}
 							canSubmit={lectureChatCanSubmit && !effectiveLectureSlideMismatch}
+							maxMessageLength={data.maxMessageLength ?? null}
 							disabled={!lectureChatCanSubmit ||
 								effectiveLectureSlideMismatch ||
 								!!$navigating ||

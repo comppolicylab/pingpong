@@ -8,7 +8,7 @@ import pingpong.models as models
 import pingpong.schemas as schemas
 from ..config import config
 from ..now import NowFn
-from . import store
+from . import limits, store
 from .errors import OpenAccessError, session_displaced, token_invalid
 from .settings import OpenAccessSettings
 from .tokens import AccessClaims, decode_access_token
@@ -43,13 +43,13 @@ class OpenAccessContext:
     assistant_id: int
 
 
-def ensure_lesson_access(
+async def ensure_lesson_access(
     settings: OpenAccessSettings,
     principal: models.ExternalPrincipal,
     assistant_id: int,
 ) -> None:
     anonymous = principal.tier == schemas.ExternalPrincipalTier.ANONYMOUS
-    if settings.paused or (anonymous and settings.anonymous_paused):
+    if await limits.is_paused(settings, anonymous=anonymous):
         raise OpenAccessError(503, "open_access_paused", "Open Access is paused.")
     if assistant_id not in settings.assistant_ids or (
         anonymous and assistant_id != settings.free_assistant_id
@@ -115,7 +115,7 @@ async def authenticate(
     if row is None:
         raise token_invalid()
     anonymous_session, principal, assistant_id = row
-    ensure_lesson_access(settings, principal, assistant_id)
+    await ensure_lesson_access(settings, principal, assistant_id)
     if not await store.is_active_session(settings, principal.id, claims.sid):
         raise session_displaced()
     return OpenAccessContext(claims, principal, anonymous_session, assistant_id)

@@ -135,9 +135,11 @@ from pingpong.say_transform import (
     combine_manual_tts_pronunciation_text,
     transform_say_text,
 )
+from pingpong.open_access import limits as open_access_limits
 from pingpong.open_access import store as open_access_store
 from pingpong.open_access.router import router as open_access_router
 from pingpong.open_access.errors import OpenAccessError
+from pingpong.open_access.settings import OpenAccessSettings
 from pingpong.session import populate_request
 from pingpong.stats import (
     get_runs_with_multiple_assistant_messages_stats,
@@ -5729,6 +5731,18 @@ async def get_thread(
         read_only = await models.Thread.has_flagged_moderation(
             request.state["db"], thread.id
         )
+        read_only_message = moderation.CONVERSATION_CLOSED_DETAIL if read_only else None
+        open_access = request.state["open_access"]
+        if not read_only and open_access is not None:
+            block = await open_access_limits.chat_block(
+                require_open_access_settings(),
+                open_access.principal,
+                thread.id,
+                get_now_fn(request)(),
+            )
+            if block is not None:
+                read_only = True
+                read_only_message = open_access_limits.MESSAGES[block]
         return {
             "thread": thread,
             "assistant_avatar_url": (
@@ -5741,9 +5755,7 @@ async def get_thread(
             "tools_available": thread.tools_available,
             "run": last_run_db if latest_run else None,
             "read_only": read_only,
-            "read_only_message": (
-                moderation.CONVERSATION_CLOSED_DETAIL if read_only else None
-            ),
+            "read_only_message": read_only_message,
             "messages": thread_messages,
             "limit": 20,
             "ci_messages": placeholder_ci_calls,
@@ -7012,6 +7024,32 @@ async def post_lecture_slide_interaction(
             data,
             nowfn=get_now_fn(request),
         )
+        open_access = request.state["open_access"]
+        if (
+            open_access is not None
+            and interactive_lesson_session.state
+            == schemas.InteractiveLessonSessionState.AWAITING_ANSWER
+            and interactive_lesson_session.current_question is not None
+            and interactive_lesson_session.current_question.type == "open_ended"
+            and await open_access_limits.chat_block(
+                require_open_access_settings(),
+                open_access.principal,
+                thread.id,
+                get_now_fn(request)(),
+            )
+            and await lesson_checks.pass_pending_check(
+                request.state["db"], thread, None
+            )
+        ):
+            refreshed = await lecture_slide_runtime.get_thread_session(
+                request.state["db"],
+                thread.id,
+                request_controller_session_id=data.controller_session_id,
+                request_actor=lesson_actor(request),
+                nowfn=get_now_fn(request),
+            )
+            if refreshed is not None:
+                interactive_lesson_session = refreshed
     except lecture_slide_runtime.LectureSlideRuntimeError as err:
         _raise_lecture_slide_runtime_http_error(err)
     return {"interactive_lesson_session": interactive_lesson_session}
@@ -9865,6 +9903,16 @@ async def send_message(
             raise OpenAccessError(
                 403, "open_access_uploads_disabled", "File uploads are disabled."
             )
+        open_access_settings = (
+            config.open_access if request.state["open_access"] is not None else None
+        )
+        if (
+            open_access_settings is not None
+            and len(data.message) > open_access_settings.limits.message_max_characters
+        ):
+            raise OpenAccessError(
+                400, "open_access_message_too_long", "Your message is too long."
+            )
         await get_attachment_files_for_class(
             request.state["db"],
             class_id,
@@ -9936,6 +9984,22 @@ async def send_message(
                     status_code=409,
                     detail="OpenAI is still processing your last request. We're fetching the latest status...",
                 )
+            if open_access_settings is not None:
+                try:
+                    await open_access_limits.reserve_turn(
+                        open_access_settings,
+                        request.state["open_access"].principal,
+                        thread.id,
+                        get_now_fn(request)(),
+                    )
+                except OpenAccessError as exc:
+                    if exc.error_code != "open_access_burst_limit" and (
+                        await lesson_checks.pass_pending_check(
+                            request.state["db"], thread, None
+                        )
+                    ):
+                        await request.state["db"].commit()
+                    raise
         else:
             raise HTTPException(
                 status_code=400,
@@ -10233,7 +10297,16 @@ async def send_message(
             tts_api_key: str | None = None
             tts_voice_settings: dict[str, Any] | None = None
             tts_model_id = schemas.ElevenLabsTTSModel.FLASH_V2_5.value
-            if (check_attempt_id is not None or data.generate_speech is not False) and (
+            speech_allowed = (
+                open_access_settings is None
+                or await open_access_limits.speech_available(
+                    open_access_settings, get_now_fn(request)()
+                )
+            )
+            if (
+                speech_allowed
+                and (check_attempt_id is not None or data.generate_speech is not False)
+            ) and (
                 (
                     thread.interaction_mode == schemas.InteractionMode.LECTURE_VIDEO
                     and thread.lecture_video_id
@@ -10402,6 +10475,7 @@ async def send_message(
             blocked = await _moderate_run_input(request, openai_client, run_to_complete)
             if blocked is not None:
                 return blocked
+            tts_usage = TTSUsage()
             stream = run_response(
                 openai_client,
                 run=run_to_complete,
@@ -10447,10 +10521,35 @@ async def send_message(
                     else False
                 ),
                 omit_message_ids=_is_lecture_lesson_mode(thread.interaction_mode),
+                max_output_tokens=(
+                    open_access_settings.limits.reply_max_output_tokens
+                    if open_access_settings is not None
+                    else None
+                ),
+                min_output_index=(
+                    await open_access_history_start(
+                        request.state["db"],
+                        thread.id,
+                        open_access_settings.limits.recent_exchanges,
+                        check_attempt_id,
+                    )
+                    if open_access_settings is not None
+                    else None
+                ),
+                on_tts_text=tts_usage.add if open_access_settings is not None else None,
             )
             if check_attempt_id is not None:
                 stream = _stream_lesson_check(
                     stream, run_to_complete.id, check_attempt_id
+                )
+            if open_access_settings is not None:
+                stream = _stream_open_access_usage(
+                    stream,
+                    open_access_settings,
+                    request.state["open_access"].principal,
+                    run_to_complete.id,
+                    tts_usage,
+                    get_now_fn(request),
                 )
 
         else:
@@ -17631,6 +17730,86 @@ async def _moderate_run_input(
         yield b'{"type":"done"}\n'
 
     return StreamingResponse(blocked_stream(), media_type="text/event-stream")
+
+
+OPEN_ACCESS_PAUSE_CHECK_SECONDS = 2
+
+
+def require_open_access_settings() -> OpenAccessSettings:
+    if config.open_access is None:
+        raise OpenAccessError(404, "open_access_disabled", "Not found.")
+    return config.open_access
+
+
+class TTSUsage:
+    def __init__(self):
+        self.characters = 0
+
+    def add(self, text: str) -> None:
+        self.characters += len(text)
+
+
+async def open_access_history_start(
+    db: AsyncSession,
+    thread_id: int,
+    recent_exchanges: int,
+    check_attempt_id: int | None,
+) -> int | None:
+    start = await db.scalar(
+        select(models.Message.output_index)
+        .where(
+            models.Message.thread_id == thread_id,
+            models.Message.role == schemas.MessageRole.USER,
+        )
+        .order_by(models.Message.output_index.desc())
+        .offset(recent_exchanges - 1)
+        .limit(1)
+    )
+    if start is not None and check_attempt_id is not None:
+        question = await db.get(models.Message, check_attempt_id)
+        if question is not None:
+            start = min(start, question.output_index)
+    return start
+
+
+async def _stream_open_access_usage(
+    stream,
+    settings: OpenAccessSettings,
+    principal: models.ExternalPrincipal,
+    run_id: int,
+    tts_usage: TTSUsage,
+    nowfn: NowFn,
+):
+    principal_id = principal.id
+    anonymous = principal.tier == schemas.ExternalPrincipalTier.ANONYMOUS
+    checked_at = time.monotonic()
+    try:
+        async for chunk in stream:
+            if time.monotonic() - checked_at >= OPEN_ACCESS_PAUSE_CHECK_SECONDS:
+                checked_at = time.monotonic()
+                if await open_access_limits.is_paused(settings, anonymous=anonymous):
+                    await stream.aclose()
+                    return
+            yield chunk
+    finally:
+        try:
+            async with config.db.driver.async_session() as session:
+                run = await session.get(models.Run, run_id)
+                tokens = int(
+                    ((run.usage if run else None) or {}).get("total_tokens") or 0
+                )
+                if run is not None:
+                    run.tts_characters = tts_usage.characters
+                    await session.commit()
+            await open_access_limits.record_usage(
+                settings,
+                principal_id,
+                nowfn(),
+                tokens=tokens,
+                tts_characters=tts_usage.characters,
+            )
+        except Exception:
+            logger.exception("Failed to record Open Access usage for run %s", run_id)
 
 
 async def _stream_lesson_check(stream, run_id: int, attempt_id: int):

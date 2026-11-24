@@ -173,6 +173,11 @@
 	 * Defaults to "Ask me anything".
 	 */
 	export let placeholderMessage = 'Ask me anything';
+	export let maxMessageLength: number | null = null;
+
+	let messageLength = 0;
+	$: overLimit = maxMessageLength !== null && messageLength > maxMessageLength;
+	$: showLength = maxMessageLength !== null && messageLength >= maxMessageLength * 0.8;
 
 	// Input container
 	let containerRef: HTMLDivElement;
@@ -330,6 +335,7 @@
 		ref.style.paddingLeft = el.style.paddingLeft;
 		ref.style.width = `${el.clientWidth}px`;
 		ref.value = el.value;
+		messageLength = el.value.length;
 		const scrollHeight = ref.scrollHeight;
 		el.style.height = `${scrollHeight + 8}px`;
 		if (scrollHeight > 80) {
@@ -434,7 +440,7 @@
 			? visionFileIds.split(',')
 			: [];
 
-		if (!ref.value || disabled) {
+		if (!ref.value || disabled || overLimit) {
 			return;
 		}
 		if (isUsingOlderAssistantVersion) {
@@ -458,6 +464,7 @@
 		focusMessage();
 		ref.value = '';
 		realRef.value = '';
+		messageLength = 0;
 		fixHeight(realRef);
 		dispatcher('textinput', { hasText: false });
 
@@ -480,6 +487,7 @@
 					$allFiles = tempFiles;
 					ref.value = message;
 					realRef.value = realMessage;
+					messageLength = realMessage.length;
 					fixHeight(realRef);
 					dispatcher('textinput', { hasText: message.trim().length > 0 });
 				}
@@ -868,13 +876,21 @@
 						ontouchstart={submit}
 						onkeydown={maybeSubmit}
 						class={`${loading ? 'animate-pulse cursor-progress' : ''} h-8 w-8 bg-orange p-1 hover:bg-orange-dark `}
-						disabled={uploading || loading || disabled || isUsingOlderAssistantVersion}
+						disabled={uploading || loading || disabled || isUsingOlderAssistantVersion || overLimit}
 					>
 						<ArrowUpOutline class="h-6 w-6" />
 					</Button>
 				</div>
 			</div>
 		</div>
+		{#if showLength}
+			<p
+				class="text-right text-xs {overLimit ? 'text-red-600' : 'text-gray-500'}"
+				aria-live="polite"
+			>
+				{messageLength.toLocaleString()} / {maxMessageLength?.toLocaleString()}
+			</p>
+		{/if}
 	</div>
 </div>
 

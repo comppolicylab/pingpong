@@ -46,7 +46,7 @@ def _digest(value: str) -> str:
     return hashlib.sha256(value.encode()).hexdigest()
 
 
-def _principal_key(settings: OpenAccessSettings, principal_id: int, *parts: str) -> str:
+def principal_key(settings: OpenAccessSettings, principal_id: int, *parts: str) -> str:
     # The hash tag keeps a principal's keys in one cluster slot for the scripts.
     return ":".join(
         ("pingpong", "oa", settings.client_id, f"{{{principal_id}}}", *parts)
@@ -54,7 +54,7 @@ def _principal_key(settings: OpenAccessSettings, principal_id: int, *parts: str)
 
 
 def _active_key(settings: OpenAccessSettings, principal_id: int) -> str:
-    return _principal_key(settings, principal_id, "active")
+    return principal_key(settings, principal_id, "active")
 
 
 def _code_key(settings: OpenAccessSettings, code: str) -> str:
@@ -82,7 +82,7 @@ async def start_session(
         return await redis.eval(
             START_SESSION_SCRIPT,
             2,
-            _principal_key(settings, principal_id, "launch", _digest(launch_id)),
+            principal_key(settings, principal_id, "launch", _digest(launch_id)),
             _active_key(settings, principal_id),
             secrets.token_urlsafe(24),
             LAUNCH_RETRY_TTL_SECONDS,

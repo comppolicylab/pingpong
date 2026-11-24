@@ -4,50 +4,24 @@ from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
+import fakeredis
 import jwt
 import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 from sqlalchemy import select
 
-from pingpong import models, schemas
+from pingpong import lesson_checks, models, schemas
 from pingpong.now import offset
 from pingpong.test_lecture_slide_runtime import _slide_transcript_data
 from pingpong.testutil import with_institution, with_user
 
-from . import store
-from .settings import OpenAccessSettings
+from . import limits, store
+from .settings import OpenAccessSettings, TierLimits
 from .tokens import GRANT_AUDIENCE, encode_access_token
 
 MARKER = {"X-PingPong-OA": "1"}
 PRIVATE_KEY = ec.generate_private_key(ec.SECP256R1())
-
-
-class FakeRedis:
-    def __init__(self):
-        self.values: dict[str, str] = {}
-
-    async def set(self, key, value, ex=None, nx=False):
-        if nx and key in self.values:
-            return None
-        self.values[key] = value
-        return True
-
-    async def get(self, key):
-        return self.values.get(key)
-
-    async def getdel(self, key):
-        return self.values.pop(key, None)
-
-    async def eval(self, script, numkeys, *args):
-        keys, argv = args[:numkeys], args[numkeys:]
-        if script == store.START_SESSION_SCRIPT:
-            if keys[0] in self.values:
-                return self.values[keys[0]]
-            self.values[keys[0]] = self.values[keys[1]] = argv[0]
-            return argv[0]
-        assert script == store.EXTEND_SESSION_SCRIPT
-        return int(self.values.get(keys[0]) == argv[0])
 
 
 @pytest.fixture
@@ -66,7 +40,7 @@ def oa(config, monkeypatch):
         free_assistant_id=1,
     )
     monkeypatch.setattr(config, "open_access", settings)
-    fake = FakeRedis()
+    fake = fakeredis.FakeAsyncRedis(decode_responses=True)
 
     @asynccontextmanager
     async def redis_client(_settings):
@@ -380,6 +354,11 @@ async def test_player_controls_lesson_without_user(api, db, authz, oa, lessons):
     loaded = api.get(url, headers=headers)
     assert loaded.status_code == 200, loaded.text
 
+    await limits.set_paused(oa, True)
+    paused = api.get(url, headers=headers)
+    assert paused.json()["detail"]["error_code"] == "open_access_paused"
+    await limits.set_paused(oa, False)
+
     cookie = {"Cookie": f"pp_oa_token={body['access_token']}"}
     captions_url = f"{url}/lecture-slides/captions.vtt"
     assert api.get(captions_url, params={"pp_oa": "1"}).status_code == 401
@@ -461,6 +440,7 @@ async def test_player_sends_message_without_user(
         yield b'{"type":"done"}\n'
 
     monkeypatch.setattr(server, "run_response", generate)
+    oa.limits.anonymous = TierLimits(thread_turns_per_day=1, principal_turns_per_day=5)
     body, url, headers = await start_player(api, db, authz)
 
     attachment = api.post(
@@ -492,3 +472,47 @@ async def test_player_sends_message_without_user(
             select(models.Run).where(models.Run.thread_id == body["thread_id"])
         )
         assert run.creator_id is None
+        run.status = schemas.RunStatus.COMPLETED
+        thread = await session.get(models.Thread, body["thread_id"])
+        question = models.LectureSlideQuestion(
+            lecture_slide_deck_id=thread.lecture_slide_deck_id,
+            position=0,
+            slide_position=0,
+            slide_offset_ms=500,
+            stop_offset_ms=500,
+            question_type=schemas.LectureSlideQuestionType.OPEN_ENDED,
+            question_text="Why does latency matter?",
+            intro_text="Why does latency matter?",
+            passing_criteria="Mentions response time.",
+        )
+        state = await session.scalar(
+            select(models.LectureSlideThreadState).where(
+                models.LectureSlideThreadState.thread_id == thread.id
+            )
+        )
+        state.state = schemas.InteractiveLessonSessionState.AWAITING_ANSWER
+        state.current_question = question
+        await session.flush()
+        await lesson_checks.start_check(session, state, question, None)
+        await session.commit()
+
+    def send(message):
+        return api.post(
+            url,
+            json={"message": message, "generate_speech": False},
+            headers=headers,
+        )
+
+    too_long = send("x" * (oa.limits.message_max_characters + 1))
+    assert too_long.json()["detail"]["error_code"] == "open_access_message_too_long"
+    limited = send("Because it is slow.")
+    assert limited.status_code == 429
+    assert limited.json()["detail"]["error_code"] == "open_access_thread_turn_limit"
+    assert api.get(url, headers=headers).json()["read_only"] is True
+    async with db.async_session() as session:
+        state = await session.scalar(
+            select(models.LectureSlideThreadState).where(
+                models.LectureSlideThreadState.thread_id == body["thread_id"]
+            )
+        )
+        assert state.check_outcome == "passed"

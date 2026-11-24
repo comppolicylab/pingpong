@@ -171,6 +171,31 @@ def schedule() -> None:
     pass
 
 
+@cli.group("oa")
+def oa() -> None:
+    pass
+
+
+def _set_open_access_paused(paused: bool, anonymous_only: bool) -> None:
+    from pingpong.open_access.limits import set_paused
+
+    if config.open_access is None:
+        raise click.ClickException("Open Access is not configured.")
+    asyncio.run(set_paused(config.open_access, paused, anonymous_only=anonymous_only))
+
+
+@oa.command("pause")
+@click.option("--anonymous-only", is_flag=True)
+def pause_open_access(anonymous_only: bool) -> None:
+    _set_open_access_paused(True, anonymous_only)
+
+
+@oa.command("resume")
+@click.option("--anonymous-only", is_flag=True)
+def resume_open_access(anonymous_only: bool) -> None:
+    _set_open_access_paused(False, anonymous_only)
+
+
 @auth.command("create_db_schema")
 def create_db_schema() -> None:
     async def _make_db_schema() -> None:
