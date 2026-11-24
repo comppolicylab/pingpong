@@ -277,6 +277,54 @@ async def test_launch_replaces_thread_after_lesson_update(api, db, oa, lessons):
 
 
 @pytest.mark.asyncio
+@with_institution(11, "OA Institution")
+async def test_transfer_moves_free_thread_and_usage_once(api, db, now, oa, lessons):
+    anonymous = exchange(api, launch(api, launch_grant()).json()["code"]).json()
+    async with db.async_session() as session:
+        source_id = await session.scalar(
+            select(models.ExternalPrincipal.id).where(
+                models.ExternalPrincipal.subject == "visitor1"
+            )
+        )
+    today = now()
+    async with store.redis_client(oa) as redis:
+        await redis.zadd(
+            store.principal_key(oa, source_id, "turns"), {"t1": limits._ms(today)}
+        )
+        await redis.set(
+            store.principal_key(oa, source_id, "tokens", limits._day(today)), 50
+        )
+
+    def transfer():
+        return api.post(
+            "/api/v1/oa/transfer",
+            json={"grant": grant(typ="transfer", sub="visitor1", to="member1")},
+            headers=MARKER,
+        )
+
+    assert transfer().json() == {"thread_moved": True}
+    assert transfer().json() == {"thread_moved": False}
+    registered = exchange(
+        api, launch(api, launch_grant(sub="member1", tier="registered")).json()["code"]
+    ).json()
+    assert registered["thread_id"] == anonymous["thread_id"]
+    async with db.async_session() as session:
+        target_id = await session.scalar(
+            select(models.ExternalPrincipal.id).where(
+                models.ExternalPrincipal.subject == "member1"
+            )
+        )
+    async with store.redis_client(oa) as redis:
+        assert await redis.zcard(store.principal_key(oa, target_id, "turns")) == 1
+        assert (
+            await redis.get(
+                store.principal_key(oa, target_id, "tokens", limits._day(today))
+            )
+            == "50"
+        )
+
+
+@pytest.mark.asyncio
 @with_user(123)
 @with_institution(11, "OA Institution")
 async def test_expired_or_missing_token_rejected_with_valid_login(

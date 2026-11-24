@@ -1,7 +1,7 @@
 import uuid_utils as uuid
 from fastapi import APIRouter, Request, Response
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -24,6 +24,7 @@ from .tokens import (
     ProgressGrant,
     RenewGrant,
     ThumbnailGrant,
+    TransferGrant,
     encode_access_token,
     verify_grant,
 )
@@ -58,6 +59,10 @@ class CatalogueLesson(BaseModel):
     name: str | None
     free: bool
     languages: list[schemas.LectureSlideLanguage]
+
+
+class TransferResponse(BaseModel):
+    thread_moved: bool
 
 
 class ProgressResponse(BaseModel):
@@ -356,6 +361,60 @@ async def catalogue(req: GrantRequest, request: StateRequest):
             )
         )
     return CatalogueResponse(lessons=lessons)
+
+
+@router.post("/transfer", response_model=TransferResponse)
+async def transfer(req: GrantRequest, request: StateRequest):
+    settings = require_request(request)
+    grant = verify_grant(settings, req.grant, TransferGrant)
+    db = request.state["db"]
+    source = await db.scalar(
+        select(models.ExternalPrincipal).where(
+            models.ExternalPrincipal.client_id == settings.client_id,
+            models.ExternalPrincipal.subject == grant.sub,
+            models.ExternalPrincipal.tier == schemas.ExternalPrincipalTier.ANONYMOUS,
+        )
+    )
+    if source is None:
+        return TransferResponse(thread_moved=False)
+    target = await models.ExternalPrincipal.get_or_create(
+        db, settings.client_id, grant.to, schemas.ExternalPrincipalTier.REGISTERED
+    )
+    if target.tier != schemas.ExternalPrincipalTier.REGISTERED:
+        raise OpenAccessError(
+            409, "open_access_tier_mismatch", "Principal tier does not match."
+        )
+    thread = await get_principal_thread(db, source.id, settings.free_assistant_id)
+    moved = (
+        thread is not None
+        and await get_principal_thread(db, target.id, settings.free_assistant_id)
+        is None
+    )
+    if moved:
+        assert thread is not None
+        thread.external_principal_id = target.id
+        await db.execute(
+            update(models.AnonymousSession)
+            .where(
+                models.AnonymousSession.thread_id == thread.id,
+                models.AnonymousSession.external_principal_id == source.id,
+            )
+            .values(external_principal_id=target.id)
+        )
+    await limits.transfer_usage(
+        settings,
+        source.id,
+        target.id,
+        thread.id if moved and thread is not None else None,
+        get_now_fn(request)(),
+    )
+    audit(
+        "oa.transfer",
+        source_principal_id=source.id,
+        target_principal_id=target.id,
+        thread_id=thread.id if moved and thread is not None else None,
+    )
+    return TransferResponse(thread_moved=moved)
 
 
 @router.post("/progress", response_model=ProgressResponse)

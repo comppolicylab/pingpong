@@ -42,6 +42,12 @@ class ProgressGrant(BaseModel):
     sub: Subject
 
 
+class TransferGrant(BaseModel):
+    typ: Literal["transfer"]
+    sub: Subject
+    to: Subject
+
+
 class ThumbnailGrant(BaseModel):
     typ: Literal["thumbnail"]
     assistant_id: int
