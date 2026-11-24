@@ -116,6 +116,11 @@ async def extend_session(
     return bool(extended)
 
 
+async def end_session(settings: OpenAccessSettings, principal_id: int) -> None:
+    async with redis_client(settings) as redis:
+        await redis.delete(_active_key(settings, principal_id))
+
+
 async def issue_code(settings: OpenAccessSettings, launch: LaunchCode) -> str:
     code = secrets.token_urlsafe(32)
     async with redis_client(settings) as redis:
