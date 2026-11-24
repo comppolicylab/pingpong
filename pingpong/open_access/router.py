@@ -58,7 +58,6 @@ class CatalogueLesson(BaseModel):
     assistant_id: int
     name: str | None
     free: bool
-    languages: list[schemas.LectureSlideLanguage]
 
 
 class TransferResponse(BaseModel):
@@ -340,24 +339,11 @@ async def catalogue(req: GrantRequest, request: StateRequest):
         if lesson is None:
             continue
         assistant, _ = lesson
-        languages = [schemas.LectureSlideLanguage(code="original", name="Original")]
-        for translation in await models.LectureSlideTranslation.list_by_deck(
-            db, assistant.lecture_slide_deck_id
-        ):
-            if await lecture_threads.translation_is_playable(
-                db, assistant.lecture_slide_deck, translation
-            ):
-                languages.append(
-                    schemas.LectureSlideLanguage(
-                        code=translation.language_code, name=translation.language_name
-                    )
-                )
         lessons.append(
             CatalogueLesson(
                 assistant_id=assistant.id,
                 name=assistant.name,
                 free=assistant.id == settings.free_assistant_id,
-                languages=languages,
             )
         )
     return CatalogueResponse(lessons=lessons)

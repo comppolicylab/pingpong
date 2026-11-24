@@ -361,13 +361,11 @@ async def test_catalogue_lists_configured_lessons(api, oa, lessons):
             "assistant_id": 1,
             "name": "Lesson 1",
             "free": True,
-            "languages": [{"code": "original", "name": "Original"}],
         },
         {
             "assistant_id": 2,
             "name": "Lesson 2",
             "free": False,
-            "languages": [{"code": "original", "name": "Original"}],
         },
     ]
 
