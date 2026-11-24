@@ -12,21 +12,17 @@ class TierLimits(BaseModel):
 
 
 class OpenAccessLimits(BaseModel):
-    registered: TierLimits = TierLimits(
-        thread_turns_per_day=50, principal_turns_per_day=150
-    )
-    anonymous: TierLimits = TierLimits(
-        thread_turns_per_day=20, principal_turns_per_day=20
-    )
-    turns_per_minute: int = Field(6, ge=1)
-    message_max_characters: int = Field(1000, ge=1)
-    reply_max_output_tokens: int | None = Field(600, ge=16)
-    recent_exchanges: int = Field(10, ge=1)
-    principal_daily_tokens: int | None = Field(None, ge=0)
-    daily_turns: int | None = Field(None, ge=0)
-    daily_new_threads: int | None = Field(None, ge=0)
-    daily_openai_tokens: int | None = Field(None, ge=0)
-    daily_tts_characters: int | None = Field(None, ge=0)
+    registered: TierLimits
+    anonymous: TierLimits
+    turns_per_minute: int = Field(ge=1)
+    message_max_characters: int = Field(ge=1)
+    reply_max_output_tokens: int = Field(ge=16)
+    recent_exchanges: int = Field(ge=1)
+    principal_daily_tokens: int = Field(ge=0)
+    daily_turns: int = Field(ge=0)
+    daily_new_threads: int = Field(ge=0)
+    daily_openai_tokens: int = Field(ge=0)
+    daily_tts_characters: int = Field(ge=0)
 
 
 class OpenAccessPricing(BaseModel):
@@ -45,8 +41,10 @@ class OpenAccessSettings(RedisSettings):
     grant_max_age_seconds: int = Field(60, ge=1, le=300)
     launch_code_ttl_seconds: int = Field(60, ge=1, le=300)
     access_token_ttl_seconds: int = Field(600, ge=60, le=3600)
-    limits: OpenAccessLimits = OpenAccessLimits()
+    limits: OpenAccessLimits
     pricing: OpenAccessPricing = OpenAccessPricing()
+    service_tier: Literal["default", "flex", "priority"] = "default"
+    input_moderation: bool = True
 
     @field_validator("origin")
     @classmethod

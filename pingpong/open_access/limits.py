@@ -86,10 +86,6 @@ MESSAGES = {
 }
 
 
-def _limit(value: int | None) -> int:
-    return UNLIMITED if value is None else value
-
-
 def _day(now: datetime) -> str:
     return now.strftime("%Y%m%d")
 
@@ -142,7 +138,7 @@ async def _turn_status(
             tier.thread_turns_per_day,
             tier.principal_turns_per_day,
             member,
-            _limit(settings.limits.principal_daily_tokens),
+            settings.limits.principal_daily_tokens,
             int(dry_run),
         )
         if status != "ok":
@@ -152,8 +148,8 @@ async def _turn_status(
             2,
             global_key(settings, _day(now), "turns"),
             global_key(settings, _day(now), "tokens"),
-            _limit(settings.limits.daily_turns),
-            _limit(settings.limits.daily_openai_tokens),
+            settings.limits.daily_turns,
+            settings.limits.daily_openai_tokens,
             DAILY_KEY_TTL_SECONDS,
             int(dry_run),
         ):
@@ -200,12 +196,9 @@ async def chat_block(
 
 
 async def speech_available(settings: OpenAccessSettings, now: datetime) -> bool:
-    budget = settings.limits.daily_tts_characters
-    if budget is None:
-        return True
     async with store.redis_client(settings) as redis:
         used = await redis.get(global_key(settings, _day(now), "tts"))
-    return int(used or 0) < budget
+    return int(used or 0) < settings.limits.daily_tts_characters
 
 
 async def record_usage(
@@ -270,7 +263,7 @@ async def reserve_new_thread(settings: OpenAccessSettings, now: datetime) -> Non
             2,
             global_key(settings, _day(now), "threads"),
             global_key(settings, _day(now), "tokens"),
-            _limit(settings.limits.daily_new_threads),
+            settings.limits.daily_new_threads,
             UNLIMITED,
             DAILY_KEY_TTL_SECONDS,
             0,

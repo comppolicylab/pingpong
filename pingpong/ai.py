@@ -3996,7 +3996,7 @@ async def run_response(
     min_output_index: int | None = None,
     on_tts_text: Callable[[str], None] | None = None,
     store: bool = True,
-    priority: bool = True,
+    service_tier: Literal["default", "flex", "priority"] | None = None,
 ):
     is_canceled = False
     await config.authz.driver.init()
@@ -4298,10 +4298,10 @@ async def run_response(
                     service_tier=(
                         openai.omit
                         if isinstance(cli, openai.AsyncAzureOpenAI)
-                        else (
+                        else service_tier
+                        or (
                             "priority"
-                            if priority
-                            and interaction_mode
+                            if interaction_mode
                             in {
                                 InteractionMode.LECTURE_VIDEO,
                                 InteractionMode.LECTURE_SLIDES,

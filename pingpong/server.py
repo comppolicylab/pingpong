@@ -10502,7 +10502,10 @@ async def send_message(
                 )
             )
 
-            thread.input_moderation_enabled = bool(asst.input_moderation_enabled)
+            thread.input_moderation_enabled = bool(asst.input_moderation_enabled) or (
+                open_access_settings is not None
+                and open_access_settings.input_moderation
+            )
             run_to_complete = models.Run.for_thread(
                 thread,
                 status=schemas.RunStatus.PENDING,
@@ -10601,7 +10604,11 @@ async def send_message(
                     if open_access_settings is not None
                     else None
                 ),
-                priority=open_access_settings is None,
+                service_tier=(
+                    open_access_settings.service_tier
+                    if open_access_settings is not None
+                    else None
+                ),
                 min_output_index=(
                     await open_access_history_start(
                         request.state["db"],

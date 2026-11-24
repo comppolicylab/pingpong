@@ -19,7 +19,7 @@ from pingpong.test_lecture_slide_runtime import _slide_transcript_data
 from pingpong.testutil import with_authz, with_institution, with_user
 
 from . import limits, retention, router, store
-from .settings import OpenAccessSettings, TierLimits
+from .settings import OpenAccessLimits, OpenAccessSettings, TierLimits
 from .tokens import GRANT_AUDIENCE, encode_access_token
 
 MARKER = {"X-PingPong-OA": "1"}
@@ -40,6 +40,19 @@ def oa(config, monkeypatch):
         origin="https://learning-ai-with-ai.example.edu",
         assistant_ids=[1, 2],
         free_assistant_id=1,
+        limits=OpenAccessLimits(
+            registered=TierLimits(thread_turns_per_day=50, principal_turns_per_day=150),
+            anonymous=TierLimits(thread_turns_per_day=20, principal_turns_per_day=20),
+            turns_per_minute=6,
+            message_max_characters=1000,
+            reply_max_output_tokens=600,
+            recent_exchanges=10,
+            principal_daily_tokens=1_000_000,
+            daily_turns=10_000,
+            daily_new_threads=10_000,
+            daily_openai_tokens=100_000_000,
+            daily_tts_characters=10_000_000,
+        ),
     )
     monkeypatch.setattr(config, "open_access", settings)
     fake = fakeredis.FakeAsyncRedis(decode_responses=True)

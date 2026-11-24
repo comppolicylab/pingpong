@@ -338,7 +338,7 @@
 				<div class="rounded-2xl bg-gold-light p-5">
 					<div class="text-sm text-gray-700">AI replies</div>
 					<div class="mt-1 text-3xl font-light">{integer.format(totals.runs)}</div>
-					{#if isToday && usage.limits.daily_turns !== null}
+					{#if isToday}
 						<div class="text-sm text-gray-700">
 							of {integer.format(usage.limits.daily_turns)} daily
 						</div>
@@ -350,7 +350,7 @@
 					<div class="text-sm text-gray-700">
 						{compact.format(totals.input)} in · {compact.format(totals.output)} out
 					</div>
-					{#if isToday && usage.limits.daily_openai_tokens !== null}
+					{#if isToday}
 						<div class="text-sm text-gray-700">
 							of {compact.format(usage.limits.daily_openai_tokens)} daily
 						</div>
@@ -359,7 +359,7 @@
 				<div class="rounded-2xl bg-gold-light p-5">
 					<div class="text-sm text-gray-700">Speech characters</div>
 					<div class="mt-1 text-3xl font-light">{compact.format(totals.tts)}</div>
-					{#if isToday && usage.limits.daily_tts_characters !== null}
+					{#if isToday}
 						<div class="text-sm text-gray-700">
 							of {compact.format(usage.limits.daily_tts_characters)} daily
 						</div>

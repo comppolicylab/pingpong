@@ -53,9 +53,9 @@ class TopUser(BaseModel):
 
 
 class Limits(BaseModel):
-    daily_turns: int | None
-    daily_openai_tokens: int | None
-    daily_tts_characters: int | None
+    daily_turns: int
+    daily_openai_tokens: int
+    daily_tts_characters: int
     paused: bool
     anonymous_paused: bool
 
