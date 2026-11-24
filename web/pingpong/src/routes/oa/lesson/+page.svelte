@@ -1,6 +1,6 @@
 <script lang="ts">
-	import { onDestroy, onMount, tick } from 'svelte';
-	import { replaceState } from '$app/navigation';
+	import { onDestroy, onMount } from 'svelte';
+	import { afterNavigate, replaceState } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { page } from '$app/stores';
 	import * as api from '$lib/api';
@@ -43,12 +43,12 @@
 		};
 	};
 
+	afterNavigate(() => {
+		if (window.location.hash) replaceState(resolve('/oa/lesson'), $page.state);
+	});
+
 	onMount(async () => {
 		const launchCode = takeLaunchCode(window.location.hash);
-		if (launchCode) {
-			await tick();
-			replaceState(resolve('/oa/lesson'), $page.state);
-		}
 		stop = await startOpenAccessPlayer(fetch, launchCode, {
 			onSession: loadLesson,
 			onError: () => {
