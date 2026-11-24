@@ -171,7 +171,6 @@
 					>
 						{resettingModels ? 'Resetting model cache...' : 'Reset model cache'}
 					</Button>
-					<p class="text-sm text-gray-600">Refresh model availability for all groups.</p>
 					<Button
 						class="rounded-full bg-orange text-white hover:bg-orange-dark"
 						href="/admin/open-access">Open Access usage</Button

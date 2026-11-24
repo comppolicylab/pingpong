@@ -3996,6 +3996,7 @@ async def run_response(
     min_output_index: int | None = None,
     on_tts_text: Callable[[str], None] | None = None,
     store: bool = True,
+    priority: bool = True,
 ):
     is_canceled = False
     await config.authz.driver.init()
@@ -4299,7 +4300,8 @@ async def run_response(
                         if isinstance(cli, openai.AsyncAzureOpenAI)
                         else (
                             "priority"
-                            if interaction_mode
+                            if priority
+                            and interaction_mode
                             in {
                                 InteractionMode.LECTURE_VIDEO,
                                 InteractionMode.LECTURE_SLIDES,

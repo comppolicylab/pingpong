@@ -10601,6 +10601,7 @@ async def send_message(
                     if open_access_settings is not None
                     else None
                 ),
+                priority=open_access_settings is None,
                 min_output_index=(
                     await open_access_history_start(
                         request.state["db"],
