@@ -8,6 +8,7 @@ from sqlalchemy import asc, select
 
 import pingpong.lecture_slide_chat as lecture_slide_chat
 import pingpong.lecture_slide_runtime as lecture_slide_runtime
+from pingpong.interactive_lesson_runtime import LessonActor
 import pingpong.models as models
 import pingpong.schemas as schemas
 from pingpong.config import config
@@ -395,7 +396,7 @@ async def test_initialize_thread_state_and_acquire_control_for_lecture_slides(
         ) = await lecture_slide_runtime.acquire_control(
             session,
             thread.id,
-            actor_user_id=123,
+            actor=LessonActor(user_id=123),
         )
 
     assert controller_session_id
@@ -479,7 +480,7 @@ async def test_process_lecture_slide_question_answer_and_resume(db, institution)
         ) = await lecture_slide_runtime.acquire_control(
             session,
             thread.id,
-            actor_user_id=123,
+            actor=LessonActor(user_id=123),
         )
         first_question = questions[0]
         first_option = first_question.options[0]
@@ -487,7 +488,7 @@ async def test_process_lecture_slide_question_answer_and_resume(db, institution)
         slide_session = await lecture_slide_runtime.process_interaction(
             session,
             thread.id,
-            actor_user_id=123,
+            actor=LessonActor(user_id=123),
             request=schemas.InteractiveLessonQuestionPresentedRequest(
                 type="question_presented",
                 controller_session_id=controller_session_id,
@@ -504,7 +505,7 @@ async def test_process_lecture_slide_question_answer_and_resume(db, institution)
         repeated_session = await lecture_slide_runtime.process_interaction(
             session,
             thread.id,
-            actor_user_id=123,
+            actor=LessonActor(user_id=123),
             request=schemas.InteractiveLessonQuestionPresentedRequest(
                 type="question_presented",
                 controller_session_id=controller_session_id,
@@ -519,7 +520,7 @@ async def test_process_lecture_slide_question_answer_and_resume(db, institution)
         slide_session = await lecture_slide_runtime.process_interaction(
             session,
             thread.id,
-            actor_user_id=123,
+            actor=LessonActor(user_id=123),
             request=schemas.InteractiveLessonAnswerSubmittedRequest(
                 type="answer_submitted",
                 controller_session_id=controller_session_id,
@@ -541,7 +542,7 @@ async def test_process_lecture_slide_question_answer_and_resume(db, institution)
         slide_session = await lecture_slide_runtime.process_interaction(
             session,
             thread.id,
-            actor_user_id=123,
+            actor=LessonActor(user_id=123),
             request=schemas.InteractiveLessonResumedRequest(
                 type="lesson_resumed",
                 controller_session_id=controller_session_id,
@@ -580,7 +581,7 @@ async def test_lesson_history_endpoint_returns_lecture_slide_answers(
         ) = await lecture_slide_runtime.acquire_control(
             session,
             thread.id,
-            actor_user_id=123,
+            actor=LessonActor(user_id=123),
         )
         question = questions[0]
         correct_option = question.options[0]
@@ -598,7 +599,7 @@ async def test_lesson_history_endpoint_returns_lecture_slide_answers(
         slide_session = await lecture_slide_runtime.process_interaction(
             session,
             thread.id,
-            actor_user_id=123,
+            actor=LessonActor(user_id=123),
             request=schemas.InteractiveLessonQuestionPresentedRequest(
                 type="question_presented",
                 controller_session_id=controller_session_id,
@@ -611,7 +612,7 @@ async def test_lesson_history_endpoint_returns_lecture_slide_answers(
         await lecture_slide_runtime.process_interaction(
             session,
             thread.id,
-            actor_user_id=123,
+            actor=LessonActor(user_id=123),
             request=schemas.InteractiveLessonAnswerSubmittedRequest(
                 type="answer_submitted",
                 controller_session_id=controller_session_id,
@@ -663,7 +664,7 @@ async def test_lecture_slide_seek_rejects_forward_jump_without_bypass(db, instit
         ) = await lecture_slide_runtime.acquire_control(
             session,
             thread.id,
-            actor_user_id=123,
+            actor=LessonActor(user_id=123),
             nowfn=lambda: fixed_now,
         )
 
@@ -671,7 +672,7 @@ async def test_lecture_slide_seek_rejects_forward_jump_without_bypass(db, instit
             await lecture_slide_runtime.process_interaction(
                 session,
                 thread.id,
-                actor_user_id=123,
+                actor=LessonActor(user_id=123),
                 request=schemas.InteractiveLessonSeekedRequest(
                     type="lesson_seeked",
                     controller_session_id=controller_session_id,
@@ -704,14 +705,14 @@ async def test_lecture_slide_timeline_bypass_seek_recomputes_question_queue(
         ) = await lecture_slide_runtime.acquire_control(
             session,
             thread.id,
-            actor_user_id=123,
+            actor=LessonActor(user_id=123),
         )
         assert slide_session.timeline_bypass_enabled is True
 
         slide_session = await lecture_slide_runtime.process_interaction(
             session,
             thread.id,
-            actor_user_id=123,
+            actor=LessonActor(user_id=123),
             request=schemas.InteractiveLessonSeekedRequest(
                 type="lesson_seeked",
                 controller_session_id=controller_session_id,
@@ -730,7 +731,7 @@ async def test_lecture_slide_timeline_bypass_seek_recomputes_question_queue(
         slide_session = await lecture_slide_runtime.process_interaction(
             session,
             thread.id,
-            actor_user_id=123,
+            actor=LessonActor(user_id=123),
             request=schemas.InteractiveLessonSeekedRequest(
                 type="lesson_seeked",
                 controller_session_id=controller_session_id,
@@ -745,7 +746,7 @@ async def test_lecture_slide_timeline_bypass_seek_recomputes_question_queue(
         slide_session = await lecture_slide_runtime.process_interaction(
             session,
             thread.id,
-            actor_user_id=123,
+            actor=LessonActor(user_id=123),
             request=schemas.InteractiveLessonSeekedRequest(
                 type="lesson_seeked",
                 controller_session_id=controller_session_id,
@@ -762,7 +763,7 @@ async def test_lecture_slide_timeline_bypass_seek_recomputes_question_queue(
         slide_session = await lecture_slide_runtime.process_interaction(
             session,
             thread.id,
-            actor_user_id=123,
+            actor=LessonActor(user_id=123),
             request=schemas.InteractiveLessonSeekedRequest(
                 type="lesson_seeked",
                 controller_session_id=controller_session_id,
@@ -800,13 +801,13 @@ async def test_lecture_slide_timeline_bypass_seek_to_exact_checkpoint_keeps_ques
         ) = await lecture_slide_runtime.acquire_control(
             session,
             thread.id,
-            actor_user_id=123,
+            actor=LessonActor(user_id=123),
         )
 
         slide_session = await lecture_slide_runtime.process_interaction(
             session,
             thread.id,
-            actor_user_id=123,
+            actor=LessonActor(user_id=123),
             request=schemas.InteractiveLessonSeekedRequest(
                 type="lesson_seeked",
                 controller_session_id=controller_session_id,
@@ -837,13 +838,13 @@ async def test_lecture_slide_timeline_bypass_seek_clears_pending_question(
         ) = await lecture_slide_runtime.acquire_control(
             session,
             thread.id,
-            actor_user_id=123,
+            actor=LessonActor(user_id=123),
         )
 
         slide_session = await lecture_slide_runtime.process_interaction(
             session,
             thread.id,
-            actor_user_id=123,
+            actor=LessonActor(user_id=123),
             request=schemas.InteractiveLessonQuestionPresentedRequest(
                 type="question_presented",
                 controller_session_id=controller_session_id,
@@ -860,7 +861,7 @@ async def test_lecture_slide_timeline_bypass_seek_clears_pending_question(
         slide_session = await lecture_slide_runtime.process_interaction(
             session,
             thread.id,
-            actor_user_id=123,
+            actor=LessonActor(user_id=123),
             request=schemas.InteractiveLessonSeekedRequest(
                 type="lesson_seeked",
                 controller_session_id=controller_session_id,
@@ -892,7 +893,7 @@ async def test_lecture_slide_timeline_bypass_seek_clears_post_answer_continuatio
         ) = await lecture_slide_runtime.acquire_control(
             session,
             thread.id,
-            actor_user_id=123,
+            actor=LessonActor(user_id=123),
         )
         first_question = questions[0]
         first_option = first_question.options[0]
@@ -900,7 +901,7 @@ async def test_lecture_slide_timeline_bypass_seek_clears_post_answer_continuatio
         slide_session = await lecture_slide_runtime.process_interaction(
             session,
             thread.id,
-            actor_user_id=123,
+            actor=LessonActor(user_id=123),
             request=schemas.InteractiveLessonQuestionPresentedRequest(
                 type="question_presented",
                 controller_session_id=controller_session_id,
@@ -913,7 +914,7 @@ async def test_lecture_slide_timeline_bypass_seek_clears_post_answer_continuatio
         slide_session = await lecture_slide_runtime.process_interaction(
             session,
             thread.id,
-            actor_user_id=123,
+            actor=LessonActor(user_id=123),
             request=schemas.InteractiveLessonAnswerSubmittedRequest(
                 type="answer_submitted",
                 controller_session_id=controller_session_id,
@@ -932,7 +933,7 @@ async def test_lecture_slide_timeline_bypass_seek_clears_post_answer_continuatio
         slide_session = await lecture_slide_runtime.process_interaction(
             session,
             thread.id,
-            actor_user_id=123,
+            actor=LessonActor(user_id=123),
             request=schemas.InteractiveLessonSeekedRequest(
                 type="lesson_seeked",
                 controller_session_id=controller_session_id,
@@ -964,7 +965,7 @@ async def test_lecture_slide_timeline_bypass_allows_presenting_question_after_se
         ) = await lecture_slide_runtime.acquire_control(
             session,
             thread.id,
-            actor_user_id=123,
+            actor=LessonActor(user_id=123),
         )
 
         # Jump past the first question to a spot still ahead of plausible
@@ -972,7 +973,7 @@ async def test_lecture_slide_timeline_bypass_allows_presenting_question_after_se
         slide_session = await lecture_slide_runtime.process_interaction(
             session,
             thread.id,
-            actor_user_id=123,
+            actor=LessonActor(user_id=123),
             request=schemas.InteractiveLessonSeekedRequest(
                 type="lesson_seeked",
                 controller_session_id=controller_session_id,
@@ -988,7 +989,7 @@ async def test_lecture_slide_timeline_bypass_allows_presenting_question_after_se
         slide_session = await lecture_slide_runtime.process_interaction(
             session,
             thread.id,
-            actor_user_id=123,
+            actor=LessonActor(user_id=123),
             request=schemas.InteractiveLessonQuestionPresentedRequest(
                 type="question_presented",
                 controller_session_id=controller_session_id,
@@ -1023,13 +1024,13 @@ async def test_lecture_slide_timeline_bypass_seek_keeps_completed_state(
         ) = await lecture_slide_runtime.acquire_control(
             session,
             thread.id,
-            actor_user_id=123,
+            actor=LessonActor(user_id=123),
         )
 
         slide_session = await lecture_slide_runtime.process_interaction(
             session,
             thread.id,
-            actor_user_id=123,
+            actor=LessonActor(user_id=123),
             request=schemas.InteractiveLessonEndedRequest(
                 type="lesson_ended",
                 controller_session_id=controller_session_id,
@@ -1043,7 +1044,7 @@ async def test_lecture_slide_timeline_bypass_seek_keeps_completed_state(
         slide_session = await lecture_slide_runtime.process_interaction(
             session,
             thread.id,
-            actor_user_id=123,
+            actor=LessonActor(user_id=123),
             request=schemas.InteractiveLessonSeekedRequest(
                 type="lesson_seeked",
                 controller_session_id=controller_session_id,
@@ -1075,13 +1076,13 @@ async def test_lecture_slide_timeline_bypass_ended_recomputes_question_queue(
         ) = await lecture_slide_runtime.acquire_control(
             session,
             thread.id,
-            actor_user_id=123,
+            actor=LessonActor(user_id=123),
         )
 
         slide_session = await lecture_slide_runtime.process_interaction(
             session,
             thread.id,
-            actor_user_id=123,
+            actor=LessonActor(user_id=123),
             request=schemas.InteractiveLessonEndedRequest(
                 type="lesson_ended",
                 controller_session_id=controller_session_id,
@@ -1211,7 +1212,7 @@ async def test_acquire_control_rejects_thread_when_slide_deck_no_longer_matches_
             await lecture_slide_runtime.acquire_control(
                 session,
                 thread.id,
-                actor_user_id=123,
+                actor=LessonActor(user_id=123),
             )
 
 
@@ -1913,7 +1914,7 @@ async def test_lecture_slide_session_uses_stored_chat_available_flag(db, institu
         lesson_session = await lecture_slide_runtime.get_thread_session(
             session,
             thread.id,
-            request_actor_user_id=123,
+            request_actor=LessonActor(user_id=123),
         )
 
     assert lesson_session is not None
@@ -1931,7 +1932,7 @@ async def test_lecture_slide_session_accepts_v5_chat_context(db, institution):
         lesson_session = await lecture_slide_runtime.get_thread_session(
             session,
             thread.id,
-            request_actor_user_id=123,
+            request_actor=LessonActor(user_id=123),
         )
 
     assert lesson_session is not None

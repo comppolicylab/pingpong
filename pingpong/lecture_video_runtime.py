@@ -237,7 +237,11 @@ def build_lecture_video_session(
             furthest_offset_ms=furthest_offset_ms,
             latest_interaction_at=latest_interaction_at,
             request_controller_session_id=request_controller_session_id,
-            request_actor_user_id=request_actor_user_id,
+            request_actor=(
+                interactive_lesson_runtime.LessonActor(user_id=request_actor_user_id)
+                if request_actor_user_id is not None
+                else None
+            ),
             now=now,
         )
     )
@@ -270,7 +274,11 @@ async def get_thread_session(
         thread_id,
         adapter=_VIDEO_ADAPTER,
         request_controller_session_id=request_controller_session_id,
-        request_actor_user_id=request_actor_user_id,
+        request_actor=(
+            interactive_lesson_runtime.LessonActor(user_id=request_actor_user_id)
+            if request_actor_user_id is not None
+            else None
+        ),
         nowfn=nowfn,
     )
     if lesson_session is None:
@@ -316,7 +324,7 @@ async def acquire_control(
     ) = await interactive_lesson_runtime.acquire_control(
         session,
         thread_id,
-        actor_user_id,
+        interactive_lesson_runtime.LessonActor(user_id=actor_user_id),
         adapter=_VIDEO_ADAPTER,
         nowfn=nowfn,
     )
@@ -334,7 +342,7 @@ async def release_control(
     lesson_session = await interactive_lesson_runtime.release_control(
         session,
         thread_id,
-        actor_user_id,
+        interactive_lesson_runtime.LessonActor(user_id=actor_user_id),
         controller_session_id,
         adapter=_VIDEO_ADAPTER,
         nowfn=nowfn,
@@ -353,7 +361,7 @@ async def renew_control(
     return await interactive_lesson_runtime.renew_control(
         session,
         thread_id,
-        actor_user_id,
+        interactive_lesson_runtime.LessonActor(user_id=actor_user_id),
         controller_session_id,
         adapter=_VIDEO_ADAPTER,
         nowfn=nowfn,
@@ -371,7 +379,7 @@ async def process_interaction(
     lesson_session = await interactive_lesson_runtime.process_interaction(
         session,
         thread_id,
-        actor_user_id,
+        interactive_lesson_runtime.LessonActor(user_id=actor_user_id),
         _to_interactive_request(request),
         adapter=_VIDEO_ADAPTER,
         nowfn=nowfn,

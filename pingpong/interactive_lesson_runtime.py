@@ -1,4 +1,5 @@
 from collections.abc import Awaitable, Callable, Sequence
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Protocol
 
@@ -161,8 +162,25 @@ class LessonState(Protocol):
     version: int
     controller_session_id: str | None
     controller_user_id: int | None
+    controller_anonymous_session_id: int | None
     controller_lease_expires_at: datetime | None
     normalized_controller_lease_expires_at: datetime | None
+
+
+@dataclass(frozen=True)
+class LessonActor:
+    """Open Access players have no user, so they own leases by anonymous session."""
+
+    user_id: int | None = None
+    anonymous_session_id: int | None = None
+
+    def owns(self, state: LessonState) -> bool:
+        if self.user_id is not None:
+            return state.controller_user_id == self.user_id
+        return (
+            self.anonymous_session_id is not None
+            and state.controller_anonymous_session_id == self.anonymous_session_id
+        )
 
 
 class InteractiveLessonRuntimeError(Exception):
@@ -193,7 +211,10 @@ def has_active_controller(state: LessonState, now: datetime | None = None) -> bo
     lease_expires_at = state.normalized_controller_lease_expires_at
     return bool(
         state.controller_session_id
-        and state.controller_user_id is not None
+        and (
+            state.controller_user_id is not None
+            or state.controller_anonymous_session_id is not None
+        )
         and lease_expires_at is not None
         and lease_expires_at > current_time
     )
@@ -409,7 +430,7 @@ def build_interactive_lesson_session(
     furthest_offset_ms: int | None = None,
     latest_interaction_at: datetime | None = None,
     request_controller_session_id: str | None = None,
-    request_actor_user_id: int | None = None,
+    request_actor: LessonActor | None = None,
     now: datetime | None = None,
 ) -> schemas.InteractiveLessonSession:
     current_time = now or utcnow()
@@ -420,8 +441,8 @@ def build_interactive_lesson_session(
         active_controller
         and request_controller_session_id
         and request_controller_session_id == state.controller_session_id
-        and request_actor_user_id is not None
-        and request_actor_user_id == state.controller_user_id
+        and request_actor is not None
+        and request_actor.owns(state)
     )
     asset = adapter.get_asset(thread)
 
@@ -474,7 +495,7 @@ async def _build_interactive_lesson_session_for_state(
     adapter: InteractiveLessonAdapter,
     latest_interaction_at: datetime | None = None,
     request_controller_session_id: str | None = None,
-    request_actor_user_id: int | None = None,
+    request_actor: LessonActor | None = None,
     now: datetime | None = None,
 ) -> schemas.InteractiveLessonSession:
     furthest_offset_ms = _get_unlocked_offset_ms(state)
@@ -485,7 +506,7 @@ async def _build_interactive_lesson_session_for_state(
         furthest_offset_ms=furthest_offset_ms,
         latest_interaction_at=latest_interaction_at,
         request_controller_session_id=request_controller_session_id,
-        request_actor_user_id=request_actor_user_id,
+        request_actor=request_actor,
         now=now,
     )
 
@@ -502,7 +523,7 @@ async def build_interactive_lesson_session_for_state(
     adapter: InteractiveLessonAdapter,
     latest_interaction_at: datetime | None = None,
     request_controller_session_id: str | None = None,
-    request_actor_user_id: int | None = None,
+    request_actor: LessonActor | None = None,
     now: datetime | None = None,
 ) -> schemas.InteractiveLessonSession:
     return await _build_interactive_lesson_session_for_state(
@@ -510,7 +531,7 @@ async def build_interactive_lesson_session_for_state(
         adapter=adapter,
         latest_interaction_at=latest_interaction_at,
         request_controller_session_id=request_controller_session_id,
-        request_actor_user_id=request_actor_user_id,
+        request_actor=request_actor,
         now=now,
     )
 
@@ -589,7 +610,7 @@ async def get_thread_session(
     *,
     adapter: InteractiveLessonAdapter,
     request_controller_session_id: str | None = None,
-    request_actor_user_id: int | None = None,
+    request_actor: LessonActor | None = None,
     nowfn: NowFn | None = None,
 ) -> schemas.InteractiveLessonSession | None:
     thread = await adapter.get_thread_with_context(session, thread_id)
@@ -612,7 +633,7 @@ async def get_thread_session(
         adapter=adapter,
         latest_interaction_at=latest_interaction_at,
         request_controller_session_id=request_controller_session_id,
-        request_actor_user_id=request_actor_user_id,
+        request_actor=request_actor,
         now=nowfn() if nowfn is not None else None,
     )
 
@@ -724,7 +745,7 @@ def _conflict(
 def _require_controller(
     state: LessonState,
     *,
-    actor_user_id: int,
+    actor: LessonActor,
     controller_session_id: str,
     now: datetime | None = None,
 ) -> None:
@@ -733,7 +754,7 @@ def _require_controller(
             detail=MSG_STALE_PAGE,
             error_code=ERROR_CONTROLLER_LEASE_EXPIRED,
         )
-    if state.controller_user_id != actor_user_id:
+    if not actor.owns(state):
         raise _conflict(
             detail=MSG_OTHER_CONTROLLER,
         )
@@ -821,12 +842,13 @@ async def append_interaction(
 
 def _renew_controller_lease(
     state: LessonState,
-    actor_user_id: int,
+    actor: LessonActor,
     controller_session_id: str,
     *,
     now: datetime | None = None,
 ) -> None:
-    state.controller_user_id = actor_user_id
+    state.controller_user_id = actor.user_id
+    state.controller_anonymous_session_id = actor.anonymous_session_id
     state.controller_session_id = controller_session_id
     state.controller_lease_expires_at = (now or utcnow()) + CONTROLLER_LEASE_DURATION
 
@@ -834,7 +856,7 @@ def _renew_controller_lease(
 async def acquire_control(
     session: AsyncSession,
     thread_id: int,
-    actor_user_id: int,
+    actor: LessonActor,
     *,
     adapter: InteractiveLessonAdapter,
     nowfn: NowFn | None = None,
@@ -846,10 +868,7 @@ async def acquire_control(
     if not adapter.matches_assistant(state.thread):
         raise InteractiveLessonConflictError(MSG_LESSON_UPDATED)
 
-    if (
-        has_active_controller(state, current_time)
-        and state.controller_user_id != actor_user_id
-    ):
+    if has_active_controller(state, current_time) and not actor.owns(state):
         raise _conflict(
             detail=MSG_OTHER_CONTROLLER,
         )
@@ -858,7 +877,7 @@ async def acquire_control(
     state.version += 1
     _renew_controller_lease(
         state,
-        actor_user_id,
+        actor,
         controller_session_id,
         now=current_time,
     )
@@ -876,7 +895,7 @@ async def acquire_control(
             adapter=adapter,
             latest_interaction_at=latest_interaction_at,
             request_controller_session_id=controller_session_id,
-            request_actor_user_id=actor_user_id,
+            request_actor=actor,
             now=current_time,
         ),
     )
@@ -885,7 +904,7 @@ async def acquire_control(
 async def release_control(
     session: AsyncSession,
     thread_id: int,
-    actor_user_id: int,
+    actor: LessonActor,
     controller_session_id: str,
     *,
     adapter: InteractiveLessonAdapter,
@@ -897,13 +916,14 @@ async def release_control(
     current_time = nowfn() if nowfn is not None else utcnow()
     _require_controller(
         state,
-        actor_user_id=actor_user_id,
+        actor=actor,
         controller_session_id=controller_session_id,
         now=current_time,
     )
     state.version += 1
     state.controller_session_id = None
     state.controller_user_id = None
+    state.controller_anonymous_session_id = None
     state.controller_lease_expires_at = None
     await session.flush()
     latest_interaction_at = (
@@ -915,7 +935,7 @@ async def release_control(
         state,
         adapter=adapter,
         latest_interaction_at=latest_interaction_at,
-        request_actor_user_id=actor_user_id,
+        request_actor=actor,
         now=current_time,
     )
 
@@ -923,7 +943,7 @@ async def release_control(
 async def renew_control(
     session: AsyncSession,
     thread_id: int,
-    actor_user_id: int,
+    actor: LessonActor,
     controller_session_id: str,
     *,
     adapter: InteractiveLessonAdapter,
@@ -938,13 +958,13 @@ async def renew_control(
 
     _require_controller(
         state,
-        actor_user_id=actor_user_id,
+        actor=actor,
         controller_session_id=controller_session_id,
         now=current_time,
     )
     _renew_controller_lease(
         state,
-        actor_user_id,
+        actor,
         controller_session_id,
         now=current_time,
     )
@@ -969,7 +989,7 @@ InteractionHandler = Callable[..., Awaitable[None]]
 async def _handle_question_presented(
     session: AsyncSession,
     state: LessonState,
-    actor_user_id: int,
+    actor_user_id: int | None,
     request: schemas.InteractiveLessonQuestionPresentedRequest,
     *,
     adapter: InteractiveLessonAdapter,
@@ -1024,7 +1044,7 @@ async def _handle_question_presented(
 async def _handle_answer_submitted(
     session: AsyncSession,
     state: LessonState,
-    actor_user_id: int,
+    actor_user_id: int | None,
     request: schemas.InteractiveLessonAnswerSubmittedRequest,
     *,
     adapter: InteractiveLessonAdapter,
@@ -1089,7 +1109,7 @@ async def _handle_answer_submitted(
 async def _handle_resumed(
     session: AsyncSession,
     state: LessonState,
-    actor_user_id: int,
+    actor_user_id: int | None,
     request: schemas.InteractiveLessonResumedRequest,
     *,
     adapter: InteractiveLessonAdapter,
@@ -1176,7 +1196,7 @@ def _require_playing_state_for_playback_event(
 async def _handle_paused(
     session: AsyncSession,
     state: LessonState,
-    actor_user_id: int,
+    actor_user_id: int | None,
     request: schemas.InteractiveLessonPausedRequest,
     *,
     adapter: InteractiveLessonAdapter,
@@ -1206,7 +1226,7 @@ async def _handle_paused(
 async def _handle_seeked(
     session: AsyncSession,
     state: LessonState,
-    actor_user_id: int,
+    actor_user_id: int | None,
     request: schemas.InteractiveLessonSeekedRequest,
     *,
     adapter: InteractiveLessonAdapter,
@@ -1249,7 +1269,7 @@ async def _handle_seeked(
 async def _handle_ended(
     session: AsyncSession,
     state: LessonState,
-    actor_user_id: int,
+    actor_user_id: int | None,
     request: schemas.InteractiveLessonEndedRequest,
     *,
     adapter: InteractiveLessonAdapter,
@@ -1309,7 +1329,7 @@ _INTERACTION_HANDLERS: dict[
 async def process_interaction(
     session: AsyncSession,
     thread_id: int,
-    actor_user_id: int,
+    actor: LessonActor,
     request: schemas.InteractiveLessonInteractionRequest,
     *,
     adapter: InteractiveLessonAdapter,
@@ -1324,7 +1344,7 @@ async def process_interaction(
 
     _require_controller(
         state,
-        actor_user_id=actor_user_id,
+        actor=actor,
         controller_session_id=request.controller_session_id,
         now=current_time,
     )
@@ -1343,7 +1363,7 @@ async def process_interaction(
             adapter=adapter,
             latest_interaction_at=latest_interaction_at,
             request_controller_session_id=request.controller_session_id,
-            request_actor_user_id=actor_user_id,
+            request_actor=actor,
             now=current_time,
         )
 
@@ -1361,7 +1381,7 @@ async def process_interaction(
     await handler(
         session,
         state,
-        actor_user_id,
+        actor.user_id,
         request,
         adapter=adapter,
         event_type=event_type,
@@ -1371,7 +1391,7 @@ async def process_interaction(
     state.version += 1
     _renew_controller_lease(
         state,
-        actor_user_id,
+        actor,
         request.controller_session_id,
         now=current_time,
     )
@@ -1387,6 +1407,6 @@ async def process_interaction(
         adapter=adapter,
         latest_interaction_at=latest_interaction_at,
         request_controller_session_id=request.controller_session_id,
-        request_actor_user_id=actor_user_id,
+        request_actor=actor,
         now=current_time,
     )

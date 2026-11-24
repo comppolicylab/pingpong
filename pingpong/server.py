@@ -452,7 +452,7 @@ def _build_run_instructions(
             use_image_descriptions=asst.use_image_descriptions,
             disable_prompt_randomization=asst.disable_prompt_randomization,
             thread_id=str(thread.id),
-            user_id=user_id,
+            user_id=user_id if user_id is not None else thread.external_principal_id,
             interaction_mode=thread.interaction_mode,
             tts_model_id=live_chat_profile.model.value,
         )
@@ -484,7 +484,7 @@ async def _ensure_thread_instructions_migrated(
     session: AsyncSession,
     thread: models.Thread,
     asst: models.Assistant,
-    user_id: int,
+    user_id: int | None,
 ) -> None:
     if thread.instructions is not None:
         session.add(thread)
@@ -867,6 +867,44 @@ async def get_lecture_slide_thread_or_404(
     if thread.interaction_mode != schemas.InteractionMode.LECTURE_SLIDES:
         raise HTTPException(status_code=404, detail="Lecture slide thread not found.")
     return thread
+
+
+def request_user_id(request: StateRequest) -> int | None:
+    user = request.state["session"].user
+    return user.id if user is not None else None
+
+
+def lesson_actor(request: StateRequest) -> interactive_lesson_runtime.LessonActor:
+    if (open_access := request.state["open_access"]) is not None:
+        return interactive_lesson_runtime.LessonActor(
+            anonymous_session_id=open_access.anonymous_session.id
+        )
+    return interactive_lesson_runtime.LessonActor(user_id=request_user_id(request))
+
+
+async def is_class_supervisor(request: StateRequest, class_id: str) -> bool:
+    if request.state["open_access"] is not None:
+        return False
+    return (
+        await request.state["authz"].check(
+            [
+                (
+                    f"user:{request.state['session'].user.id}",
+                    "supervisor",
+                    f"class:{class_id}",
+                )
+            ]
+        )
+    )[0]
+
+
+async def viewer_user_ids(request: StateRequest) -> list[int]:
+    user_id = request_user_id(request)
+    if request.state["open_access"] is not None or user_id is None:
+        return []
+    return [user_id] + await models.User.get_previous_ids_by_id(
+        request.state["db"], user_id
+    )
 
 
 async def get_assistant_for_interaction(
@@ -4980,11 +5018,7 @@ async def get_thread(
                                 lecture_video_runtime.CONTROLLER_SESSION_HEADER
                             )
                         ),
-                        request_actor_user_id=(
-                            request.state["session"].user.id
-                            if request.state["session"].user
-                            else None
-                        ),
+                        request_actor=lesson_actor(request),
                         nowfn=get_now_fn(request),
                     )
                 )
@@ -5048,24 +5082,13 @@ async def get_thread(
             ),
             models.Thread.get_latest_run_by_thread_id(request.state["db"], thread.id),
             models.Thread.get_thread_components(request.state["db"], thread.id),
-            request.state["authz"].check(
-                [
-                    (
-                        f"user:{request.state['session'].user.id}",
-                        "supervisor",
-                        f"class:{class_id}",
-                    ),
-                ]
-            ),
+            is_class_supervisor(request, class_id),
         )
-        current_user_ids = [
-            request.state["session"].user.id
-        ] + await models.User.get_previous_ids_by_id(
-            request.state["db"], request.state["session"].user.id
-        )
+        request_current_user_ids = await viewer_user_ids(request)
+        is_open_access = request.state["open_access"] is not None
         users = {str(u.id): u for u in thread.users}
 
-        is_supervisor = is_supervisor_check[0]
+        is_supervisor = is_supervisor_check
         is_current_user = False
         show_reasoning_summaries = is_supervisor or (
             assistant and not assistant.hide_reasoning_summaries
@@ -5557,10 +5580,16 @@ async def get_thread(
                         )
 
             if not message.user_id:
+                if is_open_access and message.role == schemas.MessageRole.USER:
+                    _message.metadata = {
+                        **(_message.metadata or {}),
+                        "is_current_user": True,
+                        "name": "Me",
+                    }
                 thread_messages.append(_message)
                 continue
 
-            if int(message.user_id) in current_user_ids:
+            if int(message.user_id) in request_current_user_ids:
                 is_current_user = True
                 _message.metadata = {
                     **(_message.metadata or {}),
@@ -5595,18 +5624,16 @@ async def get_thread(
             thread.assistant_names = {assistant.id: assistant.name}
         else:
             thread.assistant_names = {0: "Deleted Assistant"}
-        thread.user_names = user_names(
-            thread, request.state["session"].user.id, is_supervisor
-        )
+        thread.user_names = user_names(thread, request_user_id(request), is_supervisor)
 
         effective_instructions = _effective_thread_instructions(
-            thread, assistant, request.state["session"].user.id
+            thread, assistant, request_user_id(request)
         )
         can_view_prompt = False
         if effective_instructions and assistant:
             if not assistant.hide_prompt:
                 can_view_prompt = True
-            else:
+            elif not is_open_access:
                 can_view_prompt = await request.state["authz"].test(
                     f"user:{request.state['session'].user.id}",
                     "can_edit",
@@ -5671,11 +5698,7 @@ async def get_thread(
                                 lecture_video_runtime.CONTROLLER_SESSION_HEADER
                             )
                         ),
-                        request_actor_user_id=(
-                            request.state["session"].user.id
-                            if request.state["session"].user
-                            else None
-                        ),
+                        request_actor=lesson_actor(request),
                         nowfn=get_now_fn(request),
                     )
                 )
@@ -6888,7 +6911,7 @@ async def acquire_lecture_slide_control(
         ) = await lecture_slide_runtime.acquire_control(
             request.state["db"],
             thread.id,
-            request.state["session"].user.id,
+            lesson_actor(request),
             nowfn=get_now_fn(request),
         )
     except lecture_slide_runtime.LectureSlideRuntimeError as err:
@@ -6918,7 +6941,7 @@ async def release_lecture_slide_control(
         interactive_lesson_session = await lecture_slide_runtime.release_control(
             request.state["db"],
             thread.id,
-            request.state["session"].user.id,
+            lesson_actor(request),
             data.controller_session_id,
             nowfn=get_now_fn(request),
         )
@@ -6952,7 +6975,7 @@ async def renew_lecture_slide_control(
         lease_expires_at = await lecture_slide_runtime.renew_control(
             request.state["db"],
             thread.id,
-            request.state["session"].user.id,
+            lesson_actor(request),
             data.controller_session_id,
             nowfn=get_now_fn(request),
         )
@@ -6989,7 +7012,7 @@ async def post_lecture_slide_interaction(
         interactive_lesson_session = await lecture_slide_runtime.process_interaction(
             request.state["db"],
             thread.id,
-            request.state["session"].user.id,
+            lesson_actor(request),
             data,
             nowfn=get_now_fn(request),
         )
@@ -7038,15 +7061,19 @@ async def _get_lesson_history(
         if interaction.event_type.value == "answer_submitted"
         and interaction.question_id is not None
     }
-    user_id = request.state["session"].user.id
-    current_user_ids = [user_id] + await models.User.get_previous_ids_by_id(
-        request.state["db"], user_id
-    )
-    is_supervisor = (
-        await request.state["authz"].check(
-            [(f"user:{user_id}", "supervisor", f"class:{class_id}")]
+    is_open_access = request.state["open_access"] is not None
+    current_user_ids: list[int] = []
+    is_supervisor = False
+    if not is_open_access:
+        user_id = request.state["session"].user.id
+        current_user_ids = [user_id] + await models.User.get_previous_ids_by_id(
+            request.state["db"], user_id
         )
-    )[0]
+        is_supervisor = (
+            await request.state["authz"].check(
+                [(f"user:{user_id}", "supervisor", f"class:{class_id}")]
+            )
+        )[0]
     users = {user.id: user for user in thread.users}
 
     return schemas.LessonInteractionHistory(
@@ -7054,7 +7081,9 @@ async def _get_lesson_history(
             schemas.LessonInteractionHistoryItem(
                 event_index=interaction.event_index,
                 event_type=interaction.event_type.value,
-                actor_name=display_name_for_thread_user(
+                actor_name="Me"
+                if is_open_access
+                else display_name_for_thread_user(
                     thread,
                     interaction.actor_user_id,
                     users,
@@ -7742,25 +7771,14 @@ async def list_thread_messages(
             ),
             get_assistant(request.state["db"], thread.assistant_id),
             models.Thread.get_file_search_files(request.state["db"], thread.id),
-            request.state["authz"].check(
-                [
-                    (
-                        f"user:{request.state['session'].user.id}",
-                        "supervisor",
-                        f"class:{class_id}",
-                    ),
-                ]
-            ),
+            is_class_supervisor(request, class_id),
         )
 
-        current_user_ids = [
-            request.state["session"].user.id
-        ] + await models.User.get_previous_ids_by_id(
-            request.state["db"], request.state["session"].user.id
-        )
+        request_current_user_ids = await viewer_user_ids(request)
+        is_open_access = request.state["open_access"] is not None
         users = {str(u.id): u for u in thread.users}
 
-        is_supervisor = is_supervisor_check[0]
+        is_supervisor = is_supervisor_check
         is_current_user = False
 
         if assistants and len(assistants) == 1:
@@ -8264,10 +8282,16 @@ async def list_thread_messages(
                         )
 
             if not message.user_id:
+                if is_open_access and message.role == schemas.MessageRole.USER:
+                    _message.metadata = {
+                        **(_message.metadata or {}),
+                        "is_current_user": True,
+                        "name": "Me",
+                    }
                 thread_messages.append(_message)
                 continue
 
-            if int(message.user_id) in current_user_ids:
+            if int(message.user_id) in request_current_user_ids:
                 is_current_user = True
                 _message.metadata = {
                     **(_message.metadata or {}),
@@ -9836,6 +9860,15 @@ async def send_message(
     mcp_tool_ids: list[int] = []
     try:
         thread, asst = context
+        if request.state["open_access"] is not None and (
+            data.file_search_file_ids
+            or data.code_interpreter_file_ids
+            or data.vision_file_ids
+            or data.vision_image_descriptions
+        ):
+            raise OpenAccessError(
+                403, "open_access_uploads_disabled", "File uploads are disabled."
+            )
         await get_attachment_files_for_class(
             request.state["db"],
             class_id,
@@ -10051,13 +10084,13 @@ async def send_message(
             request.state["db"],
             thread,
             asst,
-            request.state["session"].user.id,
+            request_user_id(request),
         )
 
         metrics.inbound_messages.inc(
             app=config.public_url,
             class_=int(class_id),
-            user=request.state["session"].user.id,
+            user=request_user_id(request) or 0,
             thread=thread.thread_id or str(thread.id),
         )
 
@@ -10154,22 +10187,14 @@ async def send_message(
                 ci_all_files,
                 prev_output_sequence,
             ] = await asyncio.gather(
-                request.state["authz"].check(
-                    [
-                        (
-                            f"user:{request.state['session'].user.id}",
-                            "supervisor",
-                            f"class:{class_id}",
-                        ),
-                    ]
-                ),
+                is_class_supervisor(request, class_id),
                 models.Thread.get_code_interpreter_file_obj_ids_including_assistant(
                     request.state["db"], thread.id, asst.id
                 ),
                 models.Thread.get_max_output_sequence(request.state["db"], thread.id),
             )
 
-            is_supervisor = is_supervisor_check[0]
+            is_supervisor = is_supervisor_check
 
             if thread.interaction_mode == schemas.InteractionMode.LECTURE_VIDEO:
                 lecture_chat_prep = await lecture_video_chat.prepare_lecture_chat_turn(
@@ -10188,7 +10213,7 @@ async def send_message(
                     request=request,
                     class_id=class_id,
                     thread=thread,
-                    user_id=request.state["session"].user.id,
+                    user_id=request_user_id(request),
                     prev_output_sequence=prev_output_sequence,
                     lecture_video_playback_position_ms=(
                         data.lecture_video_playback_position_ms
@@ -10321,7 +10346,7 @@ async def send_message(
                     message_status=schemas.MessageStatus.COMPLETED,
                     role=schemas.MessageRole.USER,
                     is_hidden=False,
-                    user_id=request.state["session"].user.id,
+                    user_id=request_user_id(request),
                     message_metadata=(
                         lecture_chat_prep.user_message_metadata
                         if lecture_chat_prep is not None
@@ -10337,16 +10362,14 @@ async def send_message(
             run_to_complete = models.Run.for_thread(
                 thread,
                 status=schemas.RunStatus.PENDING,
-                creator_id=request.state["session"].user.id,
+                creator_id=request_user_id(request),
                 assistant_id=asst.id,
                 model=asst.model,
                 reasoning_effort=asst.reasoning_effort,
                 temperature=asst.temperature,
                 tools_available=thread.tools_available,
                 instructions=(
-                    _build_run_instructions(
-                        thread, asst, request.state["session"].user.id
-                    )
+                    _build_run_instructions(thread, asst, request_user_id(request))
                     or ""
                 )
                 + (

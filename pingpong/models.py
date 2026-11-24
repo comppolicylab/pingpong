@@ -4509,6 +4509,9 @@ class LectureSlideThreadState(Base):
     controller_user_id: Mapped[int | None] = mapped_column(
         Integer, ForeignKey("users.id"), nullable=True
     )
+    controller_anonymous_session_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("anonymous_sessions.id", ondelete="SET NULL"), nullable=True
+    )
     controller_lease_expires_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
@@ -4921,6 +4924,9 @@ class LectureVideoThreadState(Base):
     controller_session_id: Mapped[str | None] = mapped_column(String, nullable=True)
     controller_user_id: Mapped[int | None] = mapped_column(
         Integer, ForeignKey("users.id"), nullable=True
+    )
+    controller_anonymous_session_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("anonymous_sessions.id", ondelete="SET NULL"), nullable=True
     )
     controller_lease_expires_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True

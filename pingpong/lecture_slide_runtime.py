@@ -258,7 +258,7 @@ def build_lecture_slide_session(
     furthest_offset_ms: int | None = None,
     latest_interaction_at: datetime | None = None,
     request_controller_session_id: str | None = None,
-    request_actor_user_id: int | None = None,
+    request_actor: interactive_lesson_runtime.LessonActor | None = None,
     now: datetime | None = None,
 ) -> schemas.InteractiveLessonSession:
     return interactive_lesson_runtime.build_interactive_lesson_session(
@@ -268,7 +268,7 @@ def build_lecture_slide_session(
         furthest_offset_ms=furthest_offset_ms,
         latest_interaction_at=latest_interaction_at,
         request_controller_session_id=request_controller_session_id,
-        request_actor_user_id=request_actor_user_id,
+        request_actor=request_actor,
         now=now,
     )
 
@@ -292,7 +292,7 @@ async def get_thread_session(
     thread_id: int,
     *,
     request_controller_session_id: str | None = None,
-    request_actor_user_id: int | None = None,
+    request_actor: interactive_lesson_runtime.LessonActor | None = None,
     nowfn: NowFn | None = None,
 ) -> schemas.InteractiveLessonSession | None:
     return await interactive_lesson_runtime.get_thread_session(
@@ -300,7 +300,7 @@ async def get_thread_session(
         thread_id,
         adapter=_SLIDE_ADAPTER,
         request_controller_session_id=request_controller_session_id,
-        request_actor_user_id=request_actor_user_id,
+        request_actor=request_actor,
         nowfn=nowfn,
     )
 
@@ -364,14 +364,14 @@ async def _append_interaction(
 async def acquire_control(
     session: AsyncSession,
     thread_id: int,
-    actor_user_id: int,
+    actor: interactive_lesson_runtime.LessonActor,
     *,
     nowfn: NowFn | None = None,
 ) -> tuple[str, schemas.InteractiveLessonSession]:
     return await interactive_lesson_runtime.acquire_control(
         session,
         thread_id,
-        actor_user_id,
+        actor,
         adapter=_SLIDE_ADAPTER,
         nowfn=nowfn,
     )
@@ -380,7 +380,7 @@ async def acquire_control(
 async def release_control(
     session: AsyncSession,
     thread_id: int,
-    actor_user_id: int,
+    actor: interactive_lesson_runtime.LessonActor,
     controller_session_id: str,
     *,
     nowfn: NowFn | None = None,
@@ -388,7 +388,7 @@ async def release_control(
     return await interactive_lesson_runtime.release_control(
         session,
         thread_id,
-        actor_user_id,
+        actor,
         controller_session_id,
         adapter=_SLIDE_ADAPTER,
         nowfn=nowfn,
@@ -398,7 +398,7 @@ async def release_control(
 async def renew_control(
     session: AsyncSession,
     thread_id: int,
-    actor_user_id: int,
+    actor: interactive_lesson_runtime.LessonActor,
     controller_session_id: str,
     *,
     nowfn: NowFn | None = None,
@@ -406,7 +406,7 @@ async def renew_control(
     return await interactive_lesson_runtime.renew_control(
         session,
         thread_id,
-        actor_user_id,
+        actor,
         controller_session_id,
         adapter=_SLIDE_ADAPTER,
         nowfn=nowfn,
@@ -416,7 +416,7 @@ async def renew_control(
 async def process_interaction(
     session: AsyncSession,
     thread_id: int,
-    actor_user_id: int,
+    actor: interactive_lesson_runtime.LessonActor,
     request: schemas.InteractiveLessonInteractionRequest,
     *,
     nowfn: NowFn | None = None,
@@ -424,7 +424,7 @@ async def process_interaction(
     return await interactive_lesson_runtime.process_interaction(
         session,
         thread_id,
-        actor_user_id,
+        actor,
         request,
         adapter=_SLIDE_ADAPTER,
         nowfn=nowfn,

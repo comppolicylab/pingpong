@@ -50,7 +50,7 @@ async def start_check(
     session: AsyncSession,
     state: "LessonState",
     question: "LessonQuestion",
-    actor_user_id: int,
+    actor_user_id: int | None,
 ) -> None:
     sequence = await models.Thread.get_max_output_sequence(session, state.thread_id)
     message = models.Message(

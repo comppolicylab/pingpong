@@ -313,7 +313,7 @@ async def _build_initial_lecture_file_message(
     *,
     session: AsyncSession,
     slide_thread: models.Thread,
-    user_id: int,
+    user_id: int | None,
     output_index: int,
 ) -> models.Message | None:
     deck = slide_thread.lecture_slide_deck
@@ -657,7 +657,7 @@ async def prepare_lecture_chat_turn(
     request: Any,
     class_id: str,
     thread: models.Thread,
-    user_id: int,
+    user_id: int | None,
     prev_output_sequence: int,
     lecture_video_playback_position_ms: int | None = None,
 ) -> LectureSlideChatTurnPreparation:
