@@ -14,6 +14,7 @@ DAILY_KEY_TTL_SECONDS = 2 * 24 * 60 * 60
 MONTHLY_KEY_TTL_SECONDS = 32 * 24 * 60 * 60
 UNLIMITED = -1
 MICRODOLLARS = 1_000_000
+ALERT_PERCENTS = (50, 80, 100)
 
 # Returns an error code, or "ok" once the turn is recorded (never on a dry run).
 TURN_SCRIPT = """
@@ -247,13 +248,15 @@ async def record_usage(
     openai_cost: float,
     speech_cost: float,
 ) -> None:
+    share = settings.limits.elevenlabs_budget_percent / 100
     async with store.redis_client(settings) as redis:
-        for kind, amount in (
-            ("spend", _micro(openai_cost + speech_cost)),
-            ("speech", _micro(speech_cost)),
+        for kind, amount, scale in (
+            ("spend", _micro(openai_cost + speech_cost), 1),
+            ("speech", _micro(speech_cost), share),
         ):
             if not amount:
                 continue
+            spent = []
             for key, ttl in zip(
                 _spend_keys(settings, principal_id, now, kind),
                 (
@@ -263,8 +266,23 @@ async def record_usage(
                     MONTHLY_KEY_TTL_SECONDS,
                 ),
             ):
-                await redis.incrby(key, amount)
+                spent.append(await redis.incrby(key, amount))
                 await redis.expire(key, ttl)
+            for period, total, budget in (
+                ("daily", spent[2], settings.limits.daily_budget),
+                ("monthly", spent[3], settings.limits.monthly_budget),
+            ):
+                limit = _micro(budget) * scale
+                for percent in ALERT_PERCENTS:
+                    if total - amount < limit * percent / 100 <= total:
+                        audit(
+                            "oa.budget_threshold",
+                            budget=kind,
+                            period=period,
+                            percent=percent,
+                            spent=total / MICRODOLLARS,
+                            limit=limit / MICRODOLLARS,
+                        )
 
 
 async def transfer_usage(

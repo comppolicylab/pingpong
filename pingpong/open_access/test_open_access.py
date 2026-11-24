@@ -837,10 +837,15 @@ async def test_admin_usage_summary(api, db, oa, lessons, now, valid_user_token):
 
 
 @pytest.mark.asyncio
-async def test_budgets(oa, now):
+async def test_budgets(oa, now, monkeypatch):
+    alerts = []
+    monkeypatch.setattr(
+        limits, "audit", lambda event, **fields: alerts.append((event, fields))
+    )
     principal = models.ExternalPrincipal(
         id=7, tier=schemas.ExternalPrincipalTier.REGISTERED
     )
+    oa.limits.daily_budget = 4
     today = now()
     await limits.record_usage(oa, 7, today, openai_cost=1.0, speech_cost=0.5)
     assert await limits.speech_available(oa, principal, today)
@@ -853,3 +858,8 @@ async def test_budgets(oa, now):
     assert (
         await limits.chat_block(oa, principal, 1, today) == "open_access_daily_budget"
     )
+    assert [
+        (fields["budget"], fields["period"], fields["percent"])
+        for event, fields in alerts
+        if event == "oa.budget_threshold"
+    ] == [("spend", "daily", 50), ("speech", "daily", 50)]
