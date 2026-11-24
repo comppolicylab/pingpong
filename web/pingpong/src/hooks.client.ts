@@ -1,7 +1,9 @@
 import { handleErrorWithSentry, replayIntegration } from '@sentry/sveltekit';
 import * as Sentry from '@sentry/sveltekit';
+import { OPEN_ACCESS_PATH_PREFIX } from '$lib/stores/openAccess';
 
 const SENTRY_DSN = import.meta.env.VITE_SENTRY_DSN;
+const isOpenAccess = window.location.pathname.startsWith(OPEN_ACCESS_PATH_PREFIX);
 
 if (SENTRY_DSN) {
 	Sentry.init({
@@ -17,7 +19,7 @@ if (SENTRY_DSN) {
 		replaysOnErrorSampleRate: 1.0,
 
 		// If you don't want to use Session Replay, just remove the line below:
-		integrations: [replayIntegration()]
+		integrations: isOpenAccess ? [] : [replayIntegration()]
 	});
 }
 

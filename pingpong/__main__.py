@@ -184,6 +184,17 @@ def _set_open_access_paused(paused: bool, anonymous_only: bool) -> None:
     asyncio.run(set_paused(config.open_access, paused, anonymous_only=anonymous_only))
 
 
+async def _purge_open_access() -> None:
+    from pingpong.open_access.retention import purge_inactive
+
+    await purge_inactive()
+
+
+@oa.command("purge")
+def purge_open_access() -> None:
+    asyncio.run(_purge_open_access())
+
+
 @oa.command("pause")
 @click.option("--anonymous-only", is_flag=True)
 def pause_open_access(anonymous_only: bool) -> None:
@@ -1782,6 +1793,7 @@ FUNCTIONS_MAP: Dict[str, Callable] = {
     "batch_send_activity_summaries": _send_activity_summaries,
     "sync_pingpong_with_lms": lambda _, **kwargs: _lms_sync_all(**kwargs),
     "sync_pingpong_with_lti": lambda _, **kwargs: _lti_sync_all(**kwargs),
+    "purge_open_access_threads": lambda _: _purge_open_access(),
 }
 
 
