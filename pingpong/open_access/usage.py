@@ -53,9 +53,8 @@ class TopUser(BaseModel):
 
 
 class Limits(BaseModel):
-    daily_turns: int
-    daily_openai_tokens: int
-    daily_tts_characters: int
+    daily_budget: float
+    monthly_budget: float
     paused: bool
     anonymous_paused: bool
 
@@ -158,7 +157,7 @@ def _openai_cost(
         return None
 
 
-def _cost(
+def cost(
     settings: OpenAccessSettings,
     model: str | None,
     service_tier: str | None,
@@ -235,7 +234,7 @@ async def _top_users(
         user.output_tokens += int(output or 0)
         user.tts_characters += int(tts or 0)
         user.last_active = max(user.last_active, last)
-        openai, speech = _cost(
+        openai, speech = cost(
             settings,
             model,
             service_tier,
@@ -258,6 +257,10 @@ async def _top_users(
     )[:limit]
 
 
+def priced(model: str) -> bool:
+    return _openai_cost(model, None, 0, 0, 0, datetime.now(UTC)) is not None
+
+
 def _bounds(start: date, end: date, tz: ZoneInfo) -> tuple[datetime, datetime]:
     return (
         datetime.combine(start, datetime.min.time(), tz).astimezone(UTC),
@@ -270,9 +273,8 @@ def _bounds(start: date, end: date, tz: ZoneInfo) -> tuple[datetime, datetime]:
 async def _limits(settings: OpenAccessSettings) -> Limits:
     paused, anonymous_paused = await limits.paused_flags(settings)
     return Limits(
-        daily_turns=settings.limits.daily_turns,
-        daily_openai_tokens=settings.limits.daily_openai_tokens,
-        daily_tts_characters=settings.limits.daily_tts_characters,
+        daily_budget=settings.limits.daily_budget,
+        monthly_budget=settings.limits.monthly_budget,
         paused=settings.paused or paused,
         anonymous_paused=settings.anonymous_paused or anonymous_paused,
     )
@@ -341,7 +343,7 @@ async def summarize(
         row.cached_input_tokens += int(cached or 0)
         row.output_tokens += int(output or 0)
         row.tts_characters += int(tts or 0)
-        openai, speech = _cost(
+        openai, speech = cost(
             settings,
             model,
             service_tier,

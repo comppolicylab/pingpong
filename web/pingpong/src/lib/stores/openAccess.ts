@@ -9,7 +9,8 @@ const STORAGE_KEY = 'pingpong_oa_session';
 export const OPEN_ACCESS_CHAT_CLOSED_CODES = new Set([
 	'open_access_turn_limit',
 	'open_access_thread_turn_limit',
-	'open_access_token_limit',
+	'open_access_daily_budget',
+	'open_access_monthly_budget',
 	'open_access_capacity'
 ]);
 

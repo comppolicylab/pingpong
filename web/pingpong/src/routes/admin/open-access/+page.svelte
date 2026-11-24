@@ -235,6 +235,10 @@
 
 	const today = dayjs();
 	const isToday = $derived(usage.start === today.format('YYYY-MM-DD') && usage.end === usage.start);
+	const isThisMonth = $derived(
+		usage.start === today.startOf('month').format('YYYY-MM-DD') &&
+			usage.end === today.format('YYYY-MM-DD')
+	);
 	const presets = [
 		{ name: 'Today', start: today, end: today, granularity: 'day' },
 		{
@@ -334,15 +338,19 @@
 					<div class="text-sm text-gray-700">
 						{dollars.format(totals.openai)} OpenAI · {dollars.format(totals.speech)} speech
 					</div>
+					{#if isToday}
+						<div class="text-sm text-gray-700">
+							of {dollars.format(usage.limits.daily_budget)} daily
+						</div>
+					{:else if isThisMonth}
+						<div class="text-sm text-gray-700">
+							of {dollars.format(usage.limits.monthly_budget)} monthly
+						</div>
+					{/if}
 				</div>
 				<div class="rounded-2xl bg-gold-light p-5">
 					<div class="text-sm text-gray-700">AI replies</div>
 					<div class="mt-1 text-3xl font-light">{integer.format(totals.runs)}</div>
-					{#if isToday}
-						<div class="text-sm text-gray-700">
-							of {integer.format(usage.limits.daily_turns)} daily
-						</div>
-					{/if}
 				</div>
 				<div class="rounded-2xl bg-gold-light p-5">
 					<div class="text-sm text-gray-700">OpenAI tokens</div>
@@ -350,20 +358,10 @@
 					<div class="text-sm text-gray-700">
 						{compact.format(totals.input)} in · {compact.format(totals.output)} out
 					</div>
-					{#if isToday}
-						<div class="text-sm text-gray-700">
-							of {compact.format(usage.limits.daily_openai_tokens)} daily
-						</div>
-					{/if}
 				</div>
 				<div class="rounded-2xl bg-gold-light p-5">
 					<div class="text-sm text-gray-700">Speech characters</div>
 					<div class="mt-1 text-3xl font-light">{compact.format(totals.tts)}</div>
-					{#if isToday}
-						<div class="text-sm text-gray-700">
-							of {compact.format(usage.limits.daily_tts_characters)} daily
-						</div>
-					{/if}
 				</div>
 				<div class="rounded-2xl bg-gold-light p-5">
 					<div class="text-sm text-gray-700">Sign-ups</div>

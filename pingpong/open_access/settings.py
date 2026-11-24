@@ -3,30 +3,44 @@ from typing import Literal
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from ..login_exchange.settings import LoginExchangeSettings
+from ..schemas import ElevenLabsTTSModel
 from ..redis.settings import RedisSettings
 
 
 class TierLimits(BaseModel):
     thread_turns_per_day: int = Field(ge=0)
     principal_turns_per_day: int = Field(ge=0)
+    daily_budget: float = Field(ge=0)
+    elevenlabs_budget_percent: float | None = Field(None, ge=0, le=100)
+
+
+class RegisteredLimits(TierLimits):
+    monthly_budget: float = Field(ge=0)
 
 
 class OpenAccessLimits(BaseModel):
-    registered: TierLimits
+    registered: RegisteredLimits
     anonymous: TierLimits
     turns_per_minute: int = Field(ge=1)
     message_max_characters: int = Field(ge=1)
     reply_max_output_tokens: int = Field(ge=16)
     recent_exchanges: int = Field(ge=1)
-    principal_daily_tokens: int = Field(ge=0)
-    daily_turns: int = Field(ge=0)
     daily_new_threads: int = Field(ge=0)
-    daily_openai_tokens: int = Field(ge=0)
-    daily_tts_characters: int = Field(ge=0)
+    daily_budget: float = Field(ge=0)
+    monthly_budget: float = Field(ge=0)
+    elevenlabs_budget_percent: float = Field(ge=0, le=100)
 
 
 class OpenAccessPricing(BaseModel):
-    tts_per_thousand_characters: dict[str, float] = {}
+    tts_per_thousand_characters: dict[str, float]
+
+    @field_validator("tts_per_thousand_characters")
+    @classmethod
+    def validate_tts_models(cls, value: dict[str, float]) -> dict[str, float]:
+        missing = {model.value for model in ElevenLabsTTSModel} - value.keys()
+        if missing:
+            raise ValueError(f"Missing prices for {', '.join(sorted(missing))}.")
+        return value
 
 
 class OpenAccessSettings(RedisSettings):
@@ -42,7 +56,7 @@ class OpenAccessSettings(RedisSettings):
     launch_code_ttl_seconds: int = Field(60, ge=1, le=300)
     access_token_ttl_seconds: int = Field(600, ge=60, le=3600)
     limits: OpenAccessLimits
-    pricing: OpenAccessPricing = OpenAccessPricing()
+    pricing: OpenAccessPricing
     service_tier: Literal["default", "flex", "priority"] = "default"
     input_moderation: bool = True
 

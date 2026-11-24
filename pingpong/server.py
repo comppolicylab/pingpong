@@ -10060,6 +10060,9 @@ async def send_message(
                     detail="OpenAI is still processing your last request. We're fetching the latest status...",
                 )
             if open_access_settings is not None:
+                if not open_access_usage.priced(asst.model):
+                    audit.audit("oa.unpriced_model", model=asst.model)
+                    raise open_access_limits.limit_error("open_access_capacity")
                 try:
                     await open_access_limits.reserve_turn(
                         open_access_settings,
@@ -10375,7 +10378,9 @@ async def send_message(
             speech_allowed = (
                 open_access_settings is None
                 or await open_access_limits.speech_available(
-                    open_access_settings, get_now_fn(request)()
+                    open_access_settings,
+                    request.state["open_access"].principal,
+                    get_now_fn(request)(),
                 )
             )
             if (
@@ -17975,7 +17980,7 @@ async def _record_open_access_usage(
     try:
         async with config.db.driver.async_session() as session:
             run = await session.get(models.Run, run_id)
-            tokens = int(((run.usage if run else None) or {}).get("total_tokens") or 0)
+            openai_cost = speech_cost = 0.0
             if run is not None:
                 run.tts_characters = tts_usage.characters
                 entry = open_access_usage.ledger_row(
@@ -17987,6 +17992,17 @@ async def _record_open_access_usage(
                 )
                 session.add(entry)
                 await session.commit()
+                openai_cost, speech_cost = open_access_usage.cost(
+                    settings,
+                    entry.model,
+                    entry.service_tier,
+                    entry.tts_model,
+                    entry.input_tokens,
+                    entry.cached_input_tokens,
+                    entry.output_tokens,
+                    entry.tts_characters,
+                    nowfn(),
+                )
                 audit.audit(
                     "oa.usage",
                     principal_id=principal_id,
@@ -18002,13 +18018,15 @@ async def _record_open_access_usage(
                     output_tokens=entry.output_tokens,
                     tts_model=entry.tts_model,
                     tts_characters=entry.tts_characters,
+                    openai_cost=openai_cost,
+                    speech_cost=speech_cost,
                 )
         await open_access_limits.record_usage(
             settings,
             principal_id,
             nowfn(),
-            tokens=tokens,
-            tts_characters=tts_usage.characters,
+            openai_cost=openai_cost,
+            speech_cost=speech_cost,
         )
     except Exception:
         logger.exception("Failed to record Open Access usage for run %s", run_id)

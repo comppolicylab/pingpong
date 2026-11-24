@@ -3079,9 +3079,8 @@ export type OpenAccessUsageSummary = {
 		last_active: string;
 	}[];
 	limits: {
-		daily_turns: number;
-		daily_openai_tokens: number;
-		daily_tts_characters: number;
+		daily_budget: number;
+		monthly_budget: number;
 		paused: boolean;
 		anonymous_paused: boolean;
 	};
