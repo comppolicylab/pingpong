@@ -119,16 +119,16 @@ def _periods(start: date, end: date, granularity: Granularity) -> list[date]:
     return periods
 
 
-def _hour(db: AsyncSession, column):
+def _minute(db: AsyncSession, column):
     if db.bind.dialect.name == "postgresql":
-        return func.date_trunc("hour", column)
-    return func.strftime("%Y-%m-%d %H:00:00", column)
+        return func.date_trunc("minute", column)
+    return func.strftime("%Y-%m-%d %H:%M:00", column)
 
 
-def _utc(hour: datetime | str) -> datetime:
-    if isinstance(hour, str):
-        hour = datetime.fromisoformat(hour)
-    return hour if hour.tzinfo else hour.replace(tzinfo=UTC)
+def _utc(minute: datetime | str) -> datetime:
+    if isinstance(minute, str):
+        minute = datetime.fromisoformat(minute)
+    return minute if minute.tzinfo else minute.replace(tzinfo=UTC)
 
 
 def _openai_cost(
@@ -184,8 +184,10 @@ async def _top_users(
 ) -> list[TopUser]:
     usage = models.OpenAccessUsage
     principal = models.ExternalPrincipal
+    minute = _minute(db, usage.created)
     result = await db.execute(
         select(
+            minute,
             principal.id,
             principal.subject,
             principal.tier,
@@ -197,11 +199,11 @@ async def _top_users(
             func.sum(usage.cached_input_tokens),
             func.sum(usage.output_tokens),
             func.sum(usage.tts_characters),
-            func.max(usage.created),
         )
         .join(principal, principal.id == usage.principal_id)
         .where(usage.created >= lower, usage.created < upper)
         .group_by(
+            minute,
             principal.id,
             principal.subject,
             principal.tier,
@@ -212,6 +214,7 @@ async def _top_users(
     )
     users: dict[int, TopUser] = {}
     for (
+        bucket,
         principal_id,
         subject,
         tier,
@@ -223,17 +226,16 @@ async def _top_users(
         cached,
         output,
         tts,
-        last,
     ) in result:
-        last = _utc(last)
+        at = _utc(bucket)
         user = users.setdefault(
-            principal_id, TopUser(subject=subject, tier=tier, last_active=last)
+            principal_id, TopUser(subject=subject, tier=tier, last_active=at)
         )
         user.runs += runs
         user.input_tokens += int(input_tokens or 0)
         user.output_tokens += int(output or 0)
         user.tts_characters += int(tts or 0)
-        user.last_active = max(user.last_active, last)
+        user.last_active = max(user.last_active, at)
         openai, speech = cost(
             settings,
             model,
@@ -243,7 +245,7 @@ async def _top_users(
             int(cached or 0),
             int(output or 0),
             int(tts or 0),
-            last,
+            at,
         )
         user.openai_cost += openai
         user.speech_cost += speech
@@ -290,10 +292,10 @@ async def summarize(
 ) -> UsageSummary:
     lower, upper = _bounds(start, end, tz)
     usage = models.OpenAccessUsage
-    hour = _hour(db, usage.created)
+    minute = _minute(db, usage.created)
     result = await db.execute(
         select(
-            hour,
+            minute,
             usage.tier,
             usage.assistant_id,
             usage.model,
@@ -307,7 +309,7 @@ async def summarize(
         )
         .where(usage.created >= lower, usage.created < upper)
         .group_by(
-            hour,
+            minute,
             usage.tier,
             usage.assistant_id,
             usage.model,
@@ -357,15 +359,15 @@ async def summarize(
         row.openai_cost += openai
         row.speech_cost += speech
 
-    signup_hour = _hour(db, models.OpenAccessSignup.created)
+    signup_minute = _minute(db, models.OpenAccessSignup.created)
     signups: dict[date, int] = defaultdict(int)
     for bucket, count in await db.execute(
-        select(signup_hour, func.count(models.OpenAccessSignup.id))
+        select(signup_minute, func.count(models.OpenAccessSignup.id))
         .where(
             models.OpenAccessSignup.created >= lower,
             models.OpenAccessSignup.created < upper,
         )
-        .group_by(signup_hour)
+        .group_by(signup_minute)
     ):
         day = _utc(bucket).astimezone(tz).date()
         if start <= day <= end:

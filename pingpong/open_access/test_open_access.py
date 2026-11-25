@@ -1,6 +1,7 @@
 import importlib
 import json
 import time
+from datetime import UTC, datetime
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -834,6 +835,23 @@ async def test_admin_usage_summary(api, db, oa, lessons, now, valid_user_token):
     assert body["signups"][0]["signups"] == 1
     assert [user["subject"] for user in body["top_users"]] == ["visitor", "learner"]
     assert [lesson["name"] for lesson in body["lessons"]] == ["Lesson 1", "Lesson 2"]
+
+    async with db.async_session() as session:
+        session.add(
+            models.OpenAccessSignup(created=datetime(2026, 1, 1, 18, 40, tzinfo=UTC))
+        )
+        await session.commit()
+    response = api.get(
+        "/api/v1/admin/open-access/usage",
+        params={
+            "start": "2026-01-02",
+            "end": "2026-01-02",
+            "granularity": "day",
+            "tz": "Asia/Kolkata",
+        },
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert response.json()["signups"] == [{"period": "2026-01-02", "signups": 1}]
 
 
 @pytest.mark.asyncio
