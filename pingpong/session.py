@@ -7,6 +7,9 @@ from jwt import PyJWTError
 import uuid_utils as uuid
 from pingpong import models, schemas
 from pingpong.auth import TimeException, decode_session_token
+from pingpong.open_access import access as open_access
+from pingpong.open_access import errors as open_access_errors
+from pingpong.open_access import request as open_access_request
 from pingpong.state_types import AppState, StateRequest, StateWebSocket
 from pingpong.users import UserNotFoundException
 from .now import NowFn, utcnow
@@ -62,6 +65,7 @@ def _initialize_shared_state(request: StateRequest | StateWebSocket) -> None:
     request.state["anonymous_session_id"] = None
     request.state["anonymous_link_id"] = None
     request.state["response_safety_identifier"] = None
+    request.state["open_access"] = None
 
 
 async def _ensure_safety_identifier_uuid(
@@ -116,6 +120,8 @@ async def populate_anonymous_tokens(
             user, anonymous_session = await models.User.get_by_session_token(
                 request.state["db"], request.state["anonymous_session_token"]
             )
+            if anonymous_session and anonymous_session.external_principal_id:
+                user, anonymous_session = None, None
             if user:
                 request.state["anonymous_share_token"] = user.anonymous_link.share_token
                 request.state["anonymous_session_id"] = (
@@ -134,31 +140,55 @@ async def populate_anonymous_tokens(
         if not user:
             return request
 
-        request.state["is_anonymous"] = True
-        request.state["anonymous_share_token_auth"] = (
-            f"anonymous_link:{request.state['anonymous_share_token']}"
-            if request.state["anonymous_share_token"]
-            else None
-        )
-        request.state["anonymous_session_token_auth"] = (
-            f"anonymous_user:{request.state['anonymous_session_token']}"
-            if request.state["anonymous_session_token"]
-            else None
-        )
-        request.state["anonymous_session"] = schemas.SessionState(
-            status=schemas.SessionStatus.ANONYMOUS,
-            user=user,
-        )
-        if anonymous_session is not None:
-            request.state[
-                "response_safety_identifier"
-            ] = await _ensure_safety_identifier_uuid(request, anonymous_session)
-        else:
-            request.state[
-                "response_safety_identifier"
-            ] = await _ensure_safety_identifier_uuid(request, user.anonymous_link)
+        await _apply_anonymous_user(request, user, anonymous_session)
 
     return request
+
+
+async def _apply_anonymous_user(
+    request: StateRequest | StateWebSocket,
+    user: models.User | None,
+    anonymous_session: models.AnonymousSession | None,
+) -> None:
+    request.state["is_anonymous"] = True
+    request.state["anonymous_share_token_auth"] = (
+        f"anonymous_link:{request.state['anonymous_share_token']}"
+        if request.state["anonymous_share_token"]
+        else None
+    )
+    request.state["anonymous_session_token_auth"] = (
+        f"anonymous_user:{request.state['anonymous_session_token']}"
+        if request.state["anonymous_session_token"]
+        else None
+    )
+    request.state["anonymous_session"] = schemas.SessionState(
+        status=schemas.SessionStatus.ANONYMOUS,
+        user=user,
+    )
+    if anonymous_session is not None:
+        request.state[
+            "response_safety_identifier"
+        ] = await _ensure_safety_identifier_uuid(request, anonymous_session)
+    elif user is not None:
+        request.state[
+            "response_safety_identifier"
+        ] = await _ensure_safety_identifier_uuid(request, user.anonymous_link)
+
+
+async def populate_open_access(request: StateRequest, token: str) -> None:
+    context = await open_access.authenticate(
+        request.state["db"],
+        method=request.method,
+        path=request.url.path,
+        token=token,
+        has_marker=open_access_request.has_marker(request),
+        nowfn=get_now_fn(request),
+    )
+    request.state["open_access"] = context
+    request.state["anonymous_session_token"] = context.anonymous_session.session_token
+    request.state["anonymous_session_id"] = context.anonymous_session.id
+    await _apply_anonymous_user(request, None, context.anonymous_session)
+    request.state["session"] = request.state["anonymous_session"]
 
 
 def populate_authorization_token(request: StateRequest | StateWebSocket):
@@ -184,6 +214,18 @@ async def populate_request(
 ) -> StateRequest | StateWebSocket:
     user: models.User | None = None
     _initialize_shared_state(request)
+    if isinstance(request, Request):
+        req = cast(StateRequest, request)
+        oa_token = open_access_request.access_token(
+            req, allow_query=is_media_route(req.url.path)
+        )
+        if oa_token is not None:
+            await populate_open_access(req, oa_token)
+            return req
+        if open_access_request.has_marker(req) and open_access.is_player_route(
+            req.method, req.url.path
+        ):
+            raise open_access_errors.token_invalid()
     try:
         request = await populate_anonymous_tokens(request)
         request = populate_authorization_token(request)
