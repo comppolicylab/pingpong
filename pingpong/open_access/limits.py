@@ -245,10 +245,10 @@ async def is_paused(settings: OpenAccessSettings, *, anonymous: bool) -> bool:
 async def set_paused(
     settings: OpenAccessSettings, paused: bool, *, anonymous_only: bool = False
 ) -> None:
-    audit("oa.kill_switch", paused=paused, anonymous_only=anonymous_only)
     key = global_key(settings, "anonymous_paused" if anonymous_only else "paused")
     async with store.redis_client(settings) as redis:
         if paused:
             await redis.set(key, "1")
         else:
             await redis.delete(key)
+    audit("oa.kill_switch", paused=paused, anonymous_only=anonymous_only)
