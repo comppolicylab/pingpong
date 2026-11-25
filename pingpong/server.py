@@ -5645,6 +5645,22 @@ async def get_thread(
         lecture_video_matches_assistant = _lecture_video_matches_assistant(
             thread, assistant
         )
+        open_access = request.state["open_access"]
+        open_access_block = (
+            await open_access_limits.chat_block(
+                require_open_access_settings(),
+                open_access.principal,
+                thread.id,
+                get_now_fn(request)(),
+            )
+            if open_access is not None
+            else None
+        )
+        if open_access_block not in (
+            None,
+            "open_access_burst_limit",
+        ) and _is_lecture_lesson_mode(thread.interaction_mode):
+            await lesson_checks.pass_pending_check(request.state["db"], thread, None)
         lecture_slide_matches_assistant = True
         lecture_video_tts_available = False
         lecture_video_captions_available = False
@@ -5732,17 +5748,9 @@ async def get_thread(
             request.state["db"], thread.id
         )
         read_only_message = moderation.CONVERSATION_CLOSED_DETAIL if read_only else None
-        open_access = request.state["open_access"]
-        if not read_only and open_access is not None:
-            block = await open_access_limits.chat_block(
-                require_open_access_settings(),
-                open_access.principal,
-                thread.id,
-                get_now_fn(request)(),
-            )
-            if block is not None:
-                read_only = True
-                read_only_message = open_access_limits.MESSAGES[block]
+        if not read_only and open_access_block is not None:
+            read_only = True
+            read_only_message = open_access_limits.MESSAGES[open_access_block]
         return {
             "thread": thread,
             "assistant_avatar_url": (

@@ -509,10 +509,24 @@ async def test_player_sends_message_without_user(
     assert limited.status_code == 429
     assert limited.json()["detail"]["error_code"] == "open_access_thread_turn_limit"
     assert api.get(url, headers=headers).json()["read_only"] is True
-    async with db.async_session() as session:
-        state = await session.scalar(
+
+    def check_state(session):
+        return session.scalar(
             select(models.LectureSlideThreadState).where(
                 models.LectureSlideThreadState.thread_id == body["thread_id"]
             )
         )
+
+    async with db.async_session() as session:
+        state = await check_state(session)
         assert state.check_outcome == "passed"
+        await session.refresh(state, ["thread"])
+        state.state = schemas.InteractiveLessonSessionState.AWAITING_ANSWER
+        question = await session.get(
+            models.LectureSlideQuestion, state.current_question_id
+        )
+        await lesson_checks.start_check(session, state, question, None)
+        await session.commit()
+    assert api.get(url, headers=headers).json()["read_only"] is True
+    async with db.async_session() as session:
+        assert (await check_state(session)).check_outcome == "passed"
