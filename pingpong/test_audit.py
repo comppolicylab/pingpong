@@ -71,3 +71,23 @@ async def test_class_update_is_audited(
     assert events["class.update"]["outcome"] == "success"
     assert events["class.update"]["target"] == {"class_id": "1"}
     assert ("privilege.elevated" in events) is elevated
+
+
+@with_user(123)
+@with_institution(1, "Test Institution")
+@pytest.mark.parametrize(
+    "authz",
+    [{"grants": [("user:123", "can_create_class", "institution:1")]}],
+    indirect=True,
+)
+async def test_instructor_class_creation_is_not_elevated(
+    api, institution, valid_user_token, authz, caplog
+):
+    response = api.post(
+        "/api/v1/institution/1/class",
+        json={"name": "Class", "term": "Fall"},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert response.status_code == 200
+    events = [event["audit"] for event in logged(caplog, "pingpong.audit")]
+    assert "privilege.elevated" not in events

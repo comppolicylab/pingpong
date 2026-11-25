@@ -181,7 +181,12 @@ async def record_elevated_access(connection: HTTPConnection, status: int) -> Non
     user = f"user:{session.user.id}"
     if "institution_id" in params:
         institution = f"institution:{params['institution_id']}"
-        if not await authz.read_tuples("admin", institution, user):
+        if not any(
+            [
+                await authz.read_tuples(relation, institution, user)
+                for relation in ("admin", "can_create_class")
+            ]
+        ):
             audit("privilege.elevated", scope=institution, target=params)
     if "class_id" not in params:
         return
