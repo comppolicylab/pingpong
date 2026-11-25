@@ -1985,6 +1985,8 @@ async def test_prepare_lecture_slide_chat_turn_uses_video_context_shape(
             furthest_offset_ms=5_000,
             version=1,
         )
+        thread.lecture_language_code = "es"
+        thread.lecture_language_name = "Spanish"
         session.add_all([page, state])
         await session.flush()
 
@@ -2003,6 +2005,7 @@ async def test_prepare_lecture_slide_chat_turn_uses_video_context_shape(
         file_note = file_message.content[1].text
         context_text = context_message.content[0].text
 
+    assert "following this lesson in Spanish. Reply in Spanish" in context_text
     assert prep.user_output_index == 11
     assert prep.user_assistant_messages_only is True
     assert prep.include_developer_messages is True

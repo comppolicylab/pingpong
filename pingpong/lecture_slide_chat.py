@@ -766,6 +766,12 @@ async def prepare_lecture_chat_turn(
             furthest_offset_ms=source_furthest_ms,
             answered_knowledge_checks=answered_knowledge_checks,
         )
+    if (slide_thread.lecture_language_code or "original") != "original":
+        language = slide_thread.lecture_language_name
+        context_text += (
+            f"\n\nThe learner is following this lesson in {language}. "
+            f"Reply in {language} unless the learner writes in another language."
+        )
     if context_text.strip():
         prepended_messages.append(
             models.Message(
