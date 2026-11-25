@@ -80,7 +80,9 @@ def display_name_for_thread_user(
     return pseudonym(thread, user)
 
 
-def user_names(new_thread: Thread, user_id: int, is_supervisor=False) -> list[str]:
+def user_names(
+    new_thread: Thread, user_id: int | None, is_supervisor=False
+) -> list[str]:
     names: list[str] = []
     for u in new_thread.users:
         if u.anonymous_link_id and u.id != user_id:
@@ -89,7 +91,7 @@ def user_names(new_thread: Thread, user_id: int, is_supervisor=False) -> list[st
             new_thread,
             u.id,
             {u.id: u},
-            current_user_ids=[user_id],
+            current_user_ids=[user_id] if user_id is not None else [],
             is_supervisor=is_supervisor,
         )
         if display_name is not None:

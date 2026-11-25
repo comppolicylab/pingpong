@@ -1369,7 +1369,7 @@ class BufferedResponseStreamHandler:
         class_id: int,
         thread_id: int,
         assistant_id: int,
-        user_id: int,
+        user_id: int | None,
         mcp_server_tools_by_server_label: dict[str, models.MCPServerTool] | None = None,
         user_auth: str | None = None,
         anonymous_link_auth: str | None = None,

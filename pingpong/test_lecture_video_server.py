@@ -2617,7 +2617,7 @@ async def test_process_interaction_rejects_unhandled_request_subclass(
             await lecture_video_runtime.process_interaction(
                 session,
                 thread_id,
-                123,
+                interactive_lesson_runtime.LessonActor(user_id=123),
                 request_data,
                 nowfn=lambda: lease_expires_at - timedelta(seconds=1),
             )

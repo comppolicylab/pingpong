@@ -125,6 +125,7 @@ async def test_message_checks_availability_before_writing(db, memory_cache):
                 "db": session,
                 "is_anonymous": False,
                 "auth_user": "user:123",
+                "open_access": None,
             }
         )
         with pytest.raises(HTTPException) as raised:

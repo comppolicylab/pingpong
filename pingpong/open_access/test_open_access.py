@@ -1,5 +1,8 @@
+import importlib
 import time
 from contextlib import asynccontextmanager
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import jwt
 import pytest
@@ -9,6 +12,7 @@ from sqlalchemy import select
 
 from pingpong import models, schemas
 from pingpong.now import offset
+from pingpong.test_lecture_slide_runtime import _slide_transcript_data
 from pingpong.testutil import with_institution, with_user
 
 from . import store
@@ -109,6 +113,10 @@ async def lessons(db, institution):
                 ),
                 display_name="Slides",
                 status=schemas.LectureSlideDeckStatus.READY,
+                lecture_slide_chat_available=True,
+                transcript_data=_slide_transcript_data(),
+                context_data={},
+                context_version=4,
                 slide_count=1,
                 total_duration_ms=1_000,
             )
@@ -338,3 +346,142 @@ async def test_catalogue_lists_configured_lessons(api, oa, lessons):
             "languages": [{"code": "original", "name": "Original"}],
         },
     ]
+
+
+async def start_player(api, db, authz):
+    body = exchange(api, launch(api, launch_grant()).json()["code"]).json()
+    async with db.async_session() as session:
+        session_token = await session.scalar(
+            select(models.AnonymousSession.session_token).where(
+                models.AnonymousSession.thread_id == body["thread_id"]
+            )
+        )
+    subject = f"anonymous_user:{session_token}"
+    thread = f"thread:{body['thread_id']}"
+    # The mock FGA server only matches direct tuples, so grant the computed ones.
+    await authz.reset(
+        {
+            "grants": [
+                (subject, "can_view", thread),
+                (subject, "can_participate", thread),
+                (subject, "can_interact_with", "assistant:1"),
+            ]
+        }
+    )
+    url = f"/api/v1/class/{body['class_id']}/thread/{body['thread_id']}"
+    return body, url, player_headers(body["access_token"])
+
+
+@pytest.mark.asyncio
+@with_institution(11, "OA Institution")
+async def test_player_controls_lesson_without_user(api, db, authz, oa, lessons):
+    body, url, headers = await start_player(api, db, authz)
+
+    loaded = api.get(url, headers=headers)
+    assert loaded.status_code == 200, loaded.text
+
+    first = api.post(f"{url}/lecture-slide/control/acquire", headers=headers).json()
+    second = api.post(f"{url}/lecture-slide/control/acquire", headers=headers)
+    assert second.status_code == 200
+    second_id = second.json()["controller_session_id"]
+    assert second_id != first["controller_session_id"]
+    assert second.json()["interactive_lesson_session"]["controller"]["has_control"]
+
+    def renew(controller_session_id):
+        return api.post(
+            f"{url}/lecture-slide/control/renew",
+            json={"controller_session_id": controller_session_id},
+            headers=headers,
+        )
+
+    assert renew(first["controller_session_id"]).status_code == 409
+    assert renew(second_id).status_code == 200
+
+    paused = api.post(
+        f"{url}/lecture-slide/interactions",
+        json={
+            "type": "lesson_paused",
+            "controller_session_id": second_id,
+            "expected_state_version": second.json()["interactive_lesson_session"][
+                "state_version"
+            ],
+            "idempotency_key": "pause-1",
+            "offset_ms": 0,
+        },
+        headers=headers,
+    )
+    assert paused.status_code == 200, paused.text
+
+    history = api.get(f"{url}/lesson/history", headers=headers)
+    assert history.status_code == 200, history.text
+    assert all(item["actor_name"] == "Me" for item in history.json()["interactions"])
+
+    released = api.post(
+        f"{url}/lecture-slide/control/release",
+        json={"controller_session_id": second_id},
+        headers=headers,
+    )
+    assert released.status_code == 200
+    async with db.async_session() as session:
+        state = await session.scalar(
+            select(models.LectureSlideThreadState).where(
+                models.LectureSlideThreadState.thread_id == body["thread_id"]
+            )
+        )
+        assert state.controller_anonymous_session_id is None
+        assert state.controller_user_id is None
+
+
+@pytest.mark.asyncio
+@with_institution(11, "OA Institution")
+async def test_player_sends_message_without_user(
+    api, db, authz, oa, lessons, monkeypatch
+):
+    server = importlib.import_module("pingpong.server")
+
+    def openai_client():
+        return SimpleNamespace()
+
+    monkeypatch.setitem(
+        server.v1.dependency_overrides,
+        server.get_openai_client_for_class,
+        openai_client,
+    )
+    monkeypatch.setattr(server, "ensure_model_available", AsyncMock())
+    monkeypatch.setattr(server, "get_thread_conversation_name", AsyncMock())
+
+    async def generate(*args, **kwargs):
+        yield b'{"type":"done"}\n'
+
+    monkeypatch.setattr(server, "run_response", generate)
+    body, url, headers = await start_player(api, db, authz)
+
+    attachment = api.post(
+        url,
+        json={"message": "Hi", "vision_file_ids": ["file-1"]},
+        headers=headers,
+    )
+    assert attachment.json()["detail"]["error_code"] == "open_access_uploads_disabled"
+
+    sent = api.post(
+        url,
+        json={
+            "message": "Why does latency matter?",
+            "lecture_video_playback_position_ms": 0,
+            "generate_speech": False,
+        },
+        headers=headers,
+    )
+    assert sent.status_code == 200, sent.text
+
+    messages = api.get(f"{url}/messages", headers=headers)
+    assert messages.status_code == 200, messages.text
+    mine = [
+        message for message in messages.json()["messages"] if message["role"] == "user"
+    ]
+    assert [message["metadata"]["name"] for message in mine] == ["Me"]
+    async with db.async_session() as session:
+        run = await session.scalar(
+            select(models.Run).where(models.Run.thread_id == body["thread_id"])
+        )
+        assert run.creator_id is None
