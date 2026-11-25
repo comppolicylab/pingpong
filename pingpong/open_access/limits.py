@@ -4,6 +4,7 @@ from datetime import datetime
 import pingpong.models as models
 import pingpong.schemas as schemas
 from .errors import OpenAccessError
+from .retention import INACTIVITY
 from .settings import OpenAccessSettings, TierLimits
 from ..audit import audit
 from . import store
@@ -11,6 +12,7 @@ from . import store
 DAY_MS = 24 * 60 * 60 * 1000
 MINUTE_MS = 60 * 1000
 DAILY_KEY_TTL_SECONDS = 2 * 24 * 60 * 60
+TRANSFER_CLAIM_TTL_SECONDS = int(INACTIVITY.total_seconds())
 UNLIMITED = -1
 
 # Returns an error code, or "ok" once the turn is recorded (never on a dry run).
@@ -283,7 +285,7 @@ async def claim_transfer(
                 1,
                 store.principal_key(settings, source_id, "transfer"),
                 target_subject,
-                DAILY_KEY_TTL_SECONDS,
+                TRANSFER_CLAIM_TTL_SECONDS,
             )
         )
 
