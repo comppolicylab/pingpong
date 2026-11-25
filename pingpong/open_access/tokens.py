@@ -53,6 +53,23 @@ class ThumbnailGrant(BaseModel):
     assistant_id: int
 
 
+class EndSessionGrant(BaseModel):
+    typ: Literal["end_session"]
+    sub: Subject
+
+
+class ResetGrant(BaseModel):
+    typ: Literal["reset"]
+    sub: Subject
+    assistant_id: int
+
+
+class PauseGrant(BaseModel):
+    typ: Literal["pause"]
+    paused: bool
+    anonymous_only: bool = False
+
+
 class AccessClaims(BaseModel):
     purpose: Literal["open_access"]
     client: str

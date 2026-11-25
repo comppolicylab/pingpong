@@ -25,9 +25,12 @@ from .settings import OpenAccessSettings
 from .threads import delete_thread
 from .tokens import (
     CatalogueGrant,
+    EndSessionGrant,
     LaunchGrant,
+    PauseGrant,
     ProgressGrant,
     RenewGrant,
+    ResetGrant,
     ThumbnailGrant,
     TransferGrant,
     encode_access_token,
@@ -72,6 +75,10 @@ class TransferResponse(BaseModel):
     thread_moved: bool
 
 
+class ResetResponse(BaseModel):
+    reset: bool
+
+
 class ProgressResponse(BaseModel):
     started: list[int]
 
@@ -109,6 +116,17 @@ async def get_principal_thread(
         select(models.Thread).where(
             models.Thread.external_principal_id == principal_id,
             models.Thread.assistant_id == assistant_id,
+        )
+    )
+
+
+async def find_principal(
+    db: AsyncSession, settings: OpenAccessSettings, subject: str
+) -> models.ExternalPrincipal | None:
+    return await db.scalar(
+        select(models.ExternalPrincipal).where(
+            models.ExternalPrincipal.client_id == settings.client_id,
+            models.ExternalPrincipal.subject == subject,
         )
     )
 
@@ -260,12 +278,7 @@ async def renew(req: GrantRequest, request: StateRequest):
     settings = require_request(request)
     grant = verify_grant(settings, req.grant, RenewGrant)
     db = request.state["db"]
-    principal = await db.scalar(
-        select(models.ExternalPrincipal).where(
-            models.ExternalPrincipal.client_id == settings.client_id,
-            models.ExternalPrincipal.subject == grant.sub,
-        )
-    )
+    principal = await find_principal(db, settings, grant.sub)
     thread = (
         await get_principal_thread(db, principal.id, grant.assistant_id)
         if principal is not None
@@ -415,6 +428,45 @@ async def transfer(req: GrantRequest, request: StateRequest):
         thread_id=thread.id if moved and thread is not None else None,
     )
     return TransferResponse(thread_moved=moved)
+
+
+@router.post("/end-session", status_code=204)
+async def end_session(req: GrantRequest, request: StateRequest) -> None:
+    settings = require_request(request)
+    grant = verify_grant(settings, req.grant, EndSessionGrant)
+    principal = await find_principal(request.state["db"], settings, grant.sub)
+    if principal is not None:
+        await store.end_session(settings, principal.id)
+        audit("oa.session.end", principal_id=principal.id)
+
+
+@router.post("/reset", response_model=ResetResponse)
+async def reset(req: GrantRequest, request: StateRequest):
+    settings = require_request(request)
+    grant = verify_grant(settings, req.grant, ResetGrant)
+    db = request.state["db"]
+    principal = await find_principal(db, settings, grant.sub)
+    thread = (
+        await get_principal_thread(db, principal.id, grant.assistant_id)
+        if principal is not None
+        else None
+    )
+    if thread is None:
+        return ResetResponse(reset=False)
+    await request.state["authz"].write_safe(revoke=await delete_thread(db, thread))
+    audit(
+        "oa.thread.reset",
+        principal_id=thread.external_principal_id,
+        thread_id=thread.id,
+    )
+    return ResetResponse(reset=True)
+
+
+@router.post("/pause", status_code=204)
+async def pause(req: GrantRequest, request: StateRequest) -> None:
+    settings = require_request(request)
+    grant = verify_grant(settings, req.grant, PauseGrant)
+    await limits.set_paused(settings, grant.paused, anonymous_only=grant.anonymous_only)
 
 
 @router.post("/progress", response_model=ProgressResponse)

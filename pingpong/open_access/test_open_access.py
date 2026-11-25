@@ -356,6 +356,41 @@ async def test_transfer_moves_free_thread_and_usage_once(api, db, now, oa, lesso
 
 
 @pytest.mark.asyncio
+@with_institution(11, "OA Institution")
+async def test_admin_grants_end_session_reset_and_pause(api, db, oa, lessons):
+    body = exchange(api, launch(api, launch_grant()).json()["code"]).json()
+    thread_url = f"/api/v1/class/{body['class_id']}/thread/{body['thread_id']}"
+
+    def admin(typ, **claims):
+        return api.post(
+            f"/api/v1/oa/{typ.replace('_', '-')}",
+            json={"grant": grant(typ=typ, **claims)},
+            headers=MARKER,
+        )
+
+    def player_error():
+        response = api.get(
+            f"{thread_url}/assistant-avatar",
+            headers=player_headers(body["access_token"]),
+        )
+        return response.json()["detail"]["error_code"]
+
+    assert admin("end_session", sub="visitor1").status_code == 204
+    assert player_error() == "session_displaced"
+
+    assert admin("pause", paused=True).status_code == 204
+    assert (
+        launch(api, launch_grant(launch_id="launch-visitor1-1-0002")).status_code == 503
+    )
+    assert admin("pause", paused=False).status_code == 204
+
+    assert admin("reset", sub="visitor1", assistant_id=1).json() == {"reset": True}
+    assert admin("reset", sub="visitor1", assistant_id=1).json() == {"reset": False}
+    async with db.async_session() as session:
+        assert await session.get(models.Thread, body["thread_id"]) is None
+
+
+@pytest.mark.asyncio
 @with_user(123)
 @with_institution(11, "OA Institution")
 async def test_expired_or_missing_token_rejected_with_valid_login(
