@@ -1,7 +1,10 @@
+import logging
+
 import uuid_utils as uuid
 from fastapi import APIRouter, Request, Response
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -11,6 +14,8 @@ from .. import interactive_lesson_runtime, lecture_threads
 from ..audit import audit
 from ..session import get_now_fn
 from ..state_types import StateRequest
+from ..stream_utils import prefetch_stream
+from ..video_store import VideoStoreError
 from . import limits, store
 from ..config import config
 from .access import ensure_lesson_access
@@ -21,10 +26,15 @@ from .threads import delete_thread
 from .tokens import (
     CatalogueGrant,
     LaunchGrant,
+    ProgressGrant,
     RenewGrant,
+    ThumbnailGrant,
+    TransferGrant,
     encode_access_token,
     verify_grant,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -55,7 +65,15 @@ class CatalogueLesson(BaseModel):
     assistant_id: int
     name: str | None
     free: bool
-    languages: list[schemas.LectureSlideLanguage]
+    thumbnail_version: int
+
+
+class TransferResponse(BaseModel):
+    thread_moved: bool
+
+
+class ProgressResponse(BaseModel):
+    started: list[int]
 
 
 class CatalogueResponse(BaseModel):
@@ -329,24 +347,138 @@ async def catalogue(req: GrantRequest, request: StateRequest):
         if lesson is None:
             continue
         assistant, _ = lesson
-        languages = [schemas.LectureSlideLanguage(code="original", name="Original")]
-        for translation in await models.LectureSlideTranslation.list_by_deck(
-            db, assistant.lecture_slide_deck_id
-        ):
-            if await lecture_threads.translation_is_playable(
-                db, assistant.lecture_slide_deck, translation
-            ):
-                languages.append(
-                    schemas.LectureSlideLanguage(
-                        code=translation.language_code, name=translation.language_name
-                    )
-                )
         lessons.append(
             CatalogueLesson(
                 assistant_id=assistant.id,
                 name=assistant.name,
                 free=assistant.id == settings.free_assistant_id,
-                languages=languages,
+                thumbnail_version=assistant.lecture_slide_deck_id,
             )
         )
     return CatalogueResponse(lessons=lessons)
+
+
+@router.post("/transfer", response_model=TransferResponse)
+async def transfer(req: GrantRequest, request: StateRequest):
+    settings = require_request(request)
+    grant = verify_grant(settings, req.grant, TransferGrant)
+    db = request.state["db"]
+    source = await db.scalar(
+        select(models.ExternalPrincipal).where(
+            models.ExternalPrincipal.client_id == settings.client_id,
+            models.ExternalPrincipal.subject == grant.sub,
+            models.ExternalPrincipal.tier == schemas.ExternalPrincipalTier.ANONYMOUS,
+        )
+    )
+    if source is None:
+        return TransferResponse(thread_moved=False)
+    target = await models.ExternalPrincipal.get_or_create(
+        db, settings.client_id, grant.to, schemas.ExternalPrincipalTier.REGISTERED
+    )
+    if target.tier != schemas.ExternalPrincipalTier.REGISTERED:
+        raise OpenAccessError(
+            409, "open_access_tier_mismatch", "Principal tier does not match."
+        )
+    thread = await get_principal_thread(db, source.id, settings.free_assistant_id)
+    moved = (
+        thread is not None
+        and await get_principal_thread(db, target.id, settings.free_assistant_id)
+        is None
+    )
+    if moved:
+        assert thread is not None
+        try:
+            async with db.begin_nested():
+                thread.external_principal_id = target.id
+                await db.execute(
+                    update(models.AnonymousSession)
+                    .where(
+                        models.AnonymousSession.thread_id == thread.id,
+                        models.AnonymousSession.external_principal_id == source.id,
+                    )
+                    .values(external_principal_id=target.id)
+                )
+        except IntegrityError:
+            await db.refresh(thread)
+            moved = False
+    await limits.transfer_usage(
+        settings,
+        source.id,
+        target.id,
+        thread.id if moved and thread is not None else None,
+        get_now_fn(request)(),
+    )
+    audit(
+        "oa.transfer",
+        source_principal_id=source.id,
+        target_principal_id=target.id,
+        thread_id=thread.id if moved and thread is not None else None,
+    )
+    return TransferResponse(thread_moved=moved)
+
+
+@router.post("/progress", response_model=ProgressResponse)
+async def progress(req: GrantRequest, request: StateRequest):
+    settings = require_request(request)
+    grant = verify_grant(settings, req.grant, ProgressGrant)
+    assistant_ids = await request.state["db"].scalars(
+        select(models.Thread.assistant_id)
+        .join(
+            models.ExternalPrincipal,
+            models.ExternalPrincipal.id == models.Thread.external_principal_id,
+        )
+        .where(
+            models.ExternalPrincipal.client_id == settings.client_id,
+            models.ExternalPrincipal.subject == grant.sub,
+        )
+    )
+    return ProgressResponse(
+        started=[assistant_id for assistant_id in assistant_ids if assistant_id]
+    )
+
+
+@router.post("/thumbnail")
+async def thumbnail(req: GrantRequest, request: StateRequest) -> Response:
+    settings = require_request(request)
+    grant = verify_grant(settings, req.grant, ThumbnailGrant)
+    db = request.state["db"]
+    lesson = (
+        await get_lesson(db, grant.assistant_id)
+        if grant.assistant_id in settings.assistant_ids
+        else None
+    )
+    image = (
+        await db.scalar(
+            select(models.LectureSlideImageStoredObject)
+            .join(
+                models.LectureSlidePage,
+                models.LectureSlidePage.image_stored_object_id
+                == models.LectureSlideImageStoredObject.id,
+            )
+            .where(
+                models.LectureSlidePage.lecture_slide_deck_id
+                == lesson[0].lecture_slide_deck_id
+            )
+            .order_by(models.LectureSlidePage.position)
+            .limit(1)
+        )
+        if lesson is not None and config.video_store
+        else None
+    )
+    if image is None or not config.video_store:
+        raise OpenAccessError(
+            404, "open_access_thumbnail_unavailable", "No thumbnail for this lesson."
+        )
+    try:
+        stream = await prefetch_stream(
+            config.video_store.store.stream_video_range(key=image.key),
+            store_error=VideoStoreError,
+            logger=logger,
+            store_error_log="VideoStoreError while streaming an open access thumbnail",
+            unexpected_error_log="Unexpected error while streaming an open access thumbnail",
+        )
+    except VideoStoreError as exc:
+        raise OpenAccessError(
+            404, "open_access_thumbnail_unavailable", "No thumbnail for this lesson."
+        ) from exc
+    return StreamingResponse(stream, media_type=image.content_type)

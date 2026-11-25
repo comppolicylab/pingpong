@@ -18,7 +18,7 @@ from pingpong.now import offset, utcnow
 from pingpong.test_lecture_slide_runtime import _slide_transcript_data
 from pingpong.testutil import with_institution, with_user
 
-from . import limits, retention, store
+from . import limits, retention, router, store
 from .settings import OpenAccessSettings, TierLimits
 from .tokens import GRANT_AUDIENCE, encode_access_token
 
@@ -277,6 +277,85 @@ async def test_launch_replaces_thread_after_lesson_update(api, db, oa, lessons):
 
 
 @pytest.mark.asyncio
+@with_institution(11, "OA Institution")
+async def test_transfer_keeps_existing_thread_on_conflict(
+    api, db, oa, lessons, monkeypatch
+):
+    exchange(api, launch(api, launch_grant()).json()["code"])
+    exchange(
+        api, launch(api, launch_grant(sub="member1", tier="registered")).json()["code"]
+    )
+    async with db.async_session() as session:
+        target_id = await session.scalar(
+            select(models.ExternalPrincipal.id).where(
+                models.ExternalPrincipal.subject == "member1"
+            )
+        )
+    lookup = router.get_principal_thread
+
+    async def missing_target(db, principal_id, assistant_id):
+        if principal_id == target_id:
+            return None
+        return await lookup(db, principal_id, assistant_id)
+
+    monkeypatch.setattr(router, "get_principal_thread", missing_target)
+    response = api.post(
+        "/api/v1/oa/transfer",
+        json={"grant": grant(typ="transfer", sub="visitor1", to="member1")},
+        headers=MARKER,
+    )
+    assert response.json() == {"thread_moved": False}
+
+
+@pytest.mark.asyncio
+@with_institution(11, "OA Institution")
+async def test_transfer_moves_free_thread_and_usage_once(api, db, now, oa, lessons):
+    anonymous = exchange(api, launch(api, launch_grant()).json()["code"]).json()
+    async with db.async_session() as session:
+        source_id = await session.scalar(
+            select(models.ExternalPrincipal.id).where(
+                models.ExternalPrincipal.subject == "visitor1"
+            )
+        )
+    today = now()
+    async with store.redis_client(oa) as redis:
+        await redis.zadd(
+            store.principal_key(oa, source_id, "turns"), {"t1": limits._ms(today)}
+        )
+        await redis.set(
+            store.principal_key(oa, source_id, "tokens", limits._day(today)), 50
+        )
+
+    def transfer():
+        return api.post(
+            "/api/v1/oa/transfer",
+            json={"grant": grant(typ="transfer", sub="visitor1", to="member1")},
+            headers=MARKER,
+        )
+
+    assert transfer().json() == {"thread_moved": True}
+    assert transfer().json() == {"thread_moved": False}
+    registered = exchange(
+        api, launch(api, launch_grant(sub="member1", tier="registered")).json()["code"]
+    ).json()
+    assert registered["thread_id"] == anonymous["thread_id"]
+    async with db.async_session() as session:
+        target_id = await session.scalar(
+            select(models.ExternalPrincipal.id).where(
+                models.ExternalPrincipal.subject == "member1"
+            )
+        )
+    async with store.redis_client(oa) as redis:
+        assert await redis.zcard(store.principal_key(oa, target_id, "turns")) == 1
+        assert (
+            await redis.get(
+                store.principal_key(oa, target_id, "tokens", limits._day(today))
+            )
+            == "50"
+        )
+
+
+@pytest.mark.asyncio
 @with_user(123)
 @with_institution(11, "OA Institution")
 async def test_expired_or_missing_token_rejected_with_valid_login(
@@ -301,7 +380,12 @@ async def test_expired_or_missing_token_rejected_with_valid_login(
 
 @pytest.mark.asyncio
 @with_institution(11, "OA Institution")
-async def test_catalogue_lists_configured_lessons(api, oa, lessons):
+async def test_catalogue_lists_configured_lessons(api, db, oa, lessons):
+    async with db.async_session() as session:
+        decks = [
+            (await session.get(models.Assistant, i)).lecture_slide_deck_id
+            for i in (1, 2)
+        ]
     response = api.post(
         "/api/v1/oa/catalogue",
         json={"grant": grant(typ="catalogue")},
@@ -313,13 +397,13 @@ async def test_catalogue_lists_configured_lessons(api, oa, lessons):
             "assistant_id": 1,
             "name": "Lesson 1",
             "free": True,
-            "languages": [{"code": "original", "name": "Original"}],
+            "thumbnail_version": decks[0],
         },
         {
             "assistant_id": 2,
             "name": "Lesson 2",
             "free": False,
-            "languages": [{"code": "original", "name": "Original"}],
+            "thumbnail_version": decks[1],
         },
     ]
 

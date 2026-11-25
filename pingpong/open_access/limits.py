@@ -206,6 +206,46 @@ async def record_usage(
                 await redis.expire(key, DAILY_KEY_TTL_SECONDS)
 
 
+async def transfer_usage(
+    settings: OpenAccessSettings,
+    source_id: int,
+    target_id: int,
+    thread_id: int | None,
+    now: datetime,
+) -> None:
+    copies: list[tuple[str, ...]] = [("turns",)]
+    if thread_id is not None:
+        copies.append(("thread", str(thread_id), "turns"))
+    async with store.redis_client(settings) as redis:
+        for parts in copies:
+            turns = await redis.zrangebyscore(
+                store.principal_key(settings, source_id, *parts),
+                _ms(now) - DAY_MS,
+                "+inf",
+                withscores=True,
+            )
+            if turns:
+                target = store.principal_key(settings, target_id, *parts)
+                await redis.zadd(target, dict(turns))
+                await redis.pexpire(target, DAY_MS)
+        if await redis.set(
+            store.principal_key(settings, source_id, "transferred"),
+            "1",
+            nx=True,
+            ex=DAILY_KEY_TTL_SECONDS,
+        ):
+            tokens = int(
+                await redis.get(
+                    store.principal_key(settings, source_id, "tokens", _day(now))
+                )
+                or 0
+            )
+            if tokens:
+                target = store.principal_key(settings, target_id, "tokens", _day(now))
+                await redis.incrby(target, tokens)
+                await redis.expire(target, DAILY_KEY_TTL_SECONDS)
+
+
 async def reserve_new_thread(settings: OpenAccessSettings, now: datetime) -> None:
     async with store.redis_client(settings) as redis:
         allowed = await redis.eval(
