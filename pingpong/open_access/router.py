@@ -162,7 +162,7 @@ async def find_or_create_principal_thread(
             or lesson[0].lecture_slide_deck_id == thread.lecture_slide_deck_id
         ):
             return thread
-        await delete_thread(db, request.state["authz"], thread)
+        await request.state["authz"].write_safe(revoke=await delete_thread(db, thread))
     try:
         async with db.begin_nested():
             return await create_principal_thread(request, principal, grant)
