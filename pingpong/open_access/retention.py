@@ -4,54 +4,14 @@ from datetime import datetime, timedelta
 from sqlalchemy import delete, exists, select
 
 import pingpong.models as models
-from ..authz.base import AuthzClient
 from ..config import config
 from ..now import utcnow
+from .threads import delete_thread
 
 logger = logging.getLogger(__name__)
 
 INACTIVITY = timedelta(days=30)
 BATCH_SIZE = 100
-
-
-async def _purge_thread(session, authz: AuthzClient, thread: models.Thread) -> None:
-    tokens = (
-        await session.scalars(
-            select(models.AnonymousSession.session_token).where(
-                models.AnonymousSession.thread_id == thread.id
-            )
-        )
-    ).all()
-    await thread.delete(session)
-    logger.info(
-        "Open Access retention deleted thread %s (principal %s, class %s, "
-        "last activity %s)",
-        thread.id,
-        thread.external_principal_id,
-        thread.class_id,
-        thread.last_activity.isoformat(),
-    )
-    await authz.write_safe(
-        revoke=[
-            (f"class:{thread.class_id}", "parent", f"thread:{thread.id}"),
-            *(
-                tuple_
-                for token in tokens
-                for tuple_ in (
-                    (
-                        f"anonymous_user:{token}",
-                        "anonymous_party",
-                        f"thread:{thread.id}",
-                    ),
-                    (
-                        f"anonymous_user:{token}",
-                        "can_view",
-                        f"assistant:{thread.assistant_id}",
-                    ),
-                )
-            ),
-        ]
-    )
 
 
 async def purge_inactive(now: datetime | None = None) -> tuple[int, int]:
@@ -69,11 +29,22 @@ async def purge_inactive(now: datetime | None = None) -> tuple[int, int]:
                             models.Thread.last_activity < cutoff,
                         )
                         .limit(BATCH_SIZE)
+                        .with_for_update(skip_locked=True)
                     )
                 ).all()
+                revokes = []
                 for thread in threads:
-                    await _purge_thread(session, authz, thread)
+                    revokes += await delete_thread(session, thread)
+                    logger.info(
+                        "Open Access retention deleted thread %s (principal %s, "
+                        "class %s, last activity %s)",
+                        thread.id,
+                        thread.external_principal_id,
+                        thread.class_id,
+                        thread.last_activity.isoformat(),
+                    )
                 await session.commit()
+            await authz.write_safe(revoke=revokes)
             threads_deleted += len(threads)
             if len(threads) < BATCH_SIZE:
                 break
