@@ -155,6 +155,7 @@ async def find_or_create_principal_thread(
 ) -> models.Thread:
     db = request.state["db"]
     thread = await get_principal_thread(db, principal.id, grant.assistant_id)
+    revoke = []
     if thread is not None:
         lesson = await get_lesson(db, grant.assistant_id)
         if (
@@ -162,15 +163,17 @@ async def find_or_create_principal_thread(
             or lesson[0].lecture_slide_deck_id == thread.lecture_slide_deck_id
         ):
             return thread
-        await request.state["authz"].write_safe(revoke=await delete_thread(db, thread))
+        revoke = await delete_thread(db, thread)
     try:
         async with db.begin_nested():
-            return await create_principal_thread(request, principal, grant)
+            thread = await create_principal_thread(request, principal, grant)
     except IntegrityError:
         thread = await get_principal_thread(db, principal.id, grant.assistant_id)
         if thread is None:
             raise
-        return thread
+    if revoke:
+        await request.state["authz"].write_safe(revoke=revoke)
+    return thread
 
 
 async def issue_launch_code(
