@@ -4,7 +4,7 @@ import logging
 import time
 from collections import defaultdict
 from collections.abc import Awaitable, Callable
-from contextlib import asynccontextmanager
+from contextlib import aclosing, asynccontextmanager
 from datetime import datetime, timedelta
 from math import ceil
 from typing import Annotated, Any, Literal, NoReturn, Union, cast
@@ -5664,10 +5664,9 @@ async def get_thread(
             if open_access is not None
             else None
         )
-        if open_access_block not in (
-            None,
-            "open_access_burst_limit",
-        ) and _is_lecture_lesson_mode(thread.interaction_mode):
+        if open_access_block in open_access_limits.QUOTA_CODES and (
+            _is_lecture_lesson_mode(thread.interaction_mode)
+        ):
             await lesson_checks.pass_pending_check(request.state["db"], thread, None)
         lecture_slide_matches_assistant = True
         lecture_video_tts_available = False
@@ -10038,7 +10037,7 @@ async def send_message(
                         get_now_fn(request)(),
                     )
                 except OpenAccessError as exc:
-                    if exc.error_code != "open_access_burst_limit" and (
+                    if exc.error_code in open_access_limits.QUOTA_CODES and (
                         await lesson_checks.pass_pending_check(
                             request.state["db"], thread, None
                         )
@@ -17950,14 +17949,15 @@ async def _record_open_access_usage(
 
 
 async def _stream_lesson_check(stream, run_id: int, attempt_id: int):
-    async for chunk in stream:
-        if chunk == b'{"type":"done"}\n':
-            try:
-                async with config.db.driver.async_session() as session:
-                    await lesson_checks.complete_run(session, run_id, attempt_id)
-                    await session.commit()
-            except Exception:
-                logger.exception(
-                    "Failed to record lesson check result for run %s", run_id
-                )
-        yield chunk
+    async with aclosing(stream):
+        async for chunk in stream:
+            if chunk == b'{"type":"done"}\n':
+                try:
+                    async with config.db.driver.async_session() as session:
+                        await lesson_checks.complete_run(session, run_id, attempt_id)
+                        await session.commit()
+                except Exception:
+                    logger.exception(
+                        "Failed to record lesson check result for run %s", run_id
+                    )
+            yield chunk

@@ -377,11 +377,13 @@ async def transfer(req: GrantRequest, request: StateRequest):
     grant = verify_grant(settings, req.grant, TransferGrant)
     db = request.state["db"]
     source = await db.scalar(
-        select(models.ExternalPrincipal).where(
+        select(models.ExternalPrincipal)
+        .where(
             models.ExternalPrincipal.client_id == settings.client_id,
             models.ExternalPrincipal.subject == grant.sub,
             models.ExternalPrincipal.tier == schemas.ExternalPrincipalTier.ANONYMOUS,
         )
+        .with_for_update()
     )
     if source is None:
         return TransferResponse(thread_moved=False)
@@ -421,6 +423,17 @@ async def transfer(req: GrantRequest, request: StateRequest):
         thread.id if moved and thread is not None else None,
         get_now_fn(request)(),
     )
+    for leftover in (
+        await db.scalars(
+            select(models.Thread).where(
+                models.Thread.external_principal_id == source.id
+            )
+        )
+    ).all():
+        await request.state["authz"].write_safe(
+            revoke=await delete_thread(db, leftover)
+        )
+    await db.delete(source)
     audit(
         "oa.transfer",
         source_principal_id=source.id,

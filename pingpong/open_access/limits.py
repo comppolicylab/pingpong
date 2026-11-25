@@ -56,6 +56,27 @@ end
 return 1
 """
 
+QUOTA_CODES = frozenset(
+    {
+        "open_access_token_limit",
+        "open_access_thread_turn_limit",
+        "open_access_turn_limit",
+        "open_access_capacity",
+    }
+)
+
+CREDIT_TOKENS_SCRIPT = """
+if redis.call('HSETNX', KEYS[1], ARGV[1], '1') == 0 then
+  return 0
+end
+redis.call('EXPIRE', KEYS[1], ARGV[3])
+if tonumber(ARGV[2]) > 0 then
+  redis.call('INCRBY', KEYS[2], ARGV[2])
+  redis.call('EXPIRE', KEYS[2], ARGV[3])
+end
+return 1
+"""
+
 MESSAGES = {
     "open_access_token_limit": "You have reached today's usage limit.",
     "open_access_thread_turn_limit": "You have reached today's limit for this lesson.",
@@ -228,22 +249,18 @@ async def transfer_usage(
                 target = store.principal_key(settings, target_id, *parts)
                 await redis.zadd(target, dict(turns))
                 await redis.pexpire(target, DAY_MS)
-        if await redis.set(
-            store.principal_key(settings, source_id, "transferred"),
-            "1",
-            nx=True,
-            ex=DAILY_KEY_TTL_SECONDS,
-        ):
-            tokens = int(
-                await redis.get(
-                    store.principal_key(settings, source_id, "tokens", _day(now))
-                )
-                or 0
-            )
-            if tokens:
-                target = store.principal_key(settings, target_id, "tokens", _day(now))
-                await redis.incrby(target, tokens)
-                await redis.expire(target, DAILY_KEY_TTL_SECONDS)
+        tokens = await redis.get(
+            store.principal_key(settings, source_id, "tokens", _day(now))
+        )
+        await redis.eval(
+            CREDIT_TOKENS_SCRIPT,
+            2,
+            store.principal_key(settings, target_id, "credited"),
+            store.principal_key(settings, target_id, "tokens", _day(now)),
+            str(source_id),
+            int(tokens or 0),
+            DAILY_KEY_TTL_SECONDS,
+        )
 
 
 async def reserve_new_thread(settings: OpenAccessSettings, now: datetime) -> None:

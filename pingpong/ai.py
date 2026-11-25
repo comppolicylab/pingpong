@@ -1,4 +1,5 @@
 import asyncio
+import sys
 import csv
 import functools
 import hashlib
@@ -4734,6 +4735,7 @@ async def run_response(
                 ConnectionAbortedError,
                 asyncio.CancelledError,
                 ClientDisconnect,
+                GeneratorExit,
             ) as stream_cancel_error:
                 is_canceled = True
                 await _tts_cleanup()
@@ -4868,11 +4870,15 @@ async def run_response(
                 except Exception as e_:
                     logger.exception(f"Error writing to stream: {e_}")
             finally:
-                if not is_canceled:
+                if not is_canceled and not isinstance(sys.exception(), GeneratorExit):
                     if handler:
                         yield handler.flush()
                     yield b'{"type":"done"}\n'
-        except (asyncio.CancelledError, ClientDisconnect) as stream_cancel_error:
+        except (
+            asyncio.CancelledError,
+            ClientDisconnect,
+            GeneratorExit,
+        ) as stream_cancel_error:
             logger.warning(
                 "Response stream setup cancelled "
                 "(run_id=%s, thread_id=%s, class_id=%s, cause=%s)",
