@@ -9357,6 +9357,7 @@ class Run(Base):
     incomplete_reason = Column(String, nullable=True)
     moderation = Column(JSON, nullable=True)
     usage = Column(JSON, nullable=True)
+    tts_characters = Column(Integer, nullable=True)
     provider_metadata = Column(JSON, nullable=True)
 
     tool_calls = relationship(

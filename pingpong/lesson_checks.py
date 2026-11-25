@@ -126,6 +126,26 @@ async def prepare_check(
     return attempt_id
 
 
+async def pass_pending_check(
+    session: AsyncSession, thread: models.Thread, actor_user_id: int | None
+) -> bool:
+    from pingpong import interactive_lesson_runtime as runtime
+
+    adapter = adapter_for(thread)
+    state = await runtime.get_or_initialize_thread_state(
+        session, thread.id, adapter=adapter, for_update=True
+    )
+    if state.state.value != "awaiting_answer" or not state.check_attempt_id:
+        return False
+    question = runtime.get_current_question(state.thread, state, adapter=adapter)
+    if question is None or str(question.question_type) != "open_ended":
+        return False
+    await finish_check(
+        session, state, adapter=adapter, outcome="passed", actor_user_id=actor_user_id
+    )
+    return True
+
+
 async def finish_check(
     session: AsyncSession,
     state: "LessonState",

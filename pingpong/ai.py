@@ -5,7 +5,7 @@ import hashlib
 import io
 import json
 import logging
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from fastapi import UploadFile
 import openai
 import orjson
@@ -788,6 +788,7 @@ async def build_response_input_item_list(
     user_assistant_messages_only: bool = False,
     include_developer_messages: bool = False,
     omit_message_ids: bool = False,
+    min_output_index: int | None = None,
 ) -> list[ResponseInputItemParam]:
     """Build a list of ResponseInputItem from a thread run step."""
     response_input_items: list[ResponseInputItemParam] = []
@@ -1353,7 +1354,16 @@ async def build_response_input_item_list(
         filtered_items.append((created, output_index, item_type, item))
 
     # Extract the ResponseInputItemParam from the sorted list
-    response_input_items.extend(item for _, _, _, item in filtered_items)
+    response_input_items.extend(
+        item
+        for _, output_index, item_type, item in filtered_items
+        if min_output_index is None
+        or output_index >= min_output_index
+        or (
+            item.get("role") == MessageRole.DEVELOPER
+            and item_type != "lecture_playback_position"
+        )
+    )
     return response_input_items
 
 
@@ -3979,6 +3989,9 @@ async def run_response(
     omit_message_ids: bool = False,
     lecture_video_dual_text_mode: bool = False,
     lecture_video_followups_mode: bool = False,
+    max_output_tokens: int | None = None,
+    min_output_index: int | None = None,
+    on_tts_text: Callable[[str], None] | None = None,
 ):
     is_canceled = False
     await config.authz.driver.init()
@@ -4029,6 +4042,7 @@ async def run_response(
                     user_assistant_messages_only=user_assistant_messages_only,
                     include_developer_messages=include_developer_messages,
                     omit_message_ids=omit_message_ids,
+                    min_output_index=min_output_index,
                 )
                 max_output_index = await models.Thread.get_max_output_sequence(
                     session_, run.thread_id
@@ -4187,6 +4201,8 @@ async def run_response(
                     flush=flush,
                     try_trigger_generation=try_trigger_generation,
                 )
+                if on_tts_text is not None:
+                    on_tts_text(text)
                 if flush:
                     _tts_has_unflushed_text = False
                 elif text:
@@ -4270,6 +4286,9 @@ async def run_response(
                     include=include_with,
                     input=input_items,
                     instructions=run.instructions,
+                    max_output_tokens=(
+                        openai.omit if max_output_tokens is None else max_output_tokens
+                    ),
                     model=run.model,
                     service_tier=(
                         openai.omit

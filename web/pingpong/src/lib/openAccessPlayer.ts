@@ -12,7 +12,7 @@ const RENEW_BEFORE_EXPIRY_MS = 60_000;
 const MIN_RENEW_DELAY_MS = 10_000;
 
 type PlayerCallbacks = {
-	onSession: (session: OpenAccessSession) => void;
+	onSession: (session: OpenAccessSession, config: api.OpenAccessPlayerConfig) => void;
 	onError: (errorCode: string) => void;
 };
 
@@ -51,7 +51,7 @@ export const startOpenAccessPlayer = async (
 
 	const start = (session: OpenAccessSession) => {
 		started = true;
-		onSession(session);
+		onSession(session, config.data);
 		post('ready', { sessionId: session.sessionId });
 	};
 

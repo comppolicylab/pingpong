@@ -48,6 +48,7 @@
 		showContinueWatchingPrompt = true,
 		canSubmit,
 		disabled,
+		maxMessageLength = null,
 		waiting,
 		submitting,
 		threadManagerError,
@@ -89,6 +90,7 @@
 		showContinueWatchingPrompt?: boolean;
 		canSubmit: boolean;
 		disabled: boolean;
+		maxMessageLength?: number | null;
 		waiting: boolean;
 		submitting: boolean;
 		threadManagerError: string | null;
@@ -756,6 +758,7 @@
 					{groupArchived}
 					{canSubmit}
 					{disabled}
+					{maxMessageLength}
 					loading={submitting || waiting}
 					fileSearchAttachmentCount={0}
 					codeInterpreterAttachmentCount={0}

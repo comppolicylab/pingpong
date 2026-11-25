@@ -10,7 +10,7 @@ import pingpong.schemas as schemas
 from .. import interactive_lesson_runtime, lecture_threads
 from ..session import get_now_fn
 from ..state_types import StateRequest
-from . import store
+from . import limits, store
 from ..config import config
 from .access import ensure_lesson_access
 from .errors import OpenAccessError, session_displaced
@@ -63,6 +63,7 @@ class CatalogueResponse(BaseModel):
 
 class PlayerConfigResponse(BaseModel):
     origin: str
+    message_max_characters: int
 
 
 def lesson_unavailable() -> OpenAccessError:
@@ -112,6 +113,7 @@ async def get_lesson(
 
 
 async def create_principal_thread(
+    settings: OpenAccessSettings,
     request: StateRequest,
     principal: models.ExternalPrincipal,
     grant: LaunchGrant,
@@ -121,6 +123,7 @@ async def create_principal_thread(
     if lesson is None:
         raise lesson_unavailable()
     assistant, class_ = lesson
+    await limits.reserve_new_thread(settings, get_now_fn(request)())
     target = await lecture_threads.resolve_lecture_thread_target(
         db, assistant, grant.language
     )
@@ -153,6 +156,7 @@ async def create_principal_thread(
 
 
 async def find_or_create_principal_thread(
+    settings: OpenAccessSettings,
     request: StateRequest,
     principal: models.ExternalPrincipal,
     grant: LaunchGrant,
@@ -170,7 +174,7 @@ async def find_or_create_principal_thread(
         revoke = await delete_thread(db, thread)
     try:
         async with db.begin_nested():
-            thread = await create_principal_thread(request, principal, grant)
+            thread = await create_principal_thread(settings, request, principal, grant)
     except IntegrityError:
         thread = await get_principal_thread(db, principal.id, grant.assistant_id)
         if thread is None:
@@ -212,8 +216,8 @@ async def launch(req: GrantRequest, request: StateRequest):
         raise OpenAccessError(
             409, "open_access_tier_mismatch", "Principal tier does not match."
         )
-    ensure_lesson_access(settings, principal, grant.assistant_id)
-    thread = await find_or_create_principal_thread(request, principal, grant)
+    await ensure_lesson_access(settings, principal, grant.assistant_id)
+    thread = await find_or_create_principal_thread(settings, request, principal, grant)
     session_id = await store.start_session(settings, principal.id, grant.launch_id)
     return await issue_launch_code(settings, principal, thread, session_id)
 
@@ -236,7 +240,7 @@ async def renew(req: GrantRequest, request: StateRequest):
     )
     if principal is None or thread is None:
         raise OpenAccessError(404, "open_access_session_missing", "Session not found.")
-    ensure_lesson_access(settings, principal, grant.assistant_id)
+    await ensure_lesson_access(settings, principal, grant.assistant_id)
     if not await store.extend_session(settings, principal.id, grant.sid):
         raise session_displaced()
     return await issue_launch_code(settings, principal, thread, grant.sid)
@@ -244,7 +248,11 @@ async def renew(req: GrantRequest, request: StateRequest):
 
 @router.get("/config", response_model=PlayerConfigResponse)
 async def player_config(request: Request):
-    return PlayerConfigResponse(origin=require_request(request).origin)
+    settings = require_request(request)
+    return PlayerConfigResponse(
+        origin=settings.origin,
+        message_max_characters=settings.limits.message_max_characters,
+    )
 
 
 @router.post("/exchange", response_model=AccessTokenResponse)
@@ -262,7 +270,7 @@ async def exchange(req: ExchangeRequest, request: StateRequest, response: Respon
         raise OpenAccessError(
             400, "open_access_code_invalid", "Invalid or expired launch code."
         )
-    ensure_lesson_access(settings, principal, launch_code.assistant_id)
+    await ensure_lesson_access(settings, principal, launch_code.assistant_id)
     if not await store.is_active_session(
         settings, principal.id, launch_code.session_id
     ):

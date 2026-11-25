@@ -14,7 +14,7 @@
 	let failed = false;
 	let stop: (() => void) | undefined;
 
-	const loadLesson = async (session: OpenAccessSession) => {
+	const loadLesson = async (session: OpenAccessSession, config: api.OpenAccessPlayerConfig) => {
 		const threadData = await api.getThread(fetch, session.classId, session.threadId);
 		const expanded = api.expandResponse(threadData);
 		if (expanded.error) {
@@ -39,7 +39,8 @@
 			assistants: [],
 			uploadInfo: api.uploadInfoFrom(),
 			isSupervisor: false,
-			supervisors: []
+			supervisors: [],
+			maxMessageLength: config.message_max_characters
 		};
 	};
 
