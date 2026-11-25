@@ -5620,7 +5620,11 @@ async def get_thread(
             thread.assistant_names = {assistant.id: assistant.name}
         else:
             thread.assistant_names = {0: "Deleted Assistant"}
-        thread.user_names = user_names(thread, request_user_id(request), is_supervisor)
+        thread.user_names = (
+            ["Me"]
+            if is_open_access
+            else user_names(thread, request_user_id(request), is_supervisor)
+        )
 
         effective_instructions = _effective_thread_instructions(
             thread, assistant, request_user_id(request)

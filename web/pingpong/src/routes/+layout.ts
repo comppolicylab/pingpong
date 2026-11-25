@@ -1,6 +1,7 @@
 import { redirect } from '@sveltejs/kit';
 import * as api from '$lib/api';
 import { hasAnonymousSessionToken, setAnonymousShareToken } from '$lib/stores/anonymous';
+import { OPEN_ACCESS_PATH_PREFIX } from '$lib/stores/openAccess';
 import type { LayoutLoad } from './$types';
 const LOGIN = '/login';
 const HOME = '/';
@@ -23,6 +24,50 @@ export const ssr = false;
  * Load the current user and redirect if they are not logged in.
  */
 export const load: LayoutLoad = async ({ fetch, url }) => {
+	if (url.pathname.startsWith(OPEN_ACCESS_PATH_PREFIX)) {
+		const me: api.SessionState & api.BaseResponse = {
+			$status: 200,
+			status: 'anonymous',
+			error: null,
+			token: null,
+			user: null,
+			profile: null,
+			agreement_id: null
+		};
+		return {
+			isOpenAccess: true,
+			isPublicPage: true,
+			isLTIRegister: false,
+			needsOnboarding: false,
+			needsAgreements: false,
+			doNotShowSidebar: true,
+			forceShowSidebarButton: false,
+			forceCollapsedLayout: false,
+			openAllLinksInNewTab: true,
+			logoIsClickable: false,
+			showSidebarItems: false,
+			me,
+			authed: false,
+			classes: [],
+			threads: [],
+			admin: {
+				canCreateInstitution: false,
+				canCreateClass: [],
+				isRootAdmin: false,
+				showAdminPage: false
+			},
+			modelInfo: [],
+			shareToken: null,
+			isSharedAssistantPage: false,
+			isSharedThreadPage: false,
+			simpleView: false,
+			disagreementProjectView: false,
+			statusComponents: {},
+			hasNonComponentIncidents: false,
+			isAnonymous: true
+		};
+	}
+
 	// Check if we have a share token in the URL.
 	// If so, we will allow access to the page without authentication.
 	const t = url.searchParams.get('share_token');
@@ -361,6 +406,7 @@ export const load: LayoutLoad = async ({ fetch, url }) => {
 		disagreementProjectView,
 		statusComponents,
 		hasNonComponentIncidents,
-		isAnonymous
+		isAnonymous,
+		isOpenAccess: false
 	};
 };

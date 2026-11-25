@@ -380,6 +380,13 @@ async def test_player_controls_lesson_without_user(api, db, authz, oa, lessons):
     loaded = api.get(url, headers=headers)
     assert loaded.status_code == 200, loaded.text
 
+    cookie = {"Cookie": f"pp_oa_token={body['access_token']}"}
+    captions_url = f"{url}/lecture-slides/captions.vtt"
+    assert api.get(captions_url, params={"pp_oa": "1"}).status_code == 401
+    captions = api.get(captions_url, params={"pp_oa": "1"}, headers=cookie)
+    assert captions.json()["detail"] == "No Video Store exists."
+    assert api.get(url, headers={**MARKER, **cookie}).status_code == 401
+
     first = api.post(f"{url}/lecture-slide/control/acquire", headers=headers).json()
     second = api.post(f"{url}/lecture-slide/control/acquire", headers=headers)
     assert second.status_code == 200

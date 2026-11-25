@@ -6,7 +6,6 @@
 	import { isCompleteAudioPlaylist } from '$lib/utils/audio-playlist';
 	import disagreementProjectIcon from '$lib/assets/disagreementproject.png';
 	import {
-		getAnonymousSessionToken,
 		getAnonymousShareToken,
 		hasAnonymousShareToken,
 		resetAnonymousSessionToken
@@ -152,24 +151,9 @@
 			: data.disagreementProjectView
 				? disagreementProjectIcon
 				: '';
-	$: lectureVideoSrc = (() => {
-		const base = api.fullPath(`/class/${classId}/thread/${threadId}/video`);
-		const anonymousSessionToken = getAnonymousSessionToken();
-		const anonymousShareToken = getAnonymousShareToken();
-		const queryParts: string[] = [];
-		if (anonymousSessionToken) {
-			queryParts.push(`anonymous_session_token=${encodeURIComponent(anonymousSessionToken)}`);
-		}
-		if (anonymousShareToken) {
-			queryParts.push(`anonymous_share_token=${encodeURIComponent(anonymousShareToken)}`);
-		}
-		const ltiSessionToken = api.getLTISessionToken();
-		if (ltiSessionToken) {
-			queryParts.push(`lti_session=${encodeURIComponent(ltiSessionToken)}`);
-		}
-		const queryString = queryParts.join('&');
-		return queryParts.length > 0 ? `${base}?${queryString}` : base;
-	})();
+	$: lectureVideoSrc = api.withMediaAuthQuery(
+		api.fullPath(`/class/${classId}/thread/${threadId}/video`)
+	);
 	$: error = threadMgr.error;
 	$: readOnly = threadMgr.readOnly;
 	$: threadManagerError = $error?.detail || null;
@@ -883,7 +867,7 @@
 	}: ThreadPostMessage) => {
 		try {
 			await threadMgr.postMessage(
-				data.me.user!.id,
+				data.me.user?.id ?? null,
 				message,
 				callback,
 				code_interpreter_file_ids,

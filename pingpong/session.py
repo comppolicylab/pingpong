@@ -217,7 +217,7 @@ async def populate_request(
     if isinstance(request, Request):
         req = cast(StateRequest, request)
         oa_token = open_access_request.access_token(
-            req, allow_query=is_media_route(req.url.path)
+            req, allow_cookie=is_media_route(req.url.path)
         )
         if oa_token is not None:
             await populate_open_access(req, oa_token)

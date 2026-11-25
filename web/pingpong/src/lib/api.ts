@@ -1,6 +1,13 @@
 import { browser } from '$app/environment';
 import { TextLineStream, JSONStream } from '$lib/streams';
 import { getAnonymousSessionToken, getAnonymousShareToken } from '$lib/stores/anonymous';
+import {
+	OPEN_ACCESS_MARKER_HEADER,
+	OPEN_ACCESS_TOKEN_HEADER,
+	getOpenAccessToken,
+	isOpenAccessPage,
+	reportOpenAccessResponse
+} from '$lib/stores/openAccess';
 
 /**
  * HTTP methods.
@@ -213,6 +220,9 @@ export const getLTISessionToken = () => {
  */
 export const withMediaAuthQuery = (url: string): string => {
 	const queryParts: string[] = [];
+	if (isOpenAccessPage()) {
+		return `${url}${url.includes('?') ? '&' : '?'}pp_oa=1`;
+	}
 	const anonymousSessionToken = getAnonymousSessionToken();
 	const anonymousShareToken = getAnonymousShareToken();
 	if (anonymousSessionToken) {
@@ -248,6 +258,23 @@ const _fetch = async (
 	signal?: AbortSignal
 ) => {
 	const full = fullPath(path);
+	if (isOpenAccessPage()) {
+		const openAccessToken = path.startsWith('oa/') ? null : getOpenAccessToken();
+		const response = await f(full, {
+			method,
+			headers: {
+				...headers,
+				[OPEN_ACCESS_MARKER_HEADER]: '1',
+				...(openAccessToken ? { [OPEN_ACCESS_TOKEN_HEADER]: openAccessToken } : {})
+			},
+			body,
+			credentials: 'include',
+			mode: 'cors',
+			signal
+		});
+		if (!path.startsWith('oa/')) reportOpenAccessResponse(response);
+		return response;
+	}
 	const anonymousSessionToken = getAnonymousSessionToken();
 	if (anonymousSessionToken) {
 		// If we have a session token for anonymous threads, add it to the headers.
@@ -726,6 +753,26 @@ export type OptimisticVisionFile = {
  */
 export const me = async (f: Fetcher) => {
 	return await GET<never, SessionState>(f, 'me');
+};
+
+export type OpenAccessPlayerConfig = {
+	origin: string;
+};
+
+export type OpenAccessToken = {
+	access_token: string;
+	expires_in: number;
+	class_id: number;
+	thread_id: number;
+	session_id: string;
+};
+
+export const getOpenAccessConfig = async (f: Fetcher) => {
+	return await GET<never, OpenAccessPlayerConfig>(f, 'oa/config');
+};
+
+export const exchangeOpenAccessCode = async (f: Fetcher, code: string) => {
+	return await POST<{ code: string }, OpenAccessToken>(f, 'oa/exchange', { code });
 };
 
 /**
@@ -2741,20 +2788,7 @@ export const lectureVideoNarrationUrl = (
 	const base = fullPath(
 		`class/${classId}/thread/${threadId}/lecture-video/narration/${narrationId}`
 	);
-	const queryParts: string[] = [];
-	const anonymousSessionToken = getAnonymousSessionToken();
-	const anonymousShareToken = getAnonymousShareToken();
-	if (anonymousSessionToken) {
-		queryParts.push(`anonymous_session_token=${encodeURIComponent(anonymousSessionToken)}`);
-	}
-	if (anonymousShareToken) {
-		queryParts.push(`anonymous_share_token=${encodeURIComponent(anonymousShareToken)}`);
-	}
-	const ltiSessionToken = getLTISessionToken();
-	if (ltiSessionToken) {
-		queryParts.push(`lti_session=${encodeURIComponent(ltiSessionToken)}`);
-	}
-	return queryParts.length > 0 ? `${base}?${queryParts.join('&')}` : base;
+	return withMediaAuthQuery(base);
 };
 
 /**
@@ -2762,20 +2796,7 @@ export const lectureVideoNarrationUrl = (
  */
 export const getLectureVideoCaptionsUrl = (classId: number, threadId: number): string => {
 	const base = fullPath(`class/${classId}/thread/${threadId}/lecture-video/captions.vtt`);
-	const queryParts: string[] = [];
-	const anonymousSessionToken = getAnonymousSessionToken();
-	const anonymousShareToken = getAnonymousShareToken();
-	if (anonymousSessionToken) {
-		queryParts.push(`anonymous_session_token=${encodeURIComponent(anonymousSessionToken)}`);
-	}
-	if (anonymousShareToken) {
-		queryParts.push(`anonymous_share_token=${encodeURIComponent(anonymousShareToken)}`);
-	}
-	const ltiSessionToken = getLTISessionToken();
-	if (ltiSessionToken) {
-		queryParts.push(`lti_session=${encodeURIComponent(ltiSessionToken)}`);
-	}
-	return queryParts.length > 0 ? `${base}?${queryParts.join('&')}` : base;
+	return withMediaAuthQuery(base);
 };
 
 // Generic interactive lesson runtime API functions for lecture slides.
@@ -2837,20 +2858,7 @@ export const getLectureSlidePageImageUrl = (
 	pageId: number
 ): string => {
 	const base = fullPath(`class/${classId}/thread/${threadId}/lecture-slides/${pageId}/image`);
-	const queryParts: string[] = [];
-	const anonymousSessionToken = getAnonymousSessionToken();
-	const anonymousShareToken = getAnonymousShareToken();
-	if (anonymousSessionToken) {
-		queryParts.push(`anonymous_session_token=${encodeURIComponent(anonymousSessionToken)}`);
-	}
-	if (anonymousShareToken) {
-		queryParts.push(`anonymous_share_token=${encodeURIComponent(anonymousShareToken)}`);
-	}
-	const ltiSessionToken = getLTISessionToken();
-	if (ltiSessionToken) {
-		queryParts.push(`lti_session=${encodeURIComponent(ltiSessionToken)}`);
-	}
-	return queryParts.length > 0 ? `${base}?${queryParts.join('&')}` : base;
+	return withMediaAuthQuery(base);
 };
 
 export const lectureSlideNarrationUrl = (
@@ -2861,38 +2869,12 @@ export const lectureSlideNarrationUrl = (
 	const base = fullPath(
 		`class/${classId}/thread/${threadId}/lecture-slides/narration/${narrationId}`
 	);
-	const queryParts: string[] = [];
-	const anonymousSessionToken = getAnonymousSessionToken();
-	const anonymousShareToken = getAnonymousShareToken();
-	if (anonymousSessionToken) {
-		queryParts.push(`anonymous_session_token=${encodeURIComponent(anonymousSessionToken)}`);
-	}
-	if (anonymousShareToken) {
-		queryParts.push(`anonymous_share_token=${encodeURIComponent(anonymousShareToken)}`);
-	}
-	const ltiSessionToken = getLTISessionToken();
-	if (ltiSessionToken) {
-		queryParts.push(`lti_session=${encodeURIComponent(ltiSessionToken)}`);
-	}
-	return queryParts.length > 0 ? `${base}?${queryParts.join('&')}` : base;
+	return withMediaAuthQuery(base);
 };
 
 export const getLectureSlideCaptionsUrl = (classId: number, threadId: number): string => {
 	const base = fullPath(`class/${classId}/thread/${threadId}/lecture-slides/captions.vtt`);
-	const queryParts: string[] = [];
-	const anonymousSessionToken = getAnonymousSessionToken();
-	const anonymousShareToken = getAnonymousShareToken();
-	if (anonymousSessionToken) {
-		queryParts.push(`anonymous_session_token=${encodeURIComponent(anonymousSessionToken)}`);
-	}
-	if (anonymousShareToken) {
-		queryParts.push(`anonymous_share_token=${encodeURIComponent(anonymousShareToken)}`);
-	}
-	const ltiSessionToken = getLTISessionToken();
-	if (ltiSessionToken) {
-		queryParts.push(`lti_session=${encodeURIComponent(ltiSessionToken)}`);
-	}
-	return queryParts.length > 0 ? `${base}?${queryParts.join('&')}` : base;
+	return withMediaAuthQuery(base);
 };
 
 /**
@@ -5492,16 +5474,18 @@ export type GetFileSupportFilter = (
 export const getClassUploadInfo = async (f: Fetcher, classId: number) => {
 	const url = `class/${classId}/upload_info`;
 	const infoResponse = expandResponse(await GET<never, UploadInfo>(f, url));
+	return uploadInfoFrom(infoResponse.data || { ...noUploads, error: infoResponse.error });
+};
 
-	const info = infoResponse.data || {
-		types: [],
-		allow_private: false,
-		private_file_max_size: 0,
-		class_file_max_size: 0,
-		assistant_avatar_max_size: 0,
-		error: infoResponse.error
-	};
+const noUploads: UploadInfo = {
+	types: [],
+	allow_private: false,
+	private_file_max_size: 0,
+	class_file_max_size: 0,
+	assistant_avatar_max_size: 0
+};
 
+export const uploadInfoFrom = <T extends UploadInfo>(info: T = noUploads as T) => {
 	// Create a lookup table for mime types.
 	const _mimeTypeLookup = new Map<string, FileTypeInfo>();
 	const _extensionLookup = new Map<string, FileTypeInfo>();
