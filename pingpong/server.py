@@ -4984,11 +4984,7 @@ async def get_thread(
                 request_controller_session_id=request.headers.get(
                     lecture_video_runtime.CONTROLLER_SESSION_HEADER
                 ),
-                request_actor_user_id=(
-                    request.state["session"].user.id
-                    if request.state["session"].user
-                    else None
-                ),
+                request_actor=lesson_actor(request),
                 nowfn=get_now_fn(request),
             )
         elif thread.interaction_mode == schemas.InteractionMode.LECTURE_SLIDES:
@@ -5664,11 +5660,7 @@ async def get_thread(
                 request_controller_session_id=request.headers.get(
                     lecture_video_runtime.CONTROLLER_SESSION_HEADER
                 ),
-                request_actor_user_id=(
-                    request.state["session"].user.id
-                    if request.state["session"].user
-                    else None
-                ),
+                request_actor=lesson_actor(request),
                 nowfn=get_now_fn(request),
             )
         elif thread.interaction_mode == schemas.InteractionMode.LECTURE_SLIDES:
@@ -6774,7 +6766,7 @@ async def acquire_lecture_video_control(
         ) = await lecture_video_runtime.acquire_control(
             request.state["db"],
             thread.id,
-            request.state["session"].user.id,
+            lesson_actor(request),
             nowfn=get_now_fn(request),
         )
     except lecture_video_runtime.LectureVideoRuntimeError as err:
@@ -6804,7 +6796,7 @@ async def release_lecture_video_control(
         lecture_video_session = await lecture_video_runtime.release_control(
             request.state["db"],
             thread.id,
-            request.state["session"].user.id,
+            lesson_actor(request),
             data.controller_session_id,
             nowfn=get_now_fn(request),
         )
@@ -6838,7 +6830,7 @@ async def renew_lecture_video_control(
         lease_expires_at = await lecture_video_runtime.renew_control(
             request.state["db"],
             thread.id,
-            request.state["session"].user.id,
+            lesson_actor(request),
             data.controller_session_id,
             nowfn=get_now_fn(request),
         )
@@ -6875,7 +6867,7 @@ async def post_lecture_video_interaction(
         lecture_video_session = await lecture_video_runtime.process_interaction(
             request.state["db"],
             thread.id,
-            request.state["session"].user.id,
+            lesson_actor(request),
             data,
             nowfn=get_now_fn(request),
         )
