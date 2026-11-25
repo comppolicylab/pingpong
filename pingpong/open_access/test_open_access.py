@@ -577,7 +577,12 @@ def test_sentry_scrubs_open_access_requests():
             "cookies": {"pp_oa_token": "token"},
             "headers": {"X-PingPong-OA-Token": "token", "User-Agent": "test"},
         },
+        "exception": {
+            "values": [{"stacktrace": {"frames": [{"vars": {"data": "secret"}}]}}]
+        },
+        "breadcrumbs": {"values": [{"message": "secret"}]},
     }
-    assert scrub_open_access_event(event, None)["request"] == {
-        "headers": {"User-Agent": "test"}
-    }
+    scrubbed = scrub_open_access_event(event, None)
+    assert scrubbed["request"] == {"headers": {"User-Agent": "test"}}
+    assert scrubbed["exception"]["values"][0]["stacktrace"]["frames"] == [{}]
+    assert "breadcrumbs" not in scrubbed

@@ -1,6 +1,7 @@
 import asyncio
 import os
 from contextlib import asynccontextmanager, contextmanager
+from contextvars import ContextVar
 
 import sentry_sdk
 from sentry_sdk.integrations.aiohttp import AioHttpIntegration
@@ -11,6 +12,9 @@ _sentry_pid: int | None = None
 
 OPEN_ACCESS_TAG = "open_access"
 _OPEN_ACCESS_SAFE_HEADERS = {"user-agent", "content-type", "content-length", "host"}
+_open_access_request: ContextVar[bool] = ContextVar(
+    "open_access_request", default=False
+)
 
 
 def scrub_open_access_event(event, _hint):
@@ -25,10 +29,19 @@ def scrub_open_access_event(event, _hint):
             for name, value in (request.get("headers") or {}).items()
             if name.lower() in _OPEN_ACCESS_SAFE_HEADERS
         }
+    for exception in (event.get("exception") or {}).get("values") or []:
+        for frame in (exception.get("stacktrace") or {}).get("frames") or []:
+            frame.pop("vars", None)
+    event.pop("breadcrumbs", None)
     return event
 
 
+def drop_open_access_log(log, _hint):
+    return None if _open_access_request.get() else log
+
+
 def mark_open_access_request() -> None:
+    _open_access_request.set(True)
     sentry_sdk.get_isolation_scope().set_tag(OPEN_ACCESS_TAG, "true")
 
 
@@ -53,6 +66,7 @@ def init_sentry() -> None:
         max_request_body_size="always",
         before_send=scrub_open_access_event,
         before_send_transaction=scrub_open_access_event,
+        before_send_log=drop_open_access_log,
     )
     # codeql[py/unused-global-variable]
     _sentry_pid = current_pid
