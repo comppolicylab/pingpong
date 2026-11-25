@@ -1,4 +1,5 @@
 import asyncio
+import sys
 import csv
 import functools
 import hashlib
@@ -4869,7 +4870,7 @@ async def run_response(
                 except Exception as e_:
                     logger.exception(f"Error writing to stream: {e_}")
             finally:
-                if not is_canceled:
+                if not is_canceled and not isinstance(sys.exception(), GeneratorExit):
                     if handler:
                         yield handler.flush()
                     yield b'{"type":"done"}\n'
