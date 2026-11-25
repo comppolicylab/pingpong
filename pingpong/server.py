@@ -17977,10 +17977,10 @@ async def _record_open_access_usage(
     nowfn: NowFn,
 ):
     principal_id = principal.id
+    openai_cost = speech_cost = 0.0
     try:
         async with config.db.driver.async_session() as session:
             run = await session.get(models.Run, run_id)
-            openai_cost = speech_cost = 0.0
             if run is not None:
                 run.tts_characters = tts_usage.characters
                 entry = open_access_usage.ledger_row(
@@ -17990,8 +17990,6 @@ async def _record_open_access_usage(
                     tts_usage.characters,
                     tts_usage.model,
                 )
-                session.add(entry)
-                await session.commit()
                 openai_cost, speech_cost = open_access_usage.cost(
                     settings,
                     entry.model,
@@ -18003,6 +18001,8 @@ async def _record_open_access_usage(
                     entry.tts_characters,
                     nowfn(),
                 )
+                session.add(entry)
+                await session.commit()
                 audit.audit(
                     "oa.usage",
                     principal_id=principal_id,
@@ -18021,6 +18021,9 @@ async def _record_open_access_usage(
                     openai_cost=openai_cost,
                     speech_cost=speech_cost,
                 )
+    except Exception:
+        logger.exception("Failed to record Open Access usage for run %s", run_id)
+    try:
         await open_access_limits.record_usage(
             settings,
             principal_id,
@@ -18029,7 +18032,7 @@ async def _record_open_access_usage(
             speech_cost=speech_cost,
         )
     except Exception:
-        logger.exception("Failed to record Open Access usage for run %s", run_id)
+        logger.exception("Failed to record Open Access spend for run %s", run_id)
 
 
 async def _stream_lesson_check(stream, run_id: int, attempt_id: int):
