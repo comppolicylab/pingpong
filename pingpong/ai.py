@@ -1356,10 +1356,13 @@ async def build_response_input_item_list(
     # Extract the ResponseInputItemParam from the sorted list
     response_input_items.extend(
         item
-        for _, output_index, _, item in filtered_items
+        for _, output_index, item_type, item in filtered_items
         if min_output_index is None
         or output_index >= min_output_index
-        or item.get("role") == MessageRole.DEVELOPER
+        or (
+            item.get("role") == MessageRole.DEVELOPER
+            and item_type != "lecture_playback_position"
+        )
     )
     return response_input_items
 
