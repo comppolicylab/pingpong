@@ -1357,7 +1357,9 @@ async def build_response_input_item_list(
     response_input_items.extend(
         item
         for _, output_index, _, item in filtered_items
-        if min_output_index is None or output_index >= min_output_index
+        if min_output_index is None
+        or output_index >= min_output_index
+        or item.get("role") == MessageRole.DEVELOPER
     )
     return response_input_items
 
