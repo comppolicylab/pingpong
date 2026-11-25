@@ -3,6 +3,7 @@ from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import pytest
+from starlette.datastructures import URL
 from fastapi import HTTPException
 from sqlalchemy import asc, select
 
@@ -286,7 +287,7 @@ async def _list_slide_interactions(
 def _server_request(session, user_id: int = 123, *, headers: dict | None = None):
     def url_for(name: str, **path_params):
         params = "/".join(f"{key}-{value}" for key, value in path_params.items())
-        return f"http://testserver/{name}/{params}"
+        return URL(f"http://testserver/{name}/{params}")
 
     return SimpleNamespace(
         state={
@@ -1266,6 +1267,7 @@ async def test_lecture_slide_chat_context_matches_lecture_video_v4_sections(
             thread,
             state,
             playback_position_ms=2_000,
+            furthest_offset_ms=state.furthest_offset_ms,
             answered_knowledge_checks=None,
         )
 
@@ -1983,6 +1985,8 @@ async def test_prepare_lecture_slide_chat_turn_uses_video_context_shape(
             furthest_offset_ms=5_000,
             version=1,
         )
+        thread.lecture_language_code = "es"
+        thread.lecture_language_name = "Spanish"
         session.add_all([page, state])
         await session.flush()
 
@@ -2001,6 +2005,7 @@ async def test_prepare_lecture_slide_chat_turn_uses_video_context_shape(
         file_note = file_message.content[1].text
         context_text = context_message.content[0].text
 
+    assert "following this lesson in Spanish. Reply in Spanish" in context_text
     assert prep.user_output_index == 11
     assert prep.user_assistant_messages_only is True
     assert prep.include_developer_messages is True
@@ -2378,3 +2383,96 @@ async def test_prepare_lecture_slide_chat_turn_adds_dynamic_context_without_recr
     assert "What is shown on this slide?" in context_text
     assert "Student selected `A clear example`." in context_text
     assert "Student selected `Continue`." not in context_text
+
+
+@with_institution(11, "Test Institution")
+async def test_language_change_restarts_current_slide_in_new_timeline(db, institution):
+    async with db.async_session() as session:
+        _, deck, assistant, thread, _ = await _create_slide_runtime_fixture(
+            session, institution, with_questions=False
+        )
+        thread.interaction_mode = schemas.InteractionMode.LECTURE_SLIDES
+        assistant.interaction_mode = schemas.InteractionMode.LECTURE_SLIDES
+        thread.lecture_language_code = "original"
+        translation = models.LectureSlideTranslation(
+            lecture_slide_deck=deck,
+            language_code="es",
+            language_name="Spanish",
+            openai_model="gpt-4o-mini",
+            status=schemas.LectureSlideTranslationStatus.READY,
+            stage=schemas.LectureSlideTranslationStage.COMPOSITE_ARTIFACTS,
+            total_duration_ms=6_000,
+            continuous_narration_stored_object=models.LectureSlideNarrationStoredObject(
+                key="es.ogg", content_type="audio/ogg", content_length=1
+            ),
+            caption_stored_object=models.LectureSlideCaptionStoredObject(
+                key="es.vtt", content_type="text/vtt", content_length=1
+            ),
+        )
+        session.add_all(
+            [
+                models.LectureSlidePage(
+                    lecture_slide_deck=deck,
+                    position=position,
+                    start_offset_ms=start,
+                    end_offset_ms=end,
+                )
+                for position, start, end in ((0, 0, 4_000), (1, 4_000, 10_000))
+            ]
+            + [
+                models.LectureSlideTranslationPage(
+                    translation=translation,
+                    position=position,
+                    narration_text="Narracion",
+                    start_offset_ms=start,
+                    end_offset_ms=end,
+                )
+                for position, start, end in ((0, 0, 2_000), (1, 2_000, 6_000))
+            ]
+        )
+        await session.flush()
+
+        (
+            controller_session_id,
+            slide_session,
+        ) = await lecture_slide_runtime.acquire_control(
+            session, thread.id, actor=LessonActor(user_id=123)
+        )
+        state = await session.scalar(
+            select(models.LectureSlideThreadState).where(
+                models.LectureSlideThreadState.thread_id == thread.id
+            )
+        )
+        state.last_known_offset_ms = 5_000
+        state.furthest_offset_ms = 7_000
+        await session.flush()
+
+        def change(language_code: str, version: int):
+            return lecture_slide_runtime.process_interaction(
+                session,
+                thread.id,
+                actor=LessonActor(user_id=123),
+                request=schemas.InteractiveLessonLanguageChangedRequest(
+                    type="language_changed",
+                    controller_session_id=controller_session_id,
+                    expected_state_version=version,
+                    idempotency_key=f"language-{language_code}",
+                    language_code=language_code,
+                ),
+            )
+
+        slide_session = await change("es", slide_session.state_version)
+        assert thread.lecture_language_code == "es"
+        assert thread.lecture_slide_translation_id == translation.id
+        assert (state.last_known_offset_ms, state.furthest_offset_ms) == (2_000, 4_000)
+
+        slide_session = await change("original", slide_session.state_version)
+        assert thread.lecture_slide_translation_id is None
+        assert (state.last_known_offset_ms, state.furthest_offset_ms) == (4_000, 7_000)
+
+        with pytest.raises(lecture_slide_runtime.LectureSlideValidationError):
+            await change("fr", slide_session.state_version)
+        assert [
+            interaction.event_type
+            for interaction in await _list_slide_interactions(session, thread.id)
+        ][-2:] == [schemas.InteractiveLessonInteractionEventType.LANGUAGE_CHANGED] * 2

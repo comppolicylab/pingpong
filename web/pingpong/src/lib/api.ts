@@ -2104,13 +2104,19 @@ export type InteractiveLessonEndedRequest = InteractiveLessonInteractionRequestB
 	offset_ms: number;
 };
 
+export type InteractiveLessonLanguageChangedRequest = InteractiveLessonInteractionRequestBase & {
+	type: 'language_changed';
+	language_code: string;
+};
+
 export type InteractiveLessonInteractionRequest =
 	| InteractiveLessonQuestionPresentedRequest
 	| InteractiveLessonAnswerSubmittedRequest
 	| InteractiveLessonResumedRequest
 	| InteractiveLessonPausedRequest
 	| InteractiveLessonSeekedRequest
-	| InteractiveLessonEndedRequest;
+	| InteractiveLessonEndedRequest
+	| InteractiveLessonLanguageChangedRequest;
 
 export type LectureSlidePage = {
 	id: number;
@@ -2874,9 +2880,24 @@ export const lectureSlideNarrationUrl = (
 	return withMediaAuthQuery(base);
 };
 
-export const getLectureSlideCaptionsUrl = (classId: number, threadId: number): string => {
-	const base = fullPath(`class/${classId}/thread/${threadId}/lecture-slides/captions.vtt`);
+export const getLectureSlideCaptionsUrl = (
+	classId: number,
+	threadId: number,
+	languageCode: string
+): string => {
+	const base = fullPath(
+		`class/${classId}/thread/${threadId}/lecture-slides/captions.vtt?lang=${encodeURIComponent(languageCode)}`
+	);
 	return withMediaAuthQuery(base);
+};
+
+export const getLectureSlideThreadLanguages = async (
+	f: Fetcher,
+	classId: number,
+	threadId: number
+) => {
+	const url = `class/${classId}/thread/${threadId}/lecture-slides/languages`;
+	return await GET<never, LectureSlideThreadLanguagesResponse>(f, url);
 };
 
 /**
@@ -4086,6 +4107,11 @@ export type LectureSlideLanguage = {
 export type LectureSlideLanguagesResponse = {
 	languages: LectureSlideLanguage[];
 	can_prepare: boolean;
+};
+
+export type LectureSlideThreadLanguagesResponse = {
+	languages: LectureSlideLanguage[];
+	current_language_code: string;
 };
 
 export type LectureSlideTranslationStatus =

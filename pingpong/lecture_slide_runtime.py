@@ -75,6 +75,54 @@ def usable_lecture_slide_translation(
     return translation
 
 
+def _timeline(pages: Any) -> list[tuple[int, int, int]]:
+    return sorted(
+        (page.position, page.start_offset_ms, page.end_offset_ms)
+        for page in pages
+        if page.start_offset_ms is not None and page.end_offset_ms is not None
+    )
+
+
+def timeline_pages(thread: models.Thread) -> list[tuple[int, int, int]]:
+    translation = usable_lecture_slide_translation(thread)
+    if translation is not None:
+        return _timeline(translation.pages)
+    deck = thread.lecture_slide_deck
+    return _timeline(deck.pages) if deck is not None else []
+
+
+def _page_index(pages: list[tuple[int, int, int]], offset_ms: int) -> int:
+    return next(
+        (index for index, (_, _, end) in enumerate(pages) if offset_ms < end),
+        len(pages) - 1,
+    )
+
+
+def _remap_offset(
+    old_pages: list[tuple[int, int, int]],
+    new_pages: list[tuple[int, int, int]],
+    offset_ms: int,
+) -> int:
+    index = _page_index(old_pages, offset_ms)
+    _, start, end = old_pages[index]
+    _, new_start, new_end = new_pages[index]
+    fraction = (
+        min(max((offset_ms - start) / (end - start), 0.0), 1.0) if end > start else 0.0
+    )
+    return new_start + round(fraction * (new_end - new_start))
+
+
+def to_source_offset(thread: models.Thread, offset_ms: int) -> int:
+    deck = thread.lecture_slide_deck
+    if deck is None or usable_lecture_slide_translation(thread) is None:
+        return offset_ms
+    source_pages = _timeline(deck.pages)
+    translated_pages = timeline_pages(thread)
+    if not source_pages or len(source_pages) != len(translated_pages):
+        return offset_ms
+    return _remap_offset(translated_pages, source_pages, offset_ms)
+
+
 class LectureSlideAdapter:
     state_model: Any = models.LectureSlideThreadState
     interaction_model: Any = models.LectureSlideInteraction
@@ -196,6 +244,64 @@ class LectureSlideAdapter:
 
     def initial_state_fields(self) -> dict[str, Any]:
         return {"last_chat_context_end_ms": 0}
+
+    async def change_language(
+        self,
+        session: AsyncSession,
+        state: interactive_lesson_runtime.LessonState,
+        language_code: str,
+    ) -> None:
+        from pingpong import lecture_threads
+
+        thread = state.thread
+        deck = thread.lecture_slide_deck
+        code = language_code.strip().lower()
+        if deck is None or code == (thread.lecture_language_code or "original"):
+            return
+        translation = None
+        if code != "original":
+            translation = await models.LectureSlideTranslation.get_by_deck_and_language(
+                session, deck.id, code
+            )
+            if translation is None or not await lecture_threads.translation_is_playable(
+                session, deck, translation
+            ):
+                raise LectureSlideValidationError(
+                    "This language is not available for this lesson."
+                )
+        slide_state = cast(models.LectureSlideThreadState, state)
+        old_pages = timeline_pages(thread)
+        thread.lecture_slide_translation = translation
+        thread.lecture_language_code = (
+            translation.language_code if translation else "original"
+        )
+        thread.lecture_language_name = (
+            translation.language_name if translation else "Original"
+        )
+        new_pages = timeline_pages(thread)
+        if not old_pages or len(old_pages) != len(new_pages):
+            raise LectureSlideValidationError(
+                "This language is not available for this lesson."
+            )
+        slide_state.furthest_offset_ms = _remap_offset(
+            old_pages, new_pages, slide_state.furthest_offset_ms or 0
+        )
+        if slide_state.last_chat_context_end_ms is not None:
+            slide_state.last_chat_context_end_ms = _remap_offset(
+                old_pages, new_pages, slide_state.last_chat_context_end_ms
+            )
+        question = interactive_lesson_runtime.get_current_question(
+            thread, state, adapter=self
+        )
+        if question is not None and slide_state.state in {
+            schemas.InteractiveLessonSessionState.AWAITING_ANSWER,
+            schemas.InteractiveLessonSessionState.AWAITING_POST_ANSWER_RESUME,
+        }:
+            slide_state.last_known_offset_ms = question.stop_offset_ms
+        else:
+            slide_state.last_known_offset_ms = new_pages[
+                _page_index(old_pages, slide_state.last_known_offset_ms or 0)
+            ][1]
 
     def to_storage_event(
         self, event_type: schemas.InteractiveLessonInteractionEventType

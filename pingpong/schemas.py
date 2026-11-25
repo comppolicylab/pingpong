@@ -664,6 +664,7 @@ class InteractiveLessonInteractionEventType(StrEnum):
     LESSON_SEEKED = "lesson_seeked"
     LESSON_ENDED = "lesson_ended"
     SESSION_COMPLETED = "session_completed"
+    LANGUAGE_CHANGED = "language_changed"
 
 
 class InteractiveLessonOptionPrompt(BaseModel):
@@ -824,6 +825,11 @@ class InteractiveLessonEndedRequest(InteractiveLessonInteractionRequestBase):
     offset_ms: int = Field(..., ge=0)
 
 
+class InteractiveLessonLanguageChangedRequest(InteractiveLessonInteractionRequestBase):
+    type: Literal["language_changed"]
+    language_code: str = Field(..., min_length=1, max_length=16)
+
+
 InteractiveLessonInteractionRequest: TypeAlias = Annotated[
     Union[
         InteractiveLessonQuestionPresentedRequest,
@@ -832,6 +838,7 @@ InteractiveLessonInteractionRequest: TypeAlias = Annotated[
         InteractiveLessonPausedRequest,
         InteractiveLessonSeekedRequest,
         InteractiveLessonEndedRequest,
+        InteractiveLessonLanguageChangedRequest,
     ],
     Field(discriminator="type"),
 ]
@@ -1613,6 +1620,11 @@ class LectureSlideLanguage(BaseModel):
 class LectureSlideLanguagesResponse(BaseModel):
     languages: list[LectureSlideLanguage]
     can_prepare: bool = False
+
+
+class LectureSlideThreadLanguagesResponse(BaseModel):
+    languages: list[LectureSlideLanguage]
+    current_language_code: str
 
 
 class PrepareLectureSlideTranslationRequest(BaseModel):
