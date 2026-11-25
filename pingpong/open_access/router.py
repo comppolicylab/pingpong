@@ -228,7 +228,11 @@ async def launch(req: GrantRequest, request: StateRequest):
         assistant_id=grant.assistant_id,
         thread_id=thread.id,
     )
-    if previous_session_id is not None and previous_session_id != session_id:
+    if (
+        previous_session_id is not None
+        and previous_session_id != session_id
+        and await store.active_session(settings, principal.id) == session_id
+    ):
         audit("oa.session.takeover", principal_id=principal.id, thread_id=thread.id)
     return await issue_launch_code(settings, principal, thread, session_id)
 
