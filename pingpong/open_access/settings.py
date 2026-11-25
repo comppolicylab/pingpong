@@ -1,4 +1,4 @@
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -32,7 +32,7 @@ class OpenAccessLimits(BaseModel):
 
 
 class OpenAccessPricing(BaseModel):
-    tts_per_thousand_characters: dict[str, float]
+    tts_per_thousand_characters: dict[str, Annotated[float, Field(ge=0)]]
 
     @field_validator("tts_per_thousand_characters")
     @classmethod
