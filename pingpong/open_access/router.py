@@ -394,9 +394,6 @@ async def transfer(req: GrantRequest, request: StateRequest):
         raise OpenAccessError(
             409, "open_access_tier_mismatch", "Principal tier does not match."
         )
-    if not await limits.claim_transfer(settings, source.id, grant.to):
-        audit("oa.transfer.claimed", source_principal_id=source.id)
-        return TransferResponse(thread_moved=False)
     thread = await get_principal_thread(db, source.id, settings.free_assistant_id)
     moved = (
         thread is not None
@@ -426,6 +423,17 @@ async def transfer(req: GrantRequest, request: StateRequest):
         thread.id if moved and thread is not None else None,
         get_now_fn(request)(),
     )
+    for leftover in (
+        await db.scalars(
+            select(models.Thread).where(
+                models.Thread.external_principal_id == source.id
+            )
+        )
+    ).all():
+        await request.state["authz"].write_safe(
+            revoke=await delete_thread(db, leftover)
+        )
+    await db.delete(source)
     audit(
         "oa.transfer",
         source_principal_id=source.id,

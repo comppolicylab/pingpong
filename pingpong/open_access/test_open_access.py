@@ -305,6 +305,12 @@ async def test_transfer_keeps_existing_thread_on_conflict(
         headers=MARKER,
     )
     assert response.json() == {"thread_moved": False}
+    async with db.async_session() as session:
+        assert [
+            principal.subject
+            for principal in await session.scalars(select(models.ExternalPrincipal))
+        ] == ["member1"]
+        assert len((await session.scalars(select(models.Thread))).all()) == 1
 
 
 @pytest.mark.asyncio

@@ -4,7 +4,6 @@ from datetime import datetime
 import pingpong.models as models
 import pingpong.schemas as schemas
 from .errors import OpenAccessError
-from .retention import INACTIVITY
 from .settings import OpenAccessSettings, TierLimits
 from ..audit import audit
 from . import store
@@ -12,7 +11,6 @@ from . import store
 DAY_MS = 24 * 60 * 60 * 1000
 MINUTE_MS = 60 * 1000
 DAILY_KEY_TTL_SECONDS = 2 * 24 * 60 * 60
-TRANSFER_CLAIM_TTL_SECONDS = int(INACTIVITY.total_seconds())
 UNLIMITED = -1
 
 # Returns an error code, or "ok" once the turn is recorded (never on a dry run).
@@ -66,16 +64,6 @@ QUOTA_CODES = frozenset(
         "open_access_capacity",
     }
 )
-
-CLAIM_TRANSFER_SCRIPT = """
-local to = redis.call('HGET', KEYS[1], 'to')
-if not to then
-  redis.call('HSET', KEYS[1], 'to', ARGV[1])
-  redis.call('EXPIRE', KEYS[1], ARGV[2])
-  return 1
-end
-return to == ARGV[1] and 1 or 0
-"""
 
 CREDIT_TOKENS_SCRIPT = """
 if redis.call('HSETNX', KEYS[1], ARGV[1], '1') == 0 then
@@ -272,21 +260,6 @@ async def transfer_usage(
             str(source_id),
             int(tokens or 0),
             DAILY_KEY_TTL_SECONDS,
-        )
-
-
-async def claim_transfer(
-    settings: OpenAccessSettings, source_id: int, target_subject: str
-) -> bool:
-    async with store.redis_client(settings) as redis:
-        return bool(
-            await redis.eval(
-                CLAIM_TRANSFER_SCRIPT,
-                1,
-                store.principal_key(settings, source_id, "transfer"),
-                target_subject,
-                TRANSFER_CLAIM_TTL_SECONDS,
-            )
         )
 
 
