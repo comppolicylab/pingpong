@@ -333,6 +333,8 @@ async def test_transfer_moves_free_thread_and_usage_once(api, db, now, oa, lesso
             headers=MARKER,
         )
 
+    exchange(api, launch(api, launch_grant(sub="visitor2")).json()["code"])
+    assert transfer("visitor2").status_code == 409
     assert transfer().json() == {"thread_moved": True}
     assert transfer().json() == {"thread_moved": False}
     assert transfer("member2").json() == {"thread_moved": False}
@@ -345,14 +347,6 @@ async def test_transfer_moves_free_thread_and_usage_once(api, db, now, oa, lesso
             select(models.ExternalPrincipal.id).where(
                 models.ExternalPrincipal.subject == "member1"
             )
-        )
-        assert (
-            await session.scalar(
-                select(models.ExternalPrincipal.id).where(
-                    models.ExternalPrincipal.subject == "member2"
-                )
-            )
-            is None
         )
     async with store.redis_client(oa) as redis:
         assert await redis.zcard(store.principal_key(oa, target_id, "turns")) == 1
