@@ -4281,6 +4281,19 @@ export const listLectureSlideTranslations = async (
 	return await GET<never, { translations: LectureSlideTranslationStatusResponse[] }>(f, url);
 };
 
+export const prepareLectureSlideTranslations = async (
+	f: Fetcher,
+	classId: number,
+	assistantId: number,
+	languageCodes: string[]
+) => {
+	const url = `class/${classId}/assistant/${assistantId}/lecture-slides/translations/batch`;
+	return await POST<
+		{ language_codes: string[] },
+		{ translations: LectureSlideTranslationStatusResponse[] }
+	>(f, url, { language_codes: languageCodes });
+};
+
 export const prepareLectureSlideTranslation = async (
 	f: Fetcher,
 	classId: number,

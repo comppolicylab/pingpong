@@ -527,6 +527,29 @@ async def test_lecture_slide_editor_can_prepare_translation(
         for item in listed.json()["translations"]
     ] == [("es", "queued")]
 
+    def prepare_batch(codes):
+        return api.post(
+            "/api/v1/class/1/assistant/1/lecture-slides/translations/batch",
+            json={"language_codes": codes},
+            headers={"Authorization": f"Bearer {valid_user_token}"},
+        )
+
+    assert prepare_batch(["fr", "xx"]).status_code == 422
+    batch = prepare_batch(["fr", "es"])
+    assert batch.status_code == 200
+    assert [item["language_code"] for item in batch.json()["translations"]] == [
+        "fr",
+        "es",
+    ]
+    listed = api.get(
+        "/api/v1/class/1/assistant/1/lecture-slides/translations",
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert sorted(item["language_code"] for item in listed.json()["translations"]) == [
+        "es",
+        "fr",
+    ]
+
 
 @pytest.mark.parametrize(
     ("content_type", "format_names", "video_codec"),

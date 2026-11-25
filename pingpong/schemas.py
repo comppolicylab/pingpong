@@ -1631,6 +1631,10 @@ class PrepareLectureSlideTranslationRequest(BaseModel):
     language_code: str = Field(..., min_length=2, max_length=16)
 
 
+class PrepareLectureSlideTranslationsRequest(BaseModel):
+    language_codes: list[str] = Field(..., min_length=1, max_length=50)
+
+
 class LectureSlideTranslationStatusResponse(BaseModel):
     language_code: str
     status: Literal["not_started", "queued", "processing", "ready", "failed"]

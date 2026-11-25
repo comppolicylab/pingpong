@@ -12197,6 +12197,42 @@ async def prepare_lecture_slide_translation(
     req: schemas.PrepareLectureSlideTranslationRequest,
     request: StateRequest,
 ):
+    statuses = await _prepare_lecture_slide_translations(
+        request, class_id, assistant_id, [req.language_code]
+    )
+    return statuses[0]
+
+
+@v1.post(
+    "/class/{class_id}/assistant/{assistant_id}/lecture-slides/translations/batch",
+    dependencies=[
+        Depends(
+            Authz("can_edit", "assistant:{assistant_id}")
+            | Authz("supervisor", "class:{class_id}")
+        ),
+        Depends(ClassNotArchived()),
+    ],
+    response_model=schemas.LectureSlideTranslationStatusesResponse,
+)
+async def prepare_lecture_slide_translations(
+    class_id: str,
+    assistant_id: str,
+    req: schemas.PrepareLectureSlideTranslationsRequest,
+    request: StateRequest,
+):
+    return schemas.LectureSlideTranslationStatusesResponse(
+        translations=await _prepare_lecture_slide_translations(
+            request, class_id, assistant_id, req.language_codes
+        )
+    )
+
+
+async def _prepare_lecture_slide_translations(
+    request: StateRequest,
+    class_id: str,
+    assistant_id: str,
+    language_codes: list[str],
+) -> list[schemas.LectureSlideTranslationStatusResponse]:
     assistant = await lecture_slide_service.get_lecture_slide_assistant_for_class(
         request.state["db"], int(assistant_id), int(class_id)
     )
@@ -12210,38 +12246,46 @@ async def prepare_lecture_slide_translation(
     if deck.status != schemas.LectureSlideDeckStatus.READY:
         raise HTTPException(409, "This lecture slide deck is not ready.")
 
-    normalized_code = req.language_code.strip().lower()
-    if normalized_code == "original":
-        raise HTTPException(400, "The original lesson does not require preparation.")
     narration_model = profile_for(assistant, "narration").model
-    supported_languages = ELEVENLABS_MODEL_LANGUAGES[narration_model]
-    language = next(
-        (item for item in supported_languages if item.code == normalized_code),
-        None,
-    )
-    if language is None:
-        raise HTTPException(
-            422,
-            "The selected language is not supported by the configured ElevenLabs model.",
+    supported_languages = {
+        item.code: item for item in ELEVENLABS_MODEL_LANGUAGES[narration_model]
+    }
+    languages = []
+    for code in dict.fromkeys(code.strip().lower() for code in language_codes):
+        if code == "original":
+            raise HTTPException(
+                400, "The original lesson does not require preparation."
+            )
+        if code not in supported_languages:
+            raise HTTPException(
+                422,
+                "The selected language is not supported by the configured ElevenLabs model.",
+            )
+        languages.append(supported_languages[code])
+    for language in languages:
+        await lecture_slide_processing.queue_lecture_slide_translation(
+            request.state["db"],
+            deck,
+            language_code=language.code,
+            language_name=language.name,
+            openai_model=assistant.model,
         )
-    await lecture_slide_processing.queue_lecture_slide_translation(
-        request.state["db"],
-        deck,
-        language_code=language.code,
-        language_name=language.name,
-        openai_model=assistant.model,
-    )
     await request.state["db"].commit()
-    translation = await models.LectureSlideTranslation.get_by_deck_and_language(
-        request.state["db"], deck.id, language.code
-    )
-    return lecture_slide_processing.lecture_slide_translation_status_response(
-        translation,
-        language_code=language.code,
-        needs_reprocessing=await lecture_slide_processing.translation_needs_feedback(
-            request.state["db"], translation
-        ),
-    )
+    statuses = []
+    for language in languages:
+        translation = await models.LectureSlideTranslation.get_by_deck_and_language(
+            request.state["db"], deck.id, language.code
+        )
+        statuses.append(
+            lecture_slide_processing.lecture_slide_translation_status_response(
+                translation,
+                language_code=language.code,
+                needs_reprocessing=await lecture_slide_processing.translation_needs_feedback(
+                    request.state["db"], translation
+                ),
+            )
+        )
+    return statuses
 
 
 @v1.post(
