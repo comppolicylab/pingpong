@@ -5,8 +5,9 @@ import time
 from collections import defaultdict
 from collections.abc import Awaitable, Callable
 from contextlib import aclosing, asynccontextmanager
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from math import ceil
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from typing import Annotated, Any, Literal, NoReturn, Union, cast
 
 import humanize
@@ -138,6 +139,7 @@ from pingpong.say_transform import (
 from pingpong import audit
 from pingpong.open_access import limits as open_access_limits
 from pingpong.open_access import store as open_access_store
+from pingpong.open_access import usage as open_access_usage
 from pingpong.open_access.router import router as open_access_router
 from pingpong.open_access.errors import OpenAccessError
 from pingpong.open_access.settings import OpenAccessSettings
@@ -4789,6 +4791,35 @@ async def list_class_models(
 async def reset_model_cache():
     await reset_model_catalog_cache()
     return {"status": "ok"}
+
+
+@v1.get(
+    "/admin/open-access/usage",
+    dependencies=[Depends(Authz("admin"))],
+    response_model=open_access_usage.UsageSummary,
+)
+async def open_access_usage_summary(
+    request: StateRequest,
+    start: date,
+    end: date,
+    tz: str = "UTC",
+    granularity: open_access_usage.Granularity = "day",
+):
+    settings = require_open_access_settings()
+    try:
+        zone = ZoneInfo(tz)
+    except (ZoneInfoNotFoundError, ValueError):
+        raise HTTPException(status_code=400, detail="Unknown time zone.")
+    if end < start or (end - start).days > 3 * 366:
+        raise HTTPException(status_code=400, detail="Choose a period of up to 3 years.")
+    return await open_access_usage.summarize(
+        request.state["db"],
+        settings,
+        start,
+        end,
+        zone,
+        granularity,
+    )
 
 
 @v1.websocket(
@@ -10029,6 +10060,9 @@ async def send_message(
                     detail="OpenAI is still processing your last request. We're fetching the latest status...",
                 )
             if open_access_settings is not None:
+                if not open_access_usage.priced(asst.model):
+                    audit.audit("oa.unpriced_model", model=asst.model)
+                    raise open_access_limits.limit_error("open_access_capacity")
                 try:
                     await open_access_limits.reserve_turn(
                         open_access_settings,
@@ -10344,7 +10378,9 @@ async def send_message(
             speech_allowed = (
                 open_access_settings is None
                 or await open_access_limits.speech_available(
-                    open_access_settings, get_now_fn(request)()
+                    open_access_settings,
+                    request.state["open_access"].principal,
+                    get_now_fn(request)(),
                 )
             )
             if (
@@ -10471,7 +10507,10 @@ async def send_message(
                 )
             )
 
-            thread.input_moderation_enabled = bool(asst.input_moderation_enabled)
+            thread.input_moderation_enabled = bool(asst.input_moderation_enabled) or (
+                open_access_settings is not None
+                and open_access_settings.input_moderation
+            )
             run_to_complete = models.Run.for_thread(
                 thread,
                 status=schemas.RunStatus.PENDING,
@@ -10519,7 +10558,7 @@ async def send_message(
             blocked = await _moderate_run_input(request, openai_client, run_to_complete)
             if blocked is not None:
                 return blocked
-            tts_usage = TTSUsage()
+            tts_usage = TTSUsage(tts_model_id if tts_voice_id else None)
             stream = run_response(
                 openai_client,
                 run=run_to_complete,
@@ -10570,6 +10609,11 @@ async def send_message(
                     if open_access_settings is not None
                     else None
                 ),
+                service_tier=(
+                    open_access_settings.service_tier
+                    if open_access_settings is not None
+                    else None
+                ),
                 min_output_index=(
                     await open_access_history_start(
                         request.state["db"],
@@ -10610,6 +10654,8 @@ async def send_message(
             status_code=500,
             detail="We faced an error while sending your message. Please try again later.",
         )
+    if request.state["open_access"] is not None:
+        await request.state["db"].commit()
     return StreamingResponse(stream, media_type="text/event-stream")
 
 
@@ -17868,8 +17914,9 @@ def require_open_access_settings() -> OpenAccessSettings:
 
 
 class TTSUsage:
-    def __init__(self):
+    def __init__(self, model: str | None = None):
         self.characters = 0
+        self.model = model
 
     def add(self, text: str) -> None:
         self.characters += len(text)
@@ -17906,7 +17953,6 @@ async def _stream_open_access_usage(
     tts_usage: TTSUsage,
     nowfn: NowFn,
 ):
-    principal_id = principal.id
     anonymous = principal.tier == schemas.ExternalPrincipalTier.ANONYMOUS
     checked_at = time.monotonic()
     try:
@@ -17919,33 +17965,74 @@ async def _stream_open_access_usage(
             yield chunk
     finally:
         await asyncio.shield(
-            _record_open_access_usage(settings, principal_id, run_id, tts_usage, nowfn)
+            _record_open_access_usage(settings, principal, run_id, tts_usage, nowfn)
         )
 
 
 async def _record_open_access_usage(
     settings: OpenAccessSettings,
-    principal_id: int,
+    principal: models.ExternalPrincipal,
     run_id: int,
     tts_usage: TTSUsage,
     nowfn: NowFn,
 ):
+    principal_id = principal.id
+    openai_cost = speech_cost = 0.0
     try:
         async with config.db.driver.async_session() as session:
             run = await session.get(models.Run, run_id)
-            tokens = int(((run.usage if run else None) or {}).get("total_tokens") or 0)
             if run is not None:
                 run.tts_characters = tts_usage.characters
+                entry = open_access_usage.ledger_row(
+                    run,
+                    principal_id,
+                    principal.tier,
+                    tts_usage.characters,
+                    tts_usage.model,
+                )
+                openai_cost, speech_cost = open_access_usage.cost(
+                    settings,
+                    entry.model,
+                    entry.service_tier,
+                    entry.tts_model,
+                    entry.input_tokens,
+                    entry.cached_input_tokens,
+                    entry.output_tokens,
+                    entry.tts_characters,
+                    nowfn(),
+                )
+                session.add(entry)
                 await session.commit()
+                audit.audit(
+                    "oa.usage",
+                    principal_id=principal_id,
+                    tier=principal.tier,
+                    run_id=run_id,
+                    thread_id=run.thread_id,
+                    assistant_id=run.assistant_id,
+                    model=run.model,
+                    status=entry.status,
+                    metered=entry.metered,
+                    input_tokens=entry.input_tokens,
+                    cached_input_tokens=entry.cached_input_tokens,
+                    output_tokens=entry.output_tokens,
+                    tts_model=entry.tts_model,
+                    tts_characters=entry.tts_characters,
+                    openai_cost=openai_cost,
+                    speech_cost=speech_cost,
+                )
+    except Exception:
+        logger.exception("Failed to record Open Access usage for run %s", run_id)
+    try:
         await open_access_limits.record_usage(
             settings,
             principal_id,
             nowfn(),
-            tokens=tokens,
-            tts_characters=tts_usage.characters,
+            openai_cost=openai_cost,
+            speech_cost=speech_cost,
         )
     except Exception:
-        logger.exception("Failed to record Open Access usage for run %s", run_id)
+        logger.exception("Failed to record Open Access spend for run %s", run_id)
 
 
 async def _stream_lesson_check(stream, run_id: int, attempt_id: int):

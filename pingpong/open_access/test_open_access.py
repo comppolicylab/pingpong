@@ -1,6 +1,7 @@
 import importlib
 import json
 import time
+from datetime import UTC, datetime
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -16,10 +17,16 @@ from pingpong import lesson_checks, models, schemas
 from pingpong.errors import OPEN_ACCESS_TAG, scrub_open_access_event
 from pingpong.now import offset, utcnow
 from pingpong.test_lecture_slide_runtime import _slide_transcript_data
-from pingpong.testutil import with_institution, with_user
+from pingpong.testutil import with_authz, with_institution, with_user
 
 from . import limits, retention, router, store
-from .settings import OpenAccessSettings, TierLimits
+from .settings import (
+    OpenAccessLimits,
+    OpenAccessPricing,
+    OpenAccessSettings,
+    RegisteredLimits,
+    TierLimits,
+)
 from .tokens import GRANT_AUDIENCE, encode_access_token
 
 MARKER = {"X-PingPong-OA": "1"}
@@ -40,6 +47,30 @@ def oa(config, monkeypatch):
         origin="https://learning-ai-with-ai.example.edu",
         assistant_ids=[1, 2],
         free_assistant_id=1,
+        limits=OpenAccessLimits(
+            registered=RegisteredLimits(
+                thread_turns_per_day=50,
+                principal_turns_per_day=150,
+                daily_budget=2,
+                monthly_budget=20,
+            ),
+            anonymous=TierLimits(
+                thread_turns_per_day=20, principal_turns_per_day=20, daily_budget=0.4
+            ),
+            turns_per_minute=6,
+            message_max_characters=1000,
+            reply_max_output_tokens=600,
+            recent_exchanges=10,
+            daily_new_threads=10_000,
+            daily_budget=50,
+            monthly_budget=1000,
+            elevenlabs_budget_percent=50,
+        ),
+        pricing=OpenAccessPricing(
+            tts_per_thousand_characters={
+                model.value: 0.04 for model in schemas.ElevenLabsTTSModel
+            }
+        ),
     )
     monkeypatch.setattr(config, "open_access", settings)
     fake = fakeredis.FakeAsyncRedis(decode_responses=True)
@@ -329,7 +360,7 @@ async def test_transfer_moves_free_thread_and_usage_once(api, db, now, oa, lesso
             store.principal_key(oa, source_id, "turns"), {"t1": limits._ms(today)}
         )
         await redis.set(
-            store.principal_key(oa, source_id, "tokens", limits._day(today)), 50
+            store.principal_key(oa, source_id, "spend", limits._month(today)), 50
         )
 
     def transfer(to="member1"):
@@ -358,7 +389,7 @@ async def test_transfer_moves_free_thread_and_usage_once(api, db, now, oa, lesso
         assert await redis.zcard(store.principal_key(oa, target_id, "turns")) == 1
         assert (
             await redis.get(
-                store.principal_key(oa, target_id, "tokens", limits._day(today))
+                store.principal_key(oa, target_id, "spend", limits._month(today))
             )
             == "50"
         )
@@ -573,7 +604,9 @@ async def test_player_sends_message_without_user(
         yield b'{"type":"done"}\n'
 
     monkeypatch.setattr(server, "run_response", generate)
-    oa.limits.anonymous = TierLimits(thread_turns_per_day=1, principal_turns_per_day=5)
+    oa.limits.anonymous = TierLimits(
+        thread_turns_per_day=1, principal_turns_per_day=5, daily_budget=0.4
+    )
     body, url, headers = await start_player(api, db, authz)
 
     attachment = api.post(
@@ -594,6 +627,12 @@ async def test_player_sends_message_without_user(
     )
     assert sent.status_code == 200, sent.text
     assert calls[0]["store"] is False
+    async with db.async_session() as session:
+        entry = await session.scalar(select(models.OpenAccessUsage))
+    assert (entry.tier, entry.assistant_id) == (
+        schemas.ExternalPrincipalTier.ANONYMOUS,
+        1,
+    )
 
     messages = api.get(f"{url}/messages", headers=headers)
     assert messages.status_code == 200, messages.text
@@ -727,3 +766,118 @@ def test_sentry_scrubs_open_access_requests():
     assert scrubbed["request"] == {"headers": {"User-Agent": "test"}}
     assert scrubbed["exception"]["values"][0]["stacktrace"]["frames"] == [{}]
     assert "breadcrumbs" not in scrubbed
+
+
+@pytest.mark.asyncio
+@with_user(123)
+@with_authz(grants=[("user:123", "admin", "root:0")])
+@with_institution(11, "OA Institution")
+async def test_admin_usage_summary(api, db, oa, lessons, now, valid_user_token):
+    async with db.async_session() as session:
+        visitor = models.ExternalPrincipal(
+            client_id="oa-test",
+            subject="visitor",
+            tier=schemas.ExternalPrincipalTier.ANONYMOUS,
+        )
+        learner = models.ExternalPrincipal(
+            client_id="oa-test",
+            subject="learner",
+            tier=schemas.ExternalPrincipalTier.REGISTERED,
+        )
+        session.add_all([visitor, learner])
+        await session.flush()
+        session.add_all(
+            [
+                models.OpenAccessUsage(
+                    created=now(),
+                    principal_id=visitor.id,
+                    tier=schemas.ExternalPrincipalTier.ANONYMOUS,
+                    assistant_id=1,
+                    model="gpt-4.1-mini",
+                    service_tier="priority",
+                    metered=True,
+                    input_tokens=1_000_000,
+                    cached_input_tokens=0,
+                    output_tokens=500_000,
+                    tts_characters=0,
+                ),
+                models.OpenAccessUsage(
+                    created=now(),
+                    principal_id=learner.id,
+                    tier=schemas.ExternalPrincipalTier.REGISTERED,
+                    assistant_id=2,
+                    model="unpriced",
+                    metered=False,
+                    input_tokens=10,
+                    cached_input_tokens=0,
+                    output_tokens=0,
+                    tts_characters=0,
+                ),
+                models.OpenAccessSignup(created=now()),
+            ]
+        )
+        await session.commit()
+    day = now().date().isoformat()
+    response = api.get(
+        "/api/v1/admin/open-access/usage",
+        params={"start": day, "end": day, "granularity": "month"},
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["periods"] == [now().date().replace(day=1).isoformat()]
+    assert [
+        (row["tier"], row["runs"], row["openai_cost"] > 0) for row in body["rows"]
+    ] == [
+        ("anonymous", 1, True),
+        ("registered", 1, False),
+    ]
+    assert body["signups"][0]["signups"] == 1
+    assert [user["subject"] for user in body["top_users"]] == ["visitor", "learner"]
+    assert [lesson["name"] for lesson in body["lessons"]] == ["Lesson 1", "Lesson 2"]
+
+    async with db.async_session() as session:
+        session.add(
+            models.OpenAccessSignup(created=datetime(2026, 1, 1, 18, 40, tzinfo=UTC))
+        )
+        await session.commit()
+    response = api.get(
+        "/api/v1/admin/open-access/usage",
+        params={
+            "start": "2026-01-02",
+            "end": "2026-01-02",
+            "granularity": "day",
+            "tz": "Asia/Kolkata",
+        },
+        headers={"Authorization": f"Bearer {valid_user_token}"},
+    )
+    assert response.json()["signups"] == [{"period": "2026-01-02", "signups": 1}]
+
+
+@pytest.mark.asyncio
+async def test_budgets(oa, now, monkeypatch):
+    alerts = []
+    monkeypatch.setattr(
+        limits, "audit", lambda event, **fields: alerts.append((event, fields))
+    )
+    principal = models.ExternalPrincipal(
+        id=7, tier=schemas.ExternalPrincipalTier.REGISTERED
+    )
+    oa.limits.daily_budget = 4
+    today = now()
+    await limits.record_usage(oa, 7, today, openai_cost=1.0, speech_cost=0.5)
+    assert await limits.speech_available(oa, principal, today)
+    assert await limits.chat_block(oa, principal, 1, today) is None
+    oa.limits.registered.elevenlabs_budget_percent = 20
+    assert not await limits.speech_available(oa, principal, today)
+    oa.limits.registered.elevenlabs_budget_percent = None
+    await limits.record_usage(oa, 7, today, openai_cost=0, speech_cost=0.6)
+    assert not await limits.speech_available(oa, principal, today)
+    assert (
+        await limits.chat_block(oa, principal, 1, today) == "open_access_daily_budget"
+    )
+    assert [
+        (fields["budget"], fields["period"], fields["percent"])
+        for event, fields in alerts
+        if event == "oa.budget_threshold"
+    ] == [("spend", "daily", 50), ("speech", "daily", 50)]

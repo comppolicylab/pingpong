@@ -4,14 +4,17 @@ from datetime import datetime
 import pingpong.models as models
 import pingpong.schemas as schemas
 from .errors import OpenAccessError
-from .settings import OpenAccessSettings, TierLimits
+from .settings import OpenAccessSettings, RegisteredLimits, TierLimits
 from ..audit import audit
 from . import store
 
 DAY_MS = 24 * 60 * 60 * 1000
 MINUTE_MS = 60 * 1000
 DAILY_KEY_TTL_SECONDS = 2 * 24 * 60 * 60
+MONTHLY_KEY_TTL_SECONDS = 32 * 24 * 60 * 60
 UNLIMITED = -1
+MICRODOLLARS = 1_000_000
+ALERT_PERCENTS = (50, 80, 100)
 
 # Returns an error code, or "ok" once the turn is recorded (never on a dry run).
 TURN_SCRIPT = """
@@ -19,9 +22,13 @@ local now = tonumber(ARGV[1])
 local window = tonumber(ARGV[2])
 redis.call('ZREMRANGEBYSCORE', KEYS[1], '-inf', now - window)
 redis.call('ZREMRANGEBYSCORE', KEYS[2], '-inf', now - window)
-local budget = tonumber(ARGV[7])
-if budget >= 0 and tonumber(redis.call('GET', KEYS[3]) or '0') >= budget then
-  return 'open_access_token_limit'
+local daily = tonumber(ARGV[7])
+if daily >= 0 and tonumber(redis.call('GET', KEYS[3]) or '0') >= daily then
+  return 'open_access_daily_budget'
+end
+local monthly = tonumber(ARGV[9])
+if monthly >= 0 and tonumber(redis.call('GET', KEYS[4]) or '0') >= monthly then
+  return 'open_access_monthly_budget'
 end
 if redis.call('ZCARD', KEYS[2]) >= tonumber(ARGV[4]) then
   return 'open_access_thread_turn_limit'
@@ -41,44 +48,42 @@ return 'ok'
 """
 
 CEILING_SCRIPT = """
-local turns = tonumber(ARGV[1])
-local tokens = tonumber(ARGV[2])
-if tokens >= 0 and tonumber(redis.call('GET', KEYS[2]) or '0') >= tokens then
+if tonumber(redis.call('GET', KEYS[1]) or '0') >= tonumber(ARGV[1]) then
   return 0
 end
-if turns >= 0 and tonumber(redis.call('GET', KEYS[1]) or '0') >= turns then
-  return 0
-end
-if ARGV[4] ~= '1' then
-  redis.call('INCR', KEYS[1])
-  redis.call('EXPIRE', KEYS[1], ARGV[3])
-end
+redis.call('INCR', KEYS[1])
+redis.call('EXPIRE', KEYS[1], ARGV[2])
 return 1
 """
 
 QUOTA_CODES = frozenset(
     {
-        "open_access_token_limit",
+        "open_access_daily_budget",
+        "open_access_monthly_budget",
         "open_access_thread_turn_limit",
         "open_access_turn_limit",
         "open_access_capacity",
     }
 )
 
-CREDIT_TOKENS_SCRIPT = """
+CREDIT_SPEND_SCRIPT = """
 if redis.call('HSETNX', KEYS[1], ARGV[1], '1') == 0 then
   return 0
 end
-redis.call('EXPIRE', KEYS[1], ARGV[3])
-if tonumber(ARGV[2]) > 0 then
-  redis.call('INCRBY', KEYS[2], ARGV[2])
-  redis.call('EXPIRE', KEYS[2], ARGV[3])
+redis.call('EXPIRE', KEYS[1], ARGV[2])
+for i = 2, #KEYS do
+  local amount = tonumber(ARGV[i + 1])
+  if amount > 0 then
+    redis.call('INCRBY', KEYS[i], amount)
+    redis.call('EXPIRE', KEYS[i], ARGV[#KEYS + 2])
+  end
 end
 return 1
 """
 
 MESSAGES = {
-    "open_access_token_limit": "You have reached today's usage limit.",
+    "open_access_daily_budget": "You have reached today's usage limit.",
+    "open_access_monthly_budget": "You have reached this month's usage limit.",
     "open_access_thread_turn_limit": "You have reached today's limit for this lesson.",
     "open_access_turn_limit": "You have reached today's message limit.",
     "open_access_burst_limit": "You're sending messages too quickly.",
@@ -86,12 +91,16 @@ MESSAGES = {
 }
 
 
-def _limit(value: int | None) -> int:
-    return UNLIMITED if value is None else value
-
-
 def _day(now: datetime) -> str:
     return now.strftime("%Y%m%d")
+
+
+def _month(now: datetime) -> str:
+    return now.strftime("%Y%m")
+
+
+def _micro(dollars: float) -> int:
+    return round(dollars * MICRODOLLARS)
 
 
 def _ms(now: datetime) -> int:
@@ -104,11 +113,30 @@ def global_key(settings: OpenAccessSettings, *parts: str) -> str:
 
 def tier_limits(
     settings: OpenAccessSettings, principal: models.ExternalPrincipal
-) -> TierLimits:
+) -> TierLimits | RegisteredLimits:
     return (
         settings.limits.anonymous
         if principal.tier == schemas.ExternalPrincipalTier.ANONYMOUS
         else settings.limits.registered
+    )
+
+
+def _monthly_budget(limits: TierLimits | RegisteredLimits) -> int:
+    return (
+        _micro(limits.monthly_budget)
+        if isinstance(limits, RegisteredLimits)
+        else UNLIMITED
+    )
+
+
+def _spend_keys(
+    settings: OpenAccessSettings, principal_id: int, now: datetime, kind: str
+) -> tuple[str, str, str, str]:
+    return (
+        store.principal_key(settings, principal_id, kind, _day(now)),
+        store.principal_key(settings, principal_id, kind, _month(now)),
+        global_key(settings, _day(now), kind),
+        global_key(settings, _month(now), kind),
     )
 
 
@@ -128,47 +156,34 @@ async def _turn_status(
 ) -> str:
     tier = tier_limits(settings, principal)
     async with store.redis_client(settings) as redis:
-        status = await redis.eval(
+        site_daily, site_monthly = await redis.mget(
+            global_key(settings, _day(now), "spend"),
+            global_key(settings, _month(now), "spend"),
+        )
+        if int(site_daily or 0) >= _micro(settings.limits.daily_budget) or int(
+            site_monthly or 0
+        ) >= _micro(settings.limits.monthly_budget):
+            return "open_access_capacity"
+        daily, monthly = _spend_keys(settings, principal.id, now, "spend")[:2]
+        return await redis.eval(
             TURN_SCRIPT,
-            3,
+            4,
             store.principal_key(settings, principal.id, "turns"),
             store.principal_key(
                 settings, principal.id, "thread", str(thread_id), "turns"
             ),
-            store.principal_key(settings, principal.id, "tokens", _day(now)),
+            daily,
+            monthly,
             _ms(now),
             DAY_MS,
             settings.limits.turns_per_minute,
             tier.thread_turns_per_day,
             tier.principal_turns_per_day,
             member,
-            _limit(settings.limits.principal_daily_tokens),
+            _micro(tier.daily_budget),
             int(dry_run),
+            _monthly_budget(tier),
         )
-        if status != "ok":
-            return status
-        if not await redis.eval(
-            CEILING_SCRIPT,
-            2,
-            global_key(settings, _day(now), "turns"),
-            global_key(settings, _day(now), "tokens"),
-            _limit(settings.limits.daily_turns),
-            _limit(settings.limits.daily_openai_tokens),
-            DAILY_KEY_TTL_SECONDS,
-            int(dry_run),
-        ):
-            if not dry_run:
-                await redis.zrem(
-                    store.principal_key(settings, principal.id, "turns"), member
-                )
-                await redis.zrem(
-                    store.principal_key(
-                        settings, principal.id, "thread", str(thread_id), "turns"
-                    ),
-                    member,
-                )
-            return "open_access_capacity"
-    return "ok"
 
 
 async def reserve_turn(
@@ -199,13 +214,30 @@ async def chat_block(
     return None if status == "ok" else status
 
 
-async def speech_available(settings: OpenAccessSettings, now: datetime) -> bool:
-    budget = settings.limits.daily_tts_characters
-    if budget is None:
-        return True
+async def speech_available(
+    settings: OpenAccessSettings, principal: models.ExternalPrincipal, now: datetime
+) -> bool:
+    tier = tier_limits(settings, principal)
+    site = settings.limits.elevenlabs_budget_percent / 100
+    own = (
+        site
+        if tier.elevenlabs_budget_percent is None
+        else tier.elevenlabs_budget_percent / 100
+    )
+    budgets = (
+        _micro(tier.daily_budget) * own,
+        _monthly_budget(tier) * own,
+        _micro(settings.limits.daily_budget) * site,
+        _micro(settings.limits.monthly_budget) * site,
+    )
     async with store.redis_client(settings) as redis:
-        used = await redis.get(global_key(settings, _day(now), "tts"))
-    return int(used or 0) < budget
+        spent = [
+            await redis.get(key)
+            for key in _spend_keys(settings, principal.id, now, "speech")
+        ]
+    return all(
+        budget < 0 or int(used or 0) < budget for used, budget in zip(spent, budgets)
+    )
 
 
 async def record_usage(
@@ -213,18 +245,44 @@ async def record_usage(
     principal_id: int,
     now: datetime,
     *,
-    tokens: int,
-    tts_characters: int,
+    openai_cost: float,
+    speech_cost: float,
 ) -> None:
+    share = settings.limits.elevenlabs_budget_percent / 100
     async with store.redis_client(settings) as redis:
-        for key, amount in (
-            (store.principal_key(settings, principal_id, "tokens", _day(now)), tokens),
-            (global_key(settings, _day(now), "tokens"), tokens),
-            (global_key(settings, _day(now), "tts"), tts_characters),
+        for kind, amount, scale in (
+            ("spend", _micro(openai_cost + speech_cost), 1),
+            ("speech", _micro(speech_cost), share),
         ):
-            if amount:
-                await redis.incrby(key, amount)
-                await redis.expire(key, DAILY_KEY_TTL_SECONDS)
+            if not amount:
+                continue
+            spent = []
+            for key, ttl in zip(
+                _spend_keys(settings, principal_id, now, kind),
+                (
+                    DAILY_KEY_TTL_SECONDS,
+                    MONTHLY_KEY_TTL_SECONDS,
+                    DAILY_KEY_TTL_SECONDS,
+                    MONTHLY_KEY_TTL_SECONDS,
+                ),
+            ):
+                spent.append(await redis.incrby(key, amount))
+                await redis.expire(key, ttl)
+            for period, total, budget in (
+                ("daily", spent[2], settings.limits.daily_budget),
+                ("monthly", spent[3], settings.limits.monthly_budget),
+            ):
+                limit = _micro(budget) * scale
+                for percent in ALERT_PERCENTS:
+                    if total - amount < limit * percent / 100 <= total:
+                        audit(
+                            "oa.budget_threshold",
+                            budget=kind,
+                            period=period,
+                            percent=percent,
+                            spent=total / MICRODOLLARS,
+                            limit=limit / MICRODOLLARS,
+                        )
 
 
 async def transfer_usage(
@@ -249,17 +307,24 @@ async def transfer_usage(
                 target = store.principal_key(settings, target_id, *parts)
                 await redis.zadd(target, dict(turns))
                 await redis.pexpire(target, DAY_MS)
-        tokens = await redis.get(
-            store.principal_key(settings, source_id, "tokens", _day(now))
-        )
+        sources = [
+            *_spend_keys(settings, source_id, now, "spend")[:2],
+            *_spend_keys(settings, source_id, now, "speech")[:2],
+        ]
+        targets = [
+            *_spend_keys(settings, target_id, now, "spend")[:2],
+            *_spend_keys(settings, target_id, now, "speech")[:2],
+        ]
+        amounts = await redis.mget(sources)
         await redis.eval(
-            CREDIT_TOKENS_SCRIPT,
-            2,
+            CREDIT_SPEND_SCRIPT,
+            1 + len(targets),
             store.principal_key(settings, target_id, "credited"),
-            store.principal_key(settings, target_id, "tokens", _day(now)),
+            *targets,
             str(source_id),
-            int(tokens or 0),
-            DAILY_KEY_TTL_SECONDS,
+            MONTHLY_KEY_TTL_SECONDS,
+            *(int(amount or 0) for amount in amounts),
+            MONTHLY_KEY_TTL_SECONDS,
         )
 
 
@@ -267,13 +332,10 @@ async def reserve_new_thread(settings: OpenAccessSettings, now: datetime) -> Non
     async with store.redis_client(settings) as redis:
         allowed = await redis.eval(
             CEILING_SCRIPT,
-            2,
+            1,
             global_key(settings, _day(now), "threads"),
-            global_key(settings, _day(now), "tokens"),
-            _limit(settings.limits.daily_new_threads),
-            UNLIMITED,
+            settings.limits.daily_new_threads,
             DAILY_KEY_TTL_SECONDS,
-            0,
         )
     if not allowed:
         audit("oa.limit_hit", error_code="open_access_thread_capacity")

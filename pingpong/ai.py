@@ -3818,6 +3818,8 @@ class BufferedResponseStreamHandler:
         cleanup_kwargs: dict[str, Any] = {}
         if (usage := getattr(data.response, "usage", None)) is not None:
             cleanup_kwargs["response_usage"] = _openai_model_to_json(usage)
+            if service_tier := getattr(data.response, "service_tier", None):
+                cleanup_kwargs["response_usage"]["service_tier"] = service_tier
         if data.response.moderation is not None:
             cleanup_kwargs["response_moderation"] = _openai_model_to_json(
                 data.response.moderation
@@ -3994,6 +3996,7 @@ async def run_response(
     min_output_index: int | None = None,
     on_tts_text: Callable[[str], None] | None = None,
     store: bool = True,
+    service_tier: Literal["default", "flex", "priority"] | None = None,
 ):
     is_canceled = False
     await config.authz.driver.init()
@@ -4295,7 +4298,8 @@ async def run_response(
                     service_tier=(
                         openai.omit
                         if isinstance(cli, openai.AsyncAzureOpenAI)
-                        else (
+                        else service_tier
+                        or (
                             "priority"
                             if interaction_mode
                             in {

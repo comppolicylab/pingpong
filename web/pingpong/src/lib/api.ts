@@ -3044,6 +3044,55 @@ export const resetModelCache = async (f: Fetcher) => {
 	return await POST<never, GenericStatus>(f, 'admin/model-cache/reset');
 };
 
+export type OpenAccessGranularity = 'day' | 'week' | 'month';
+
+export type OpenAccessUsageRow = {
+	period: string;
+	tier: 'anonymous' | 'registered';
+	assistant_id: number | null;
+	runs: number;
+	input_tokens: number;
+	cached_input_tokens: number;
+	output_tokens: number;
+	tts_characters: number;
+	openai_cost: number;
+	speech_cost: number;
+};
+
+export type OpenAccessUsageSummary = {
+	start: string;
+	end: string;
+	granularity: OpenAccessGranularity;
+	periods: string[];
+	lessons: { assistant_id: number; number: number; name: string | null }[];
+	rows: OpenAccessUsageRow[];
+	signups: { period: string; signups: number }[];
+	top_users: {
+		subject: string;
+		tier: OpenAccessUsageRow['tier'];
+		runs: number;
+		input_tokens: number;
+		output_tokens: number;
+		tts_characters: number;
+		openai_cost: number;
+		speech_cost: number;
+		last_active: string;
+	}[];
+	limits: {
+		daily_budget: number;
+		monthly_budget: number;
+		paused: boolean;
+		anonymous_paused: boolean;
+	};
+};
+
+export const getOpenAccessUsage = async (
+	f: Fetcher,
+	params: { start: string; end: string; tz: string; granularity: OpenAccessGranularity }
+) => {
+	return await GET<typeof params, OpenAccessUsageSummary>(f, 'admin/open-access/usage', params);
+};
+
 /**
  * Load defaults and capabilities used by the lecture lesson assistant editor.
  */
