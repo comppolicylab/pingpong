@@ -17800,24 +17800,34 @@ async def _stream_open_access_usage(
                     return
             yield chunk
     finally:
-        try:
-            async with config.db.driver.async_session() as session:
-                run = await session.get(models.Run, run_id)
-                tokens = int(
-                    ((run.usage if run else None) or {}).get("total_tokens") or 0
-                )
-                if run is not None:
-                    run.tts_characters = tts_usage.characters
-                    await session.commit()
-            await open_access_limits.record_usage(
-                settings,
-                principal_id,
-                nowfn(),
-                tokens=tokens,
-                tts_characters=tts_usage.characters,
-            )
-        except Exception:
-            logger.exception("Failed to record Open Access usage for run %s", run_id)
+        await asyncio.shield(
+            _record_open_access_usage(settings, principal_id, run_id, tts_usage, nowfn)
+        )
+
+
+async def _record_open_access_usage(
+    settings: OpenAccessSettings,
+    principal_id: int,
+    run_id: int,
+    tts_usage: TTSUsage,
+    nowfn: NowFn,
+):
+    try:
+        async with config.db.driver.async_session() as session:
+            run = await session.get(models.Run, run_id)
+            tokens = int(((run.usage if run else None) or {}).get("total_tokens") or 0)
+            if run is not None:
+                run.tts_characters = tts_usage.characters
+                await session.commit()
+        await open_access_limits.record_usage(
+            settings,
+            principal_id,
+            nowfn(),
+            tokens=tokens,
+            tts_characters=tts_usage.characters,
+        )
+    except Exception:
+        logger.exception("Failed to record Open Access usage for run %s", run_id)
 
 
 async def _stream_lesson_check(stream, run_id: int, attempt_id: int):
