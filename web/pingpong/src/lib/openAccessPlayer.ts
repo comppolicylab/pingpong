@@ -1,6 +1,7 @@
 import * as api from '$lib/api';
 import {
 	getOpenAccessSession,
+	isFatalOpenAccessError,
 	onOpenAccessError,
 	setOpenAccessSession,
 	type OpenAccessSession
@@ -40,8 +41,9 @@ export const startOpenAccessPlayer = async (
 	};
 
 	const fail = (code: string) => {
-		clearTimeout(renewTimer);
 		post('error', { errorCode: code });
+		if (!isFatalOpenAccessError(code)) return;
+		clearTimeout(renewTimer);
 		onError(code);
 	};
 

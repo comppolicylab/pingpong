@@ -6,6 +6,20 @@ export const OPEN_ACCESS_TOKEN_HEADER = 'X-PingPong-OA-Token';
 
 const STORAGE_KEY = 'pingpong_oa_session';
 
+const FATAL_CODES = new Set([
+	'open_access_code_invalid',
+	'open_access_code_missing',
+	'open_access_disabled',
+	'open_access_lesson_unavailable',
+	'open_access_paused',
+	'open_access_route_forbidden',
+	'open_access_token_invalid',
+	'open_access_unavailable',
+	'session_displaced'
+]);
+
+export const isFatalOpenAccessError = (errorCode: string) => FATAL_CODES.has(errorCode);
+
 export type OpenAccessSession = {
 	accessToken: string;
 	expiresAt: number;
