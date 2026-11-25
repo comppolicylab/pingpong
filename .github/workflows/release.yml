@@ -113,7 +113,7 @@ jobs:
           aws-region: ${{ vars.AWS_REGION }}
 
       - name: Login to Amazon ECR
-        uses: aws-actions/amazon-ecr-login@03f1aad4c6c7ffd436567f42f9384779290529bd
+        uses: aws-actions/amazon-ecr-login@7290e214a610b32bc0eef81748948b6d466a8783
         with:
           registries: "654654251079"
 
@@ -330,7 +330,7 @@ jobs:
             $SLACK_WEBHOOK
 
       - name: Create Sentry release
-        uses: getsentry/action-release@e6703d0b00208e0b3687ba660d18ab5af7892821
+        uses: getsentry/action-release@2e505a70ff06dac263413242aa3617fec90134e5
         env:
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
           SENTRY_ORG: ${{ vars.SENTRY_ORG }}
