@@ -340,11 +340,11 @@
 					</div>
 					{#if isToday}
 						<div class="text-sm text-gray-700">
-							of {dollars.format(usage.limits.daily_budget)} daily
+							of {dollars.format(usage.limits.daily_budget)} daily · resets 00:00 UTC
 						</div>
 					{:else if isThisMonth}
 						<div class="text-sm text-gray-700">
-							of {dollars.format(usage.limits.monthly_budget)} monthly
+							of {dollars.format(usage.limits.monthly_budget)} monthly · resets 00:00 UTC
 						</div>
 					{/if}
 				</div>
