@@ -76,12 +76,12 @@
 	}
 
 	async function loadStatuses(current: number) {
-		stopPolling();
 		const expanded = await api
 			.listLectureSlideTranslations(fetch, classId, assistantId)
 			.then(api.expandResponse)
 			.catch(() => null);
 		if (current !== generation) return;
+		stopPolling();
 		if (expanded && !expanded.error) setStatuses(expanded.data.translations);
 		if (!expanded || expanded.error || Object.keys(statuses).some(isPreparing)) {
 			pollTimer = setTimeout(() => void loadStatuses(current), POLL_MS);
