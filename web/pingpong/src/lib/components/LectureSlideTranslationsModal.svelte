@@ -25,10 +25,12 @@
 	let languages: api.LectureSlideLanguage[] = $state([]);
 	let canPrepare = $state(false);
 	let loaded = $state(false);
+	let loadFailed = $state(false);
 	let statuses: Record<string, api.LectureSlideTranslationStatusResponse> = $state({});
 	let selected: string[] = $state([]);
 	let preparing = $state(false);
 	let pollTimer: ReturnType<typeof setTimeout> | null = null;
+	let generation = 0;
 
 	const translatable = $derived(languages.filter((language) => language.code !== 'original'));
 
@@ -64,61 +66,71 @@
 		pollTimer = null;
 	}
 
-	async function loadStatuses() {
+	function setStatuses(translations: api.LectureSlideTranslationStatusResponse[]) {
+		statuses = {
+			...statuses,
+			...Object.fromEntries(
+				translations.map((translation) => [translation.language_code, translation])
+			)
+		};
+	}
+
+	async function loadStatuses(current: number) {
 		stopPolling();
-		const expanded = api.expandResponse(
-			await api.listLectureSlideTranslations(fetch, classId, assistantId)
-		);
-		if (expanded.error || !open) return;
-		statuses = Object.fromEntries(
-			expanded.data.translations.map((translation) => [translation.language_code, translation])
-		);
-		if (Object.keys(statuses).some(isPreparing)) {
-			pollTimer = setTimeout(() => void loadStatuses(), POLL_MS);
+		const expanded = await api
+			.listLectureSlideTranslations(fetch, classId, assistantId)
+			.then(api.expandResponse)
+			.catch(() => null);
+		if (current !== generation) return;
+		if (expanded && !expanded.error) setStatuses(expanded.data.translations);
+		if (!expanded || expanded.error || Object.keys(statuses).some(isPreparing)) {
+			pollTimer = setTimeout(() => void loadStatuses(current), POLL_MS);
 		}
 	}
 
-	async function load() {
+	async function load(current: number) {
 		loaded = false;
-		const expanded = api.expandResponse(
-			await api.getLectureSlideLanguages(fetch, classId, assistantId)
-		);
-		if (!expanded.error) {
+		loadFailed = false;
+		statuses = {};
+		const expanded = await api
+			.getLectureSlideLanguages(fetch, classId, assistantId)
+			.then(api.expandResponse)
+			.catch(() => null);
+		if (current !== generation) return;
+		if (!expanded || expanded.error) {
+			loadFailed = true;
+		} else {
 			languages = expanded.data.languages;
 			canPrepare = expanded.data.can_prepare;
-			if (canPrepare && deckReady) await loadStatuses();
+			if (canPrepare && deckReady) await loadStatuses(current);
 		}
-		loaded = true;
+		if (current === generation) loaded = true;
 	}
 
 	async function prepareSelected() {
+		const current = generation;
 		preparing = true;
-		const failures: string[] = [];
 		try {
-			for (const code of selected) {
-				const expanded = api.expandResponse(
-					await api.prepareLectureSlideTranslation(fetch, classId, assistantId, code)
-				);
-				if (expanded.error) {
-					const name = languages.find((language) => language.code === code)?.name ?? code;
-					failures.push(`${name}: ${expanded.error.detail || 'Unknown error'}`);
-				} else {
-					statuses = { ...statuses, [code]: expanded.data };
-				}
+			const expanded = api.expandResponse(
+				await api.prepareLectureSlideTranslations(fetch, classId, assistantId, selected)
+			);
+			if (current !== generation) return;
+			if (expanded.error) {
+				sadToast(`Could not prepare translations: ${expanded.error.detail || 'Unknown error'}`);
+				return;
 			}
+			setStatuses(expanded.data.translations);
 			selected = [];
 		} finally {
 			preparing = false;
 		}
-		if (failures.length > 0) {
-			sadToast(`Could not prepare some translations:\n${failures.join('\n')}`);
-		}
-		await loadStatuses();
+		await loadStatuses(current);
 	}
 
 	$effect(() => {
+		const current = ++generation;
 		if (open) {
-			void load();
+			void load(current);
 		} else {
 			stopPolling();
 			selected = [];
@@ -135,6 +147,8 @@
 	</p>
 	{#if !loaded}
 		<p class="text-sm text-gray-500">Loading…</p>
+	{:else if loadFailed}
+		<p class="text-sm text-gray-600">Couldn't load translations. Try again.</p>
 	{:else if !deckReady}
 		<p class="text-sm text-gray-600">You can prepare translations once the lesson is ready.</p>
 	{:else if !canPrepare}
