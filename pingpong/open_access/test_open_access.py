@@ -18,7 +18,7 @@ from pingpong.now import offset, utcnow
 from pingpong.test_lecture_slide_runtime import _slide_transcript_data
 from pingpong.testutil import with_institution, with_user
 
-from . import limits, retention, store
+from . import limits, retention, router, store
 from .settings import OpenAccessSettings, TierLimits
 from .tokens import GRANT_AUDIENCE, encode_access_token
 
@@ -274,6 +274,37 @@ async def test_launch_replaces_thread_after_lesson_update(api, db, oa, lessons):
     assert second["thread_id"] != first["thread_id"]
     async with db.async_session() as session:
         assert await session.get(models.Thread, first["thread_id"]) is None
+
+
+@pytest.mark.asyncio
+@with_institution(11, "OA Institution")
+async def test_transfer_keeps_existing_thread_on_conflict(
+    api, db, oa, lessons, monkeypatch
+):
+    exchange(api, launch(api, launch_grant()).json()["code"])
+    exchange(
+        api, launch(api, launch_grant(sub="member1", tier="registered")).json()["code"]
+    )
+    async with db.async_session() as session:
+        target_id = await session.scalar(
+            select(models.ExternalPrincipal.id).where(
+                models.ExternalPrincipal.subject == "member1"
+            )
+        )
+    lookup = router.get_principal_thread
+
+    async def missing_target(db, principal_id, assistant_id):
+        if principal_id == target_id:
+            return None
+        return await lookup(db, principal_id, assistant_id)
+
+    monkeypatch.setattr(router, "get_principal_thread", missing_target)
+    response = api.post(
+        "/api/v1/oa/transfer",
+        json={"grant": grant(typ="transfer", sub="visitor1", to="member1")},
+        headers=MARKER,
+    )
+    assert response.json() == {"thread_moved": False}
 
 
 @pytest.mark.asyncio

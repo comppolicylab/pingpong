@@ -1,5 +1,8 @@
+import logging
+
 import uuid_utils as uuid
 from fastapi import APIRouter, Request, Response
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
@@ -11,6 +14,8 @@ from .. import interactive_lesson_runtime, lecture_threads
 from ..audit import audit
 from ..session import get_now_fn
 from ..state_types import StateRequest
+from ..stream_utils import prefetch_stream
+from ..video_store import VideoStoreError
 from . import limits, store
 from ..config import config
 from .access import ensure_lesson_access
@@ -28,6 +33,8 @@ from .tokens import (
     encode_access_token,
     verify_grant,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -378,15 +385,20 @@ async def transfer(req: GrantRequest, request: StateRequest):
     )
     if moved:
         assert thread is not None
-        thread.external_principal_id = target.id
-        await db.execute(
-            update(models.AnonymousSession)
-            .where(
-                models.AnonymousSession.thread_id == thread.id,
-                models.AnonymousSession.external_principal_id == source.id,
-            )
-            .values(external_principal_id=target.id)
-        )
+        try:
+            async with db.begin_nested():
+                thread.external_principal_id = target.id
+                await db.execute(
+                    update(models.AnonymousSession)
+                    .where(
+                        models.AnonymousSession.thread_id == thread.id,
+                        models.AnonymousSession.external_principal_id == source.id,
+                    )
+                    .values(external_principal_id=target.id)
+                )
+        except IntegrityError:
+            await db.refresh(thread)
+            moved = False
     await limits.transfer_usage(
         settings,
         source.id,
@@ -455,12 +467,16 @@ async def thumbnail(req: GrantRequest, request: StateRequest) -> Response:
         raise OpenAccessError(
             404, "open_access_thumbnail_unavailable", "No thumbnail for this lesson."
         )
-    content = b"".join(
-        [
-            chunk
-            async for chunk in config.video_store.store.stream_video_range(
-                key=image.key
-            )
-        ]
-    )
-    return Response(content, media_type=image.content_type)
+    try:
+        stream = await prefetch_stream(
+            config.video_store.store.stream_video_range(key=image.key),
+            store_error=VideoStoreError,
+            logger=logger,
+            store_error_log="VideoStoreError while streaming an open access thumbnail",
+            unexpected_error_log="Unexpected error while streaming an open access thumbnail",
+        )
+    except VideoStoreError as exc:
+        raise OpenAccessError(
+            404, "open_access_thumbnail_unavailable", "No thumbnail for this lesson."
+        ) from exc
+    return StreamingResponse(stream, media_type=image.content_type)
