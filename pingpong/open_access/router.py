@@ -65,6 +65,7 @@ class CatalogueLesson(BaseModel):
     assistant_id: int
     name: str | None
     free: bool
+    thumbnail_version: int
 
 
 class TransferResponse(BaseModel):
@@ -351,6 +352,7 @@ async def catalogue(req: GrantRequest, request: StateRequest):
                 assistant_id=assistant.id,
                 name=assistant.name,
                 free=assistant.id == settings.free_assistant_id,
+                thumbnail_version=assistant.lecture_slide_deck_id,
             )
         )
     return CatalogueResponse(lessons=lessons)

@@ -380,7 +380,12 @@ async def test_expired_or_missing_token_rejected_with_valid_login(
 
 @pytest.mark.asyncio
 @with_institution(11, "OA Institution")
-async def test_catalogue_lists_configured_lessons(api, oa, lessons):
+async def test_catalogue_lists_configured_lessons(api, db, oa, lessons):
+    async with db.async_session() as session:
+        decks = [
+            (await session.get(models.Assistant, i)).lecture_slide_deck_id
+            for i in (1, 2)
+        ]
     response = api.post(
         "/api/v1/oa/catalogue",
         json={"grant": grant(typ="catalogue")},
@@ -392,11 +397,13 @@ async def test_catalogue_lists_configured_lessons(api, oa, lessons):
             "assistant_id": 1,
             "name": "Lesson 1",
             "free": True,
+            "thumbnail_version": decks[0],
         },
         {
             "assistant_id": 2,
             "name": "Lesson 2",
             "free": False,
+            "thumbnail_version": decks[1],
         },
     ]
 
