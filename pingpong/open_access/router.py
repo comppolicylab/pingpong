@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 import pingpong.models as models
 import pingpong.schemas as schemas
 from .. import interactive_lesson_runtime, lecture_threads
+from ..audit import audit
 from ..session import get_now_fn
 from ..state_types import StateRequest
 from . import limits, store
@@ -218,7 +219,21 @@ async def launch(req: GrantRequest, request: StateRequest):
         )
     await ensure_lesson_access(settings, principal, grant.assistant_id)
     thread = await find_or_create_principal_thread(settings, request, principal, grant)
+    previous_session_id = await store.active_session(settings, principal.id)
     session_id = await store.start_session(settings, principal.id, grant.launch_id)
+    audit(
+        "oa.session.start",
+        principal_id=principal.id,
+        tier=principal.tier,
+        assistant_id=grant.assistant_id,
+        thread_id=thread.id,
+    )
+    if (
+        previous_session_id is not None
+        and previous_session_id != session_id
+        and await store.active_session(settings, principal.id) == session_id
+    ):
+        audit("oa.session.takeover", principal_id=principal.id, thread_id=thread.id)
     return await issue_launch_code(settings, principal, thread, session_id)
 
 
@@ -243,6 +258,7 @@ async def renew(req: GrantRequest, request: StateRequest):
     await ensure_lesson_access(settings, principal, grant.assistant_id)
     if not await store.extend_session(settings, principal.id, grant.sid):
         raise session_displaced()
+    audit("oa.session.renew", principal_id=principal.id, thread_id=thread.id)
     return await issue_launch_code(settings, principal, thread, grant.sid)
 
 
@@ -275,6 +291,7 @@ async def exchange(req: ExchangeRequest, request: StateRequest, response: Respon
         settings, principal.id, launch_code.session_id
     ):
         raise session_displaced()
+    audit("oa.token.issue", principal_id=principal.id, thread_id=launch_code.thread_id)
     access_token = encode_access_token(
         settings,
         principal_id=principal.id,

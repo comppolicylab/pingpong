@@ -15,7 +15,6 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from pingpong.artifacts import LocalArtifactStore, S3ArtifactStore
 from pingpong.audio_store import LocalAudioStore, S3AudioStore
 from pingpong.video_store import LocalVideoStore, S3VideoStore
-from pingpong.log_filters import IgnoreHealthEndpoint
 from .authz import OpenFgaAuthzDriver
 from .login_exchange.settings import LoginExchangeSettings
 from .open_access.settings import OpenAccessSettings
@@ -843,7 +842,9 @@ logging.getLogger("urllib3").setLevel(logging.WARNING)
 logging.getLogger("azure.core.pipeline.policies.http_logging_policy").setLevel(
     logging.WARNING
 )
-logging.getLogger("uvicorn.access").addFilter(IgnoreHealthEndpoint())
+logging.getLogger("uvicorn.access").disabled = True
+logging.getLogger("pingpong.access").setLevel(logging.INFO)
+logging.getLogger("pingpong.audit").setLevel(logging.INFO)
 logging.getLogger("realtime_browser").setLevel(
     config.realtime_log_level or config.log_level
 )

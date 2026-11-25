@@ -5,6 +5,7 @@ import pingpong.models as models
 import pingpong.schemas as schemas
 from .errors import OpenAccessError
 from .settings import OpenAccessSettings, TierLimits
+from ..audit import audit
 from . import store
 
 DAY_MS = 24 * 60 * 60 * 1000
@@ -91,6 +92,7 @@ def tier_limits(
 
 
 def limit_error(error_code: str) -> OpenAccessError:
+    audit("oa.limit_hit", error_code=error_code)
     return OpenAccessError(429, error_code, MESSAGES[error_code])
 
 
@@ -217,6 +219,7 @@ async def reserve_new_thread(settings: OpenAccessSettings, now: datetime) -> Non
             0,
         )
     if not allowed:
+        audit("oa.limit_hit", error_code="open_access_thread_capacity")
         raise OpenAccessError(
             503, "open_access_capacity", "New lessons are unavailable right now."
         )
@@ -248,3 +251,4 @@ async def set_paused(
             await redis.set(key, "1")
         else:
             await redis.delete(key)
+    audit("oa.kill_switch", paused=paused, anonymous_only=anonymous_only)

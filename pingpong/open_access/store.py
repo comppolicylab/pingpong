@@ -90,11 +90,15 @@ async def start_session(
         )
 
 
+async def active_session(settings: OpenAccessSettings, principal_id: int) -> str | None:
+    async with redis_client(settings) as redis:
+        return await redis.get(_active_key(settings, principal_id))
+
+
 async def is_active_session(
     settings: OpenAccessSettings, principal_id: int, session_id: str
 ) -> bool:
-    async with redis_client(settings) as redis:
-        active = await redis.get(_active_key(settings, principal_id))
+    active = await active_session(settings, principal_id)
     return active is not None and secrets.compare_digest(active, session_id)
 
 

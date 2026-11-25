@@ -135,6 +135,7 @@ from pingpong.say_transform import (
     combine_manual_tts_pronunciation_text,
     transform_say_text,
 )
+from pingpong import audit
 from pingpong.open_access import limits as open_access_limits
 from pingpong.open_access import store as open_access_store
 from pingpong.open_access.router import router as open_access_router
@@ -970,9 +971,10 @@ async def get_thread_for_interaction(
 
 
 if config.development:
-    v1 = FastAPI()
+    v1 = FastAPI(dependencies=[Depends(audit.check_elevated_access)])
 else:
     v1 = FastAPI(
+        dependencies=[Depends(audit.check_elevated_access)],
         openapi_url=None,
         docs_url=None,
         redoc_url=None,
@@ -1139,6 +1141,13 @@ FileClient = Annotated[OpenAIClientType, bound_openai_client_dependency(get_boun
 
 
 @v1.middleware("http")
+async def audit_elevated_access(request: StateRequest, call_next):
+    response = await call_next(request)
+    audit.record_elevated_access(request, response.status_code)
+    return response
+
+
+@v1.middleware("http")
 async def parse_session_token(request: StateRequest, call_next):
     """Parse the session token from the cookie and add it to the request state."""
     try:
@@ -1196,6 +1205,7 @@ async def log_request(request: StateRequest, call_next):
     metrics.in_flight.inc(app=config.public_url)
     start_time = time.monotonic()
     result = None
+    audit_token = audit.bind_request(request)
     try:
         result = await call_next(request)
         return result
@@ -1216,14 +1226,11 @@ async def log_request(request: StateRequest, call_next):
             method=request.method,
             status=status,
         )
-        if config.development:
-            logger.debug(
-                "Request %s %s %s %s",
-                request.method,
-                request.url.path,
-                status,
-                duration,
-            )
+        try:
+            audit.access(request, request.method, status, round(duration * 1000))
+            audit.route_event(request, status)
+        finally:
+            audit.unbind_request(audit_token)
 
 
 @v1.get("/config", dependencies=[Depends(Authz("admin"))])
@@ -1316,6 +1323,7 @@ async def list_all_user_permissions(request: StateRequest, user_id: str):
 )
 async def manage_authz(data: schemas.ManageAuthzRequest, request: StateRequest):
     await request.state["authz"].write(grant=data.grant, revoke=data.revoke)
+    audit.audit("authz.change", grant=data.grant, revoke=data.revoke)
     return {"status": "ok"}
 
 

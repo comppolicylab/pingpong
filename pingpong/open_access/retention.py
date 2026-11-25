@@ -1,14 +1,12 @@
-import logging
 from datetime import datetime, timedelta
 
 from sqlalchemy import delete, exists, select
 
 import pingpong.models as models
+from ..audit import audit
 from ..config import config
 from ..now import utcnow
 from .threads import delete_thread
-
-logger = logging.getLogger(__name__)
 
 INACTIVITY = timedelta(days=30)
 BATCH_SIZE = 100
@@ -35,13 +33,12 @@ async def purge_inactive(now: datetime | None = None) -> tuple[int, int]:
                 revokes = []
                 for thread in threads:
                     revokes += await delete_thread(session, thread)
-                    logger.info(
-                        "Open Access retention deleted thread %s (principal %s, "
-                        "class %s, last activity %s)",
-                        thread.id,
-                        thread.external_principal_id,
-                        thread.class_id,
-                        thread.last_activity.isoformat(),
+                    audit(
+                        "oa.retention.thread_delete",
+                        thread_id=thread.id,
+                        principal_id=thread.external_principal_id,
+                        class_id=thread.class_id,
+                        last_activity=thread.last_activity.isoformat(),
                     )
                 await session.commit()
             await authz.write_safe(revoke=revokes)
@@ -63,11 +60,11 @@ async def purge_inactive(now: datetime | None = None) -> tuple[int, int]:
         ).all()
         await session.commit()
     for principal_id in principal_ids:
-        logger.info("Open Access retention deleted principal %s", principal_id)
+        audit("oa.retention.principal_delete", principal_id=principal_id)
     principals_deleted = len(principal_ids)
-    logger.info(
-        "Open Access retention deleted %s threads and %s principals",
-        threads_deleted,
-        principals_deleted,
+    audit(
+        "oa.retention.run",
+        threads_deleted=threads_deleted,
+        principals_deleted=principals_deleted,
     )
     return threads_deleted, principals_deleted

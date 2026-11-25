@@ -9,6 +9,7 @@ from jwt.exceptions import PyJWTError
 from .config import config, AuthnSettings
 from .now import NowFn, utcnow
 from .schemas import AuthToken, SessionToken
+from .audit import audit
 
 
 STREAMED_MESSAGE_IMAGE_PROOF_PURPOSE = "streamed_message_image"
@@ -28,6 +29,7 @@ def encode_session_token(
     Returns:
         str: Encoded session token JWT
     """
+    audit("auth.session.issue", subject_user_id=user_id, expires_in=expiry)
     return encode_auth_token(str(user_id), expiry, nowfn=nowfn)
 
 

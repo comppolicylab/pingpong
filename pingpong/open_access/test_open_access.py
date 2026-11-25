@@ -1,4 +1,5 @@
 import importlib
+import json
 import time
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
@@ -564,8 +565,20 @@ async def test_retention_purges_inactive_threads_and_principals(
         assert await session.get(models.Thread, body["thread_id"]) is None
         assert await session.scalar(select(models.ExternalPrincipal)) is None
     assert await authz.get_all_calls() == [("revoke", *t) for t in tuples]
-    assert f"deleted thread {body['thread_id']} (principal 1," in caplog.text
-    assert "deleted principal 1" in caplog.text
+    events = [
+        json.loads(record.getMessage())
+        for record in caplog.records
+        if record.name == "pingpong.audit" and "retention" in record.getMessage()
+    ]
+    assert [
+        (event["audit"], event.get("thread_id"), event.get("principal_id"))
+        for event in events
+    ] == [
+        ("oa.retention.run", None, None),
+        ("oa.retention.thread_delete", body["thread_id"], 1),
+        ("oa.retention.principal_delete", None, 1),
+        ("oa.retention.run", None, None),
+    ]
 
 
 def test_sentry_scrubs_open_access_requests():
