@@ -1325,6 +1325,7 @@ async def list_all_user_permissions(request: StateRequest, user_id: str):
 )
 async def manage_authz(data: schemas.ManageAuthzRequest, request: StateRequest):
     await request.state["authz"].write(grant=data.grant, revoke=data.revoke)
+    audit.audit("authz.change", grant=data.grant, revoke=data.revoke)
     return {"status": "ok"}
 
 
