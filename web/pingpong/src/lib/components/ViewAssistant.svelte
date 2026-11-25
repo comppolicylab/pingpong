@@ -30,9 +30,11 @@
 		ExclamationCircleOutline,
 		InfoCircleOutline,
 		RefreshOutline,
-		FilePdfOutline
+		FilePdfOutline,
+		LanguageOutline
 	} from 'flowbite-svelte-icons';
 	import ConfirmationModal from '$lib/components/ConfirmationModal.svelte';
+	import LectureSlideTranslationsModal from '$lib/components/LectureSlideTranslationsModal.svelte';
 	import type { Assistant, AppUser } from '$lib/api';
 	import dayjs from 'dayjs';
 	import { happyToast, sadToast } from '$lib/toast';
@@ -52,6 +54,7 @@
 	export let assistant: Assistant;
 	export let creator: AppUser;
 	export let editable = false;
+	export let canTranslate = false;
 	export let shareable = false;
 	export let classOptions: { id: number; name: string; term: string }[] = [];
 	export let currentClassId: number;
@@ -66,6 +69,7 @@
 	let copyAssistantModalOpen = false;
 	let deleteAssistantModalOpen = false;
 	let notesAssistantModalOpen = false;
+	let translationsModalOpen = false;
 	let qualtricsCodeLinkName = '';
 	let qualtricsQuestionJavaScript = '';
 	let qualtricsQuestionHTML = '';
@@ -509,6 +513,16 @@
 	</div>
 </Modal>
 
+{#if (editable || canTranslate) && assistant.interaction_mode === 'lecture_slides' && assistant.lecture_slide_deck}
+	<LectureSlideTranslationsModal
+		bind:open={translationsModalOpen}
+		classId={assistant.class_id}
+		assistantId={assistant.id}
+		assistantName={assistant.name}
+		deckReady={assistant.lecture_slide_deck.status === 'ready'}
+	/>
+{/if}
+
 <div
 	class="flex flex-col gap-2 {editable
 		? 'bg-gold-light'
@@ -545,6 +559,17 @@
 		</div>
 
 		<div class="flex shrink-0 items-center gap-2">
+			{#if (editable || canTranslate) && assistant.interaction_mode === 'lecture_slides' && assistant.lecture_slide_deck}
+				<button
+					class="text-blue-dark-30 hover:text-blue-dark-50"
+					aria-label="Translations"
+					onclick={(event) => {
+						event.preventDefault();
+						translationsModalOpen = true;
+					}}><LanguageOutline size="md" /></button
+				>
+				<Tooltip placement="top" class="text-xs font-light">Translations</Tooltip>
+			{/if}
 			{#if editable}
 				{#if assistant.notes}
 					<button
