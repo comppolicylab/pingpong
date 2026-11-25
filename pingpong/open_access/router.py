@@ -16,6 +16,7 @@ from .access import ensure_lesson_access
 from .errors import OpenAccessError, session_displaced
 from .request import has_marker
 from .settings import OpenAccessSettings
+from .threads import delete_thread
 from .tokens import (
     CatalogueGrant,
     LaunchGrant,
@@ -155,7 +156,13 @@ async def find_or_create_principal_thread(
     db = request.state["db"]
     thread = await get_principal_thread(db, principal.id, grant.assistant_id)
     if thread is not None:
-        return thread
+        lesson = await get_lesson(db, grant.assistant_id)
+        if (
+            lesson is None
+            or lesson[0].lecture_slide_deck_id == thread.lecture_slide_deck_id
+        ):
+            return thread
+        await delete_thread(db, request.state["authz"], thread)
     try:
         async with db.begin_nested():
             return await create_principal_thread(request, principal, grant)
