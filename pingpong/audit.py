@@ -7,6 +7,7 @@ from starlette.requests import HTTPConnection
 
 access_logger = logging.getLogger("pingpong.access")
 audit_logger = logging.getLogger("pingpong.audit")
+logger = logging.getLogger(__name__)
 
 _current: ContextVar[HTTPConnection | None] = ContextVar("audit_request", default=None)
 
@@ -171,13 +172,21 @@ def route_event(connection: HTTPConnection, status: int) -> None:
         )
 
 
-async def record_elevated_access(connection: HTTPConnection, status: int) -> None:
+async def check_elevated_access(connection: HTTPConnection) -> None:
+    try:
+        await _check_elevated_access(connection)
+    except Exception:
+        logger.exception("Failed to check elevated access")
+
+
+async def _check_elevated_access(connection: HTTPConnection) -> None:
     state = connection.scope.get("state") or {}
     session = state.get("session")
     authz = state.get("authz")
-    params = connection.scope.get("path_params") or {}
-    if status >= 400 or session is None or session.user is None or authz is None:
+    params = connection.path_params
+    if session is None or session.user is None or authz is None:
         return
+    elevated = state["elevated_access"] = []
     user = f"user:{session.user.id}"
     if "institution_id" in params:
         institution = f"institution:{params['institution_id']}"
@@ -187,7 +196,7 @@ async def record_elevated_access(connection: HTTPConnection, status: int) -> Non
                 for relation in ("admin", "can_create_class")
             ]
         ):
-            audit("privilege.elevated", scope=institution, target=params)
+            elevated.append(institution)
     if "class_id" not in params:
         return
     class_ = f"class:{params['class_id']}"
@@ -202,4 +211,16 @@ async def record_elevated_access(connection: HTTPConnection, status: int) -> Non
         party, can_view = thread_checks
         direct = party or teacher or (student and can_view)
     if not direct:
-        audit("privilege.elevated", scope=thread or class_, target=params)
+        elevated.append(thread or class_)
+
+
+def record_elevated_access(connection: HTTPConnection, status: int) -> None:
+    state = connection.scope.get("state") or {}
+    if status >= 400:
+        return
+    for scope in state.get("elevated_access", ()):
+        audit(
+            "privilege.elevated",
+            scope=scope,
+            target=connection.scope.get("path_params") or {},
+        )

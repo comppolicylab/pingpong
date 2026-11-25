@@ -971,9 +971,10 @@ async def get_thread_for_interaction(
 
 
 if config.development:
-    v1 = FastAPI()
+    v1 = FastAPI(dependencies=[Depends(audit.check_elevated_access)])
 else:
     v1 = FastAPI(
+        dependencies=[Depends(audit.check_elevated_access)],
         openapi_url=None,
         docs_url=None,
         redoc_url=None,
@@ -1142,10 +1143,7 @@ FileClient = Annotated[OpenAIClientType, bound_openai_client_dependency(get_boun
 @v1.middleware("http")
 async def audit_elevated_access(request: StateRequest, call_next):
     response = await call_next(request)
-    try:
-        await audit.record_elevated_access(request, response.status_code)
-    except Exception:
-        logger.exception("Failed to check elevated access")
+    audit.record_elevated_access(request, response.status_code)
     return response
 
 
