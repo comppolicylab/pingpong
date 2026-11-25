@@ -1,4 +1,5 @@
 import hashlib
+import logging
 import secrets
 from contextlib import asynccontextmanager
 
@@ -8,6 +9,8 @@ from redis.exceptions import RedisError
 from ..redis.client import RedisPool
 from .errors import unavailable
 from .settings import OpenAccessSettings
+
+logger = logging.getLogger(__name__)
 
 LAUNCH_RETRY_TTL_SECONDS = 10 * 60
 ACTIVE_SESSION_TTL_SECONDS = 24 * 60 * 60
@@ -64,6 +67,7 @@ async def redis_client(settings: OpenAccessSettings):
         async with _pool.client(settings) as client:
             yield client
     except RedisError as exc:
+        logger.exception("Open Access Redis operation failed")
         raise unavailable() from exc
 
 
