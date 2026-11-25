@@ -438,10 +438,14 @@ async def test_player_sends_message_without_user(
     api, db, authz, oa, lessons, monkeypatch
 ):
     server = importlib.import_module("pingpong.server")
+
+    def openai_client():
+        return SimpleNamespace()
+
     monkeypatch.setitem(
         server.v1.dependency_overrides,
         server.get_openai_client_for_class,
-        lambda: SimpleNamespace(),
+        openai_client,
     )
     monkeypatch.setattr(server, "ensure_model_available", AsyncMock())
     monkeypatch.setattr(server, "get_thread_conversation_name", AsyncMock())
