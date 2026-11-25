@@ -40,11 +40,19 @@ export const startOpenAccessPlayer = async (
 		}
 	};
 
+	let started = false;
+
 	const fail = (code: string) => {
 		post('error', { errorCode: code });
 		if (!isFatalOpenAccessError(code)) return;
 		clearTimeout(renewTimer);
 		onError(code);
+	};
+
+	const start = (session: OpenAccessSession) => {
+		started = true;
+		onSession(session);
+		post('ready', { sessionId: session.sessionId });
 	};
 
 	const scheduleRenewal = (session: OpenAccessSession) => {
@@ -73,10 +81,11 @@ export const startOpenAccessPlayer = async (
 		return session;
 	};
 
-	const onMessage = (event: MessageEvent) => {
+	const onMessage = async (event: MessageEvent) => {
 		if (event.origin !== parentOrigin || event.source !== window.parent) return;
 		if (event.data?.type === `${MESSAGE_PREFIX}code` && typeof event.data.code === 'string') {
-			exchange(event.data.code);
+			const session = await exchange(event.data.code);
+			if (session && !started) start(session);
 		}
 	};
 
@@ -84,16 +93,15 @@ export const startOpenAccessPlayer = async (
 	onOpenAccessError(fail);
 
 	const stored = getOpenAccessSession();
-	const session = launchCode
-		? await exchange(launchCode)
-		: stored && stored.expiresAt > Date.now()
-			? stored
-			: null;
-	if (session) {
-		if (!launchCode) scheduleRenewal(session);
-		onSession(session);
-		post('ready', { sessionId: session.sessionId });
-	} else if (!launchCode) {
+	if (launchCode) {
+		const session = await exchange(launchCode);
+		if (session) start(session);
+	} else if (stored && stored.expiresAt > Date.now()) {
+		scheduleRenewal(stored);
+		start(stored);
+	} else if (stored && window.parent !== window) {
+		post('renew', { sessionId: stored.sessionId });
+	} else {
 		fail('open_access_code_missing');
 	}
 
