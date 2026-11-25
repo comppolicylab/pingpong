@@ -7,6 +7,7 @@ from jwt import PyJWTError
 import uuid_utils as uuid
 from pingpong import models, schemas
 from pingpong.auth import TimeException, decode_session_token
+from pingpong.errors import mark_open_access_request
 from pingpong.open_access import access as open_access
 from pingpong.open_access import errors as open_access_errors
 from pingpong.open_access import request as open_access_request
@@ -216,6 +217,8 @@ async def populate_request(
     _initialize_shared_state(request)
     if isinstance(request, Request):
         req = cast(StateRequest, request)
+        if open_access_request.has_marker(req):
+            mark_open_access_request()
         oa_token = open_access_request.access_token(
             req, allow_cookie=is_media_route(req.url.path)
         )

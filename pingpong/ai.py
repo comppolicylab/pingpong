@@ -3992,6 +3992,7 @@ async def run_response(
     max_output_tokens: int | None = None,
     min_output_index: int | None = None,
     on_tts_text: Callable[[str], None] | None = None,
+    store: bool = True,
 ):
     is_canceled = False
     await config.authz.driver.init()
@@ -4308,7 +4309,7 @@ async def run_response(
                     reasoning=reasoning_settings,
                     safety_identifier=safety_identifier_setting,
                     tools=tools,
-                    store=True,
+                    store=store,
                     stream=True,
                     temperature=temperature_setting,
                     truncation="auto",

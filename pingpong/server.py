@@ -7033,6 +7033,8 @@ async def post_lecture_slide_interaction(
             nowfn=get_now_fn(request),
         )
         open_access = request.state["open_access"]
+        if open_access is not None:
+            thread.last_activity = func.now()
         if (
             open_access is not None
             and interactive_lesson_session.state
@@ -10545,6 +10547,7 @@ async def send_message(
                     else None
                 ),
                 on_tts_text=tts_usage.add if open_access_settings is not None else None,
+                store=open_access_settings is None,
             )
             if check_attempt_id is not None:
                 stream = _stream_lesson_check(

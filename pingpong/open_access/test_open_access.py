@@ -12,11 +12,12 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from sqlalchemy import select
 
 from pingpong import lesson_checks, models, schemas
-from pingpong.now import offset
+from pingpong.errors import OPEN_ACCESS_TAG, scrub_open_access_event
+from pingpong.now import offset, utcnow
 from pingpong.test_lecture_slide_runtime import _slide_transcript_data
 from pingpong.testutil import with_institution, with_user
 
-from . import limits, store
+from . import limits, retention, store
 from .settings import OpenAccessSettings, TierLimits
 from .tokens import GRANT_AUDIENCE, encode_access_token
 
@@ -436,7 +437,10 @@ async def test_player_sends_message_without_user(
     monkeypatch.setattr(server, "ensure_model_available", AsyncMock())
     monkeypatch.setattr(server, "get_thread_conversation_name", AsyncMock())
 
+    calls = []
+
     async def generate(*args, **kwargs):
+        calls.append(kwargs)
         yield b'{"type":"done"}\n'
 
     monkeypatch.setattr(server, "run_response", generate)
@@ -460,6 +464,7 @@ async def test_player_sends_message_without_user(
         headers=headers,
     )
     assert sent.status_code == 200, sent.text
+    assert calls[0]["store"] is False
 
     messages = api.get(f"{url}/messages", headers=headers)
     assert messages.status_code == 200, messages.text
@@ -530,3 +535,54 @@ async def test_player_sends_message_without_user(
     assert api.get(url, headers=headers).json()["read_only"] is True
     async with db.async_session() as session:
         assert (await check_state(session)).check_outcome == "passed"
+
+
+@pytest.mark.asyncio
+@with_institution(11, "OA Institution")
+async def test_retention_purges_inactive_threads_and_principals(
+    api, db, authz, oa, lessons, caplog
+):
+    body = exchange(api, launch(api, launch_grant()).json()["code"]).json()
+    async with db.async_session() as session:
+        token = await session.scalar(
+            select(models.AnonymousSession.session_token).where(
+                models.AnonymousSession.thread_id == body["thread_id"]
+            )
+        )
+    subject = f"anonymous_user:{token}"
+    tuples = [
+        ("class:1", "parent", f"thread:{body['thread_id']}"),
+        (subject, "anonymous_party", f"thread:{body['thread_id']}"),
+        (subject, "can_view", "assistant:1"),
+    ]
+    await authz.reset({"grants": tuples})
+
+    assert await retention.purge_inactive(utcnow()) == (0, 0)
+    assert await retention.purge_inactive(utcnow() + retention.INACTIVITY) == (1, 1)
+
+    async with db.async_session() as session:
+        assert await session.get(models.Thread, body["thread_id"]) is None
+        assert await session.scalar(select(models.ExternalPrincipal)) is None
+    assert await authz.get_all_calls() == [("revoke", *t) for t in tuples]
+    assert f"deleted thread {body['thread_id']} (principal 1," in caplog.text
+    assert "deleted principal 1" in caplog.text
+
+
+def test_sentry_scrubs_open_access_requests():
+    event = {
+        "tags": {OPEN_ACCESS_TAG: "true"},
+        "request": {
+            "data": {"message": "secret"},
+            "query_string": "pp_oa=1",
+            "cookies": {"pp_oa_token": "token"},
+            "headers": {"X-PingPong-OA-Token": "token", "User-Agent": "test"},
+        },
+        "exception": {
+            "values": [{"stacktrace": {"frames": [{"vars": {"data": "secret"}}]}}]
+        },
+        "breadcrumbs": {"values": [{"message": "secret"}]},
+    }
+    scrubbed = scrub_open_access_event(event, None)
+    assert scrubbed["request"] == {"headers": {"User-Agent": "test"}}
+    assert scrubbed["exception"]["values"][0]["stacktrace"]["frames"] == [{}]
+    assert "breadcrumbs" not in scrubbed
