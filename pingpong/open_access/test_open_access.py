@@ -273,6 +273,26 @@ async def test_new_launch_displaces_previous_session(api, oa, lessons):
 
 
 @pytest.mark.asyncio
+@with_institution(11, "OA Institution")
+async def test_launch_replaces_thread_after_lesson_update(api, db, oa, lessons):
+    first = exchange(api, launch(api, launch_grant()).json()["code"]).json()
+    assert launch(api, launch_grant(sub="visitor2")).status_code == 200
+    async with db.async_session() as session:
+        lesson, other = [await session.get(models.Assistant, i) for i in (1, 2)]
+        deck_id, other.lecture_slide_deck_id = other.lecture_slide_deck_id, None
+        await session.flush()
+        lesson.lecture_slide_deck_id = deck_id
+        await session.commit()
+
+    second = exchange(
+        api, launch(api, launch_grant(launch_id="launch-updated-0001")).json()["code"]
+    ).json()
+    assert second["thread_id"] != first["thread_id"]
+    async with db.async_session() as session:
+        assert await session.get(models.Thread, first["thread_id"]) is None
+
+
+@pytest.mark.asyncio
 @with_user(123)
 @with_institution(11, "OA Institution")
 async def test_expired_or_missing_token_rejected_with_valid_login(
